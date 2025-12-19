@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gallery - ALICE</title>
+    <link rel="stylesheet" href="/web/fonts/inter.css">
+    <link rel="stylesheet" href="/web/style.css">
+    <style>
+        .filters {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .filter-group label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+        
+        .image-card {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .image-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+        
+        .image-card img {
+            width: 100%;
+            height: 300px;
+            object-fit: cover;
+            cursor: pointer;
+        }
+        
+        .image-info {
+            padding: 1rem;
+        }
+        
+        .image-prompt {
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            margin-bottom: 0.75rem;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .image-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .meta-badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            color: var(--text-secondary);
+        }
+        
+        .image-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        
+        .image-actions button {
+            flex: 1;
+            padding: 0.5rem;
+            font-size: 0.85rem;
+        }
+        
+        .privacy-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .privacy-badge.public {
+            background: rgba(52, 211, 153, 0.1);
+            color: #34d399;
+        }
+        
+        .privacy-badge.private {
+            background: rgba(251, 146, 60, 0.1);
+            color: #fb923c;
+        }
+        
+        /* Modal styles - replaced with fullscreen viewer */
+        .fullscreen-viewer {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            z-index: 1000;
+            touch-action: none;
+        }
+        
+        .fullscreen-viewer.active {
+            display: flex;
+        }
+        
+        .fullscreen-image-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .fullscreen-image {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        
+        /* Navigation zones */
+        .nav-zone {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            width: 33.33%;
+            z-index: 10;
+            cursor: pointer;
+        }
+        
+        .nav-zone-left {
+            left: 0;
+        }
+        
+        .nav-zone-center {
+            left: 33.33%;
+        }
+        
+        .nav-zone-right {
+            right: 0;
+        }
+        
+        /* Navigation hints (shown on hover for desktop) */
+        @media (hover: hover) {
+            .nav-zone-left:hover::after,
+            .nav-zone-right:hover::after {
+                content: '';
+                position: absolute;
+                top: 50%;
+                transform: translateY(-50%);
+                width: 48px;
+                height: 48px;
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 50%;
+            }
+            
+            .nav-zone-left:hover::after {
+                left: 20px;
+            }
+            
+            .nav-zone-right:hover::after {
+                right: 20px;
+            }
+        }
+        
+        /* Close button overlay */
+        .fullscreen-close-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+        
+        .fullscreen-close-overlay.active {
+            display: flex;
+        }
+        
+        .fullscreen-close-btn {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* Image counter */
+        .fullscreen-counter {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 16px;
+            border-radius: 20px;
+            z-index: 15;
+        }
+        
+        /* Info overlay */
+        .fullscreen-info {
+            position: absolute;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            max-width: 90%;
+            text-align: center;
+            font-size: 14px;
+            z-index: 15;
+            display: none;
+        }
+        
+        .fullscreen-info.active {
+            display: block;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-secondary);
+        }
+        
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+        
+        /* Image Details Modal */
+        .details-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 2000;
+            overflow-y: auto;
+        }
+        
+        .details-modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        
+        .details-content {
+            background: var(--bg-primary);
+            border-radius: 12px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+        }
+        
+        .details-header {
+            position: sticky;
+            top: 0;
+            background: var(--bg-primary);
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+        
+        .details-header h2 {
+            margin: 0;
+            font-size: 1.25rem;
+        }
+        
+        .details-close {
+            background: none;
+            border: none;
+            font-size: 2rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+        
+        .details-close:hover {
+            background: var(--bg-secondary);
+        }
+        
+        .details-body {
+            padding: 1.5rem;
+        }
+        
+        .details-section {
+            margin-bottom: 1.5rem;
+        }
+        
+        .details-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        .details-section h3 {
+            font-size: 1rem;
+            margin: 0 0 0.75rem 0;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+        
+        .details-textarea {
+            width: 100%;
+            min-height: 80px;
+            padding: 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            resize: vertical;
+            cursor: pointer;
+        }
+        
+        .details-textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        
+        .details-copy-btn {
+            margin-top: 0.5rem;
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
+        }
+        
+        .details-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .details-table td {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .details-table tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .details-table td:first-child {
+            font-weight: 600;
+            color: var(--text-secondary);
+            width: 40%;
+        }
+        
+        .details-table td:last-child {
+            color: var(--text-primary);
+        }
+        
+        .details-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .details-actions button {
+            padding: 0.75rem 1rem;
+        }
+        
+        .lora-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .lora-list li {
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .lora-list li:last-child {
+            margin-bottom: 0;
+        }
+        
+        .lora-name {
+            font-weight: 500;
+        }
+        
+        .lora-scale {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-brand">
+            <a href="/web/" class="logo">ALICE</a>
+        </div>
+        <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+        </button>
+        <div class="nav-links">
+            <a href="/web/" class="admin-only">Dashboard</a>
+            <a href="/web/models.html" class="admin-only">Models</a>
+            <a href="/web/generate.html">Generate</a>
+            <a href="/web/gallery.html" class="active">Gallery</a>
+            <a href="/web/prompting.html">Prompting Guide</a>
+            <a href="/web/download.html" class="admin-only">Download</a>
+            <a href="/web/admin.html" class="admin-only">Admin</a>
+            <a href="/docs" target="_blank">API Docs</a>
+            <a href="/web/login.html" class="login-link">Login</a>
+            <a href="#" onclick="window.SDAPI.logout(); return false;" class="logout-link">Logout</a>
+        </div>
+    </nav>
+    
+    <main>
+        <div class="container">
+            <h1>Image Gallery</h1>
+            
+            <div class="filters">
+                <div class="filter-group">
+                    <label>
+                        <input type="checkbox" id="filterPublic" checked onchange="loadGallery()">
+                        Show Public
+                    </label>
+                </div>
+                <div class="filter-group">
+                    <label>
+                        <input type="checkbox" id="filterPrivate" checked onchange="loadGallery()">
+                        Show My Private
+                    </label>
+                </div>
+                <div class="filter-group">
+                    <button class="btn btn-secondary" onclick="loadGallery()">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            
+            <div id="galleryGrid" class="gallery-grid">
+                <div class="empty-state">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <p>Loading gallery...</p>
+                </div>
+            </div>
+            
+            <!-- Load More Button -->
+            <div id="loadMoreContainer" style="text-align: center; margin-top: 2rem; display: none;">
+                <button class="btn btn-primary" id="loadMoreBtn" onclick="loadMoreImages()">
+                    Load More Images
+                </button>
+                <p id="imageCount" style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;"></p>
+            </div>
+        </div>
+    </main>
+    
+    <!-- Fullscreen Image Viewer -->
+    <div id="fullscreenViewer" class="fullscreen-viewer">
+        <div class="fullscreen-image-container">
+            <img id="fullscreenImage" class="fullscreen-image" src="" alt="">
+        </div>
+        
+        <!-- Navigation zones -->
+        <div class="nav-zone nav-zone-left" onclick="navigateImage(-1)"></div>
+        <div class="nav-zone nav-zone-center" onclick="toggleCloseOverlay()"></div>
+        <div class="nav-zone nav-zone-right" onclick="navigateImage(1)"></div>
+        
+        <!-- Close overlay (shown on center tap) -->
+        <div id="closeOverlay" class="fullscreen-close-overlay" onclick="hideCloseOverlay(event)">
+            <button class="fullscreen-close-btn" onclick="closeFullscreen()">✕</button>
+        </div>
+        
+        <!-- Image counter -->
+        <div id="imageCounter" class="fullscreen-counter">1 / 1</div>
+        
+        <!-- Info overlay (optional, tap counter to show) -->
+        <div id="fullscreenInfo" class="fullscreen-info"></div>
+    </div>
+    
+    <!-- Image Details Modal -->
+    <div id="detailsModal" class="details-modal">
+        <div class="details-content">
+            <div class="details-header">
+                <h2>Image Details</h2>
+                <button class="details-close" onclick="closeDetailsModal()">×</button>
+            </div>
+            <div class="details-body" id="detailsBody">
+                <!-- Content dynamically inserted -->
+            </div>
+        </div>
+    </div>
+    
+    <script src="/web/app.js"></script>
+    <script>
+        let currentImages = [];
+        let currentOffset = 0;
+        let hasMore = true;
+        const BATCH_SIZE = 100;
+        
+        async function loadGallery(append = false) {
+            const grid = document.getElementById('galleryGrid');
+            const loadMoreContainer = document.getElementById('loadMoreContainer');
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            const imageCount = document.getElementById('imageCount');
+            const includePublic = document.getElementById('filterPublic').checked;
+            const includePrivate = document.getElementById('filterPrivate').checked;
+            
+            // Reset if not appending
+            if (!append) {
+                currentOffset = 0;
+                currentImages = [];
+                hasMore = true;
+            }
+            
+            try {
+                loadMoreBtn.disabled = true;
+                loadMoreBtn.textContent = 'Loading...';
+                
+                const data = await window.SDAPI.API.fetch(
+                    `/v1/gallery?include_public=${includePublic}&include_private=${includePrivate}&limit=${BATCH_SIZE}&offset=${currentOffset}`
+                );
+                
+                const newImages = data.data || [];
+                
+                // Check if there are more images
+                hasMore = newImages.length === BATCH_SIZE;
+                currentOffset += newImages.length;
+                
+                if (append) {
+                    currentImages = currentImages.concat(newImages);
+                } else {
+                    currentImages = newImages;
+                }
+                
+                if (currentImages.length === 0) {
+                    grid.innerHTML = `
+                        <div class="empty-state">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <p>No images found. Generate some images to get started!</p>
+                        </div>
+                    `;
+                    loadMoreContainer.style.display = 'none';
+                    return;
+                }
+                
+                grid.innerHTML = currentImages.map(img => createImageCard(img)).join('');
+                
+                // Show/hide load more button
+                if (hasMore) {
+                    loadMoreContainer.style.display = 'block';
+                    imageCount.textContent = `Showing ${currentImages.length} images`;
+                } else {
+                    loadMoreContainer.style.display = 'block';
+                    imageCount.textContent = `All ${currentImages.length} images loaded`;
+                    loadMoreBtn.style.display = 'none';
+                }
+                
+            } catch (error) {
+                console.error('Failed to load gallery:', error);
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <p style="color: var(--error);">Failed to load gallery: ${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.textContent = 'Load More Images';
+            }
+        }
+        
+        async function loadMoreImages() {
+            await loadGallery(true);
+        }
+        
+        function createImageCard(img) {
+            const privacyBadge = img.isPublic 
+                ? '<span class="privacy-badge public">Public</span>'
+                : '<span class="privacy-badge private">Private</span>';
+            
+            const expiresInfo = img.isPublic && img.expiresAt 
+                ? `<span class="meta-badge">Expires: ${new Date(img.expiresAt * 1000).toLocaleDateString()}</span>`
+                : '';
+            
+            const ownerActions = img.isOwner ? `
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); showImageDetails('${img.id}')">View Details</button>
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); togglePrivacy('${img.id}', ${!img.isPublic})">
+                    ${img.isPublic ? 'Make Private' : 'Make Public'}
+                </button>
+                <button class="btn btn-danger" onclick="event.stopPropagation(); confirmDelete('${img.id}')">Delete</button>
+            ` : `
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); showImageDetails('${img.id}')">View Details</button>
+            `;
+            
+            return `
+                <div class="image-card" onclick="openFullscreen('${img.id}')">
+                    <img src="${img.url}" alt="${escapeHtml(img.prompt)}" loading="lazy">
+                    <div class="image-info">
+                        <div style="margin-bottom: 0.5rem;">${privacyBadge}</div>
+                        <div class="image-prompt" title="${escapeHtml(img.prompt)}">${escapeHtml(img.prompt)}</div>
+                        <div class="image-meta">
+                            <span class="meta-badge">${escapeHtml(img.model)}</span>
+                            <span class="meta-badge">${img.width}x${img.height}</span>
+                            <span class="meta-badge">${img.steps} steps</span>
+                            ${img.generationTime ? `<span class="meta-badge">${img.generationTime.toFixed(1)}s (${(img.generationTime / img.steps).toFixed(2)}s/step)</span>` : ''}
+                            ${expiresInfo}
+                        </div>
+                        ${ownerActions ? `<div class="image-actions">${ownerActions}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Fullscreen viewer variables
+        let currentImageIndex = 0;
+        
+        async function openFullscreen(imageId) {
+            const index = currentImages.findIndex(i => i.id === imageId);
+            if (index === -1) return;
+            
+            currentImageIndex = index;
+            showImageAtIndex(currentImageIndex);
+            
+            const viewer = document.getElementById('fullscreenViewer');
+            viewer.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            
+            // Request true fullscreen using Fullscreen API
+            try {
+                if (viewer.requestFullscreen) {
+                    await viewer.requestFullscreen();
+                } else if (viewer.webkitRequestFullscreen) {
+                    await viewer.webkitRequestFullscreen(); // Safari
+                } else if (viewer.msRequestFullscreen) {
+                    await viewer.msRequestFullscreen(); // IE11
+                }
+            } catch (err) {
+                console.log('Fullscreen request failed or not supported:', err);
+                // Continue with overlay mode if fullscreen not available
+            }
+        }
+        
+        function closeFullscreen() {
+            // Exit fullscreen if active
+            if (document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement) {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                }
+            }
+            
+            const viewer = document.getElementById('fullscreenViewer');
+            viewer.classList.remove('active');
+            document.body.style.overflow = '';
+            hideCloseOverlay();
+        }
+        
+        function showImageAtIndex(index) {
+            if (index < 0 || index >= currentImages.length) return;
+            
+            const img = currentImages[index];
+            document.getElementById('fullscreenImage').src = img.url;
+            document.getElementById('imageCounter').textContent = `${index + 1} / ${currentImages.length}`;
+            
+            // Update info overlay
+            document.getElementById('fullscreenInfo').innerHTML = `
+                <strong>${escapeHtml(img.prompt.substring(0, 100))}${img.prompt.length > 100 ? '...' : ''}</strong>
+                <br><small>${img.model} • ${img.width}x${img.height} • ${img.steps} steps</small>
+            `;
+        }
+        
+        function navigateImage(direction) {
+            let newIndex = currentImageIndex + direction;
+            
+            // Wrap around
+            if (newIndex < 0) {
+                newIndex = currentImages.length - 1;
+            } else if (newIndex >= currentImages.length) {
+                newIndex = 0;
+            }
+            
+            currentImageIndex = newIndex;
+            showImageAtIndex(currentImageIndex);
+        }
+        
+        function toggleCloseOverlay() {
+            const overlay = document.getElementById('closeOverlay');
+            overlay.classList.toggle('active');
+            const info = document.getElementById('fullscreenInfo');
+            info.classList.toggle('active');
+        }
+        
+        function hideCloseOverlay(event) {
+            if (event && event.target.classList.contains('fullscreen-close-btn')) {
+                return; // Let the button handle its own click
+            }
+            const overlay = document.getElementById('closeOverlay');
+            overlay.classList.remove('active');
+            const info = document.getElementById('fullscreenInfo');
+            info.classList.remove('active');
+        }
+        
+        async function togglePrivacy(imageId, makePublic) {
+            try {
+                await window.SDAPI.API.fetch(`/v1/gallery/${imageId}/privacy`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ isPublic: makePublic })
+                });
+                
+                // Reload gallery
+                await loadGallery();
+                window.SDAPI.Toast.success('Privacy updated');
+            } catch (error) {
+                console.error('Failed to update privacy:', error);
+                window.SDAPI.Toast.error('Failed to update privacy: ' + error.message);
+            }
+        }
+        
+        async function deleteImage(imageId, confirmationModal) {
+            try {
+                // Close confirmation modal immediately
+                if (confirmationModal) {
+                    confirmationModal.remove();
+                }
+                
+                // Close details modal if open (using proper method)
+                closeDetailsModal();
+                
+                await window.SDAPI.API.fetch(`/v1/gallery/${imageId}`, {
+                    method: 'DELETE'
+                });
+                
+                // Reload gallery
+                await loadGallery();
+                window.SDAPI.Toast.success('Image deleted');
+            } catch (error) {
+                console.error('Failed to delete image:', error);
+                window.SDAPI.Toast.error('Failed to delete image: ' + error.message);
+            }
+        }
+        
+        function confirmDelete(imageId) {
+            // Close details modal first to avoid overlay stacking (using proper method)
+            closeDetailsModal();
+            
+            const modal = document.createElement('div');
+            modal.id = 'deleteConfirmationModal';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 3000; display: flex; align-items: center; justify-content: center;';
+            modal.innerHTML = `
+                <div style="background: var(--bg-primary); padding: 2rem; border-radius: 12px; max-width: 400px; text-align: center;">
+                    <h3 style="margin: 0 0 1rem 0; color: var(--error);">Delete Image?</h3>
+                    <p style="margin: 0 0 1.5rem 0; color: var(--text-secondary);">This action cannot be undone. The image will be permanently deleted.</p>
+                    <div style="display: flex; gap: 0.75rem;">
+                        <button id="deleteCancelBtn" class="btn btn-secondary" style="flex: 1;">Cancel</button>
+                        <button id="deleteConfirmBtn" class="btn btn-danger" style="flex: 1;">Delete</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Add event listeners instead of inline onclick
+            const cancelBtn = modal.querySelector('#deleteCancelBtn');
+            const confirmBtn = modal.querySelector('#deleteConfirmBtn');
+            
+            cancelBtn.addEventListener('click', () => {
+                modal.remove();
+            });
+            
+            confirmBtn.addEventListener('click', () => {
+                deleteImage(imageId, modal);
+            });
+            
+            // Click outside to cancel
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+        }
+        
+        function showImageDetails(imageId) {
+            const img = currentImages.find(i => i.id === imageId);
+            if (!img) return;
+            
+            const modal = document.getElementById('detailsModal');
+            const body = document.getElementById('detailsBody');
+            
+            // Build LoRA section if present
+            let loraSection = '';
+            if (img.loras && img.loras.length > 0) {
+                const loraItems = img.loras.map((lora, idx) => {
+                    const scale = img.loraScales && img.loraScales[idx] !== undefined ? img.loraScales[idx] : 1.0;
+                    return `
+                        <li>
+                            <span class="lora-name">${escapeHtml(lora)}</span>
+                            <span class="lora-scale">Scale: ${scale.toFixed(2)}</span>
+                        </li>
+                    `;
+                }).join('');
+                
+                loraSection = `
+                    <div class="details-section">
+                        <h3>LoRAs</h3>
+                        <ul class="lora-list">${loraItems}</ul>
+                    </div>
+                `;
+            }
+            
+            // Format generation time
+            const timeInfo = img.generationTime 
+                ? `${img.generationTime.toFixed(1)}s (${(img.generationTime / img.steps).toFixed(2)}s/step)`
+                : 'N/A';
+            
+            // Format created timestamp
+            const createdDate = img.createdAt 
+                ? new Date(img.createdAt * 1000).toLocaleString()
+                : 'N/A';
+            
+            body.innerHTML = `
+                <div class="details-section">
+                    <h3>Prompt</h3>
+                    <textarea class="details-textarea" readonly onclick="this.select()">${escapeHtml(img.prompt)}</textarea>
+                    <button class="btn btn-primary details-copy-btn" onclick="copyToClipboard(\`${escapeHtml(img.prompt).replace(/`/g, '\\`')}\`, 'Prompt copied!')">
+                        Copy Prompt
+                    </button>
+                </div>
+                
+                ${img.negativePrompt ? `
+                <div class="details-section">
+                    <h3>Negative Prompt</h3>
+                    <textarea class="details-textarea" readonly onclick="this.select()">${escapeHtml(img.negativePrompt)}</textarea>
+                    <button class="btn btn-primary details-copy-btn" onclick="copyToClipboard(\`${escapeHtml(img.negativePrompt).replace(/`/g, '\\`')}\`, 'Negative prompt copied!')">
+                        Copy Negative Prompt
+                    </button>
+                </div>
+                ` : ''}
+                
+                <div class="details-section">
+                    <h3>Generation Settings</h3>
+                    <table class="details-table">
+                        <tr>
+                            <td>Model:</td>
+                            <td>${escapeHtml(img.model)}</td>
+                        </tr>
+                        <tr>
+                            <td>Resolution:</td>
+                            <td>${img.width} × ${img.height}</td>
+                        </tr>
+                        <tr>
+                            <td>Steps:</td>
+                            <td>${img.steps}</td>
+                        </tr>
+                        <tr>
+                            <td>Guidance Scale:</td>
+                            <td>${img.guidanceScale !== undefined ? img.guidanceScale : 'N/A'}</td>
+                        </tr>
+                        <tr>
+                            <td>Scheduler:</td>
+                            <td>${img.scheduler || 'N/A'}</td>
+                        </tr>
+                        <tr>
+                            <td>Seed:</td>
+                            <td>
+                                ${img.seed !== undefined ? img.seed : 'N/A'}
+                                ${img.seed !== undefined ? `<button class="btn btn-primary" style="margin-left: 0.5rem; padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="copyToClipboard('${img.seed}', 'Seed copied!')">Copy</button>` : ''}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Generation Time:</td>
+                            <td>${timeInfo}</td>
+                        </tr>
+                        <tr>
+                            <td>Created:</td>
+                            <td>${createdDate}</td>
+                        </tr>
+                    </table>
+                </div>
+                
+                ${loraSection}
+                
+                <div class="details-actions">
+                    <button class="btn btn-primary" onclick="regenerateImage('${img.id}')">
+                        Regenerate
+                    </button>
+                    <button class="btn btn-secondary" onclick="downloadImage('${img.url}', '${img.id}')">
+                        Download
+                    </button>
+                    <button class="btn btn-secondary" onclick="closeDetailsModal(); openFullscreen('${img.id}')">
+                        View Fullscreen
+                    </button>
+                    ${img.isOwner ? `
+                        <button class="btn btn-secondary" onclick="togglePrivacy('${img.id}', ${!img.isPublic}); closeDetailsModal()">
+                            ${img.isPublic ? 'Make Private' : 'Make Public'}
+                        </button>
+                        <button class="btn btn-danger" onclick="closeDetailsModal(); confirmDelete('${img.id}')">
+                            Delete Image
+                        </button>
+                    ` : ''}
+                </div>
+            `;
+            
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+        
+        function closeDetailsModal() {
+            const modal = document.getElementById('detailsModal');
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+        
+        function copyToClipboard(text, message = 'Copied to clipboard!') {
+            navigator.clipboard.writeText(text).then(() => {
+                window.SDAPI.Toast.success(message);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                window.SDAPI.Toast.error('Failed to copy to clipboard');
+            });
+        }
+        
+        function regenerateImage(imageId) {
+            const img = currentImages.find(i => i.id === imageId);
+            if (!img) return;
+            
+            // Store settings in sessionStorage
+            sessionStorage.setItem('regenerate_settings', JSON.stringify({
+                prompt: img.prompt,
+                negativePrompt: img.negativePrompt || '',
+                model: img.model,
+                width: img.width,
+                height: img.height,
+                steps: img.steps,
+                guidanceScale: img.guidanceScale,
+                scheduler: img.scheduler,
+                seed: img.seed,
+                loras: img.loras || [],
+                loraScales: img.loraScales || [],
+            }));
+            
+            // Navigate to generate page
+            window.location.href = '/web/generate.html';
+        }
+        
+        function downloadImage(url, imageId) {
+            // Create a temporary anchor element
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `alice_${imageId}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.SDAPI.Toast.success('Download started');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Load gallery on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (typeof window.SDAPI === 'undefined') {
+                document.body.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--error);">Error: ALICE JavaScript failed to load. Please refresh the page.</div>';
+                return;
+            }
+            
+            // Check auth and update nav visibility
+            const { requireAuth } = window.SDAPI;
+            const authResult = await requireAuth();
+            
+            // Add admin class to body for CSS to show admin links
+            if (authResult.isAdmin) {
+                document.body.classList.add('is-admin');
+            }
+            
+            loadGallery();
+        });
+        
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            const viewer = document.getElementById('fullscreenViewer');
+            const detailsModal = document.getElementById('detailsModal');
+            
+            // Details modal has priority
+            if (detailsModal.classList.contains('active')) {
+                if (e.key === 'Escape') {
+                    closeDetailsModal();
+                }
+                return;
+            }
+            
+            // Fullscreen viewer
+            if (!viewer.classList.contains('active')) return;
+            
+            switch (e.key) {
+                case 'Escape':
+                    closeFullscreen();
+                    break;
+                case 'ArrowLeft':
+                    navigateImage(-1);
+                    break;
+                case 'ArrowRight':
+                    navigateImage(1);
+                    break;
+            }
+        });
+        
+        // Listen for fullscreen changes (user pressing F11 or ESC)
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+        document.addEventListener('msfullscreenchange', handleFullscreenChange);
+        
+        function handleFullscreenChange() {
+            const viewer = document.getElementById('fullscreenViewer');
+            // If user exited fullscreen but viewer is still active, close it
+            if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+                if (viewer.classList.contains('active')) {
+                    viewer.classList.remove('active');
+                    document.body.style.overflow = '';
+                    hideCloseOverlay();
+                }
+            }
+        }
+        
+        // Touch swipe support for mobile
+        let touchStartX = 0;
+        let touchEndX = 0;
+        
+        document.getElementById('fullscreenViewer').addEventListener('touchstart', (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+        }, { passive: true });
+        
+        document.getElementById('fullscreenViewer').addEventListener('touchend', (e) => {
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipe();
+        }, { passive: true });
+        
+        function handleSwipe() {
+            const threshold = 50; // minimum swipe distance
+            const diff = touchStartX - touchEndX;
+            
+            if (Math.abs(diff) > threshold) {
+                if (diff > 0) {
+                    // Swipe left - next image
+                    navigateImage(1);
+                } else {
+                    // Swipe right - previous image
+                    navigateImage(-1);
+                }
+            }
+        }
+    </script>
+</body>
+</html>

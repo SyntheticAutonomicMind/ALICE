@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ALICE Dashboard</title>
+    <link rel="stylesheet" href="/web/fonts/inter.css">
+    <link rel="stylesheet" href="/web/style.css">
+    <style>
+        .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        
+        .live-indicator .dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .resource-bar {
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            height: 24px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .resource-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+            position: relative;
+        }
+        
+        .resource-fill.gpu-mem { background: linear-gradient(90deg, var(--primary), var(--primary-light)); }
+        .resource-fill.sys-mem { background: linear-gradient(90deg, #10b981, #34d399); }
+        .resource-fill.utilization { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+        
+        .resource-label {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            z-index: 1;
+        }
+        
+        .activity-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+        
+        .activity-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .activity-icon.generating { background: rgba(99, 102, 241, 0.1); color: var(--primary); }
+        .activity-icon.complete { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .activity-icon.error { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .activity-icon.idle { background: rgba(107, 113, 119, 0.1); color: var(--text-muted); }
+        
+        .activity-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .activity-title {
+            font-weight: 500;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .activity-meta {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 1rem;
+        }
+        
+        .quick-action {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1.25rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            text-decoration: none;
+            color: var(--text-primary);
+            transition: all 0.2s;
+        }
+        
+        .quick-action:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+        
+        .quick-action svg {
+            width: 28px;
+            height: 28px;
+            color: var(--primary);
+        }
+        
+        .quick-action span {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+        
+        @media (max-width: 768px) {
+            .stats-row {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        .stat-card {
+            text-align: center;
+            padding: 1rem;
+        }
+        
+        .stat-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-brand">
+            <a href="/web/" class="logo">ALICE</a>
+        </div>
+        <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+        </button>
+        <div class="nav-links">
+            <a href="/web/" class="active admin-only">Dashboard</a>
+            <a href="/web/models.html" class="admin-only">Models</a>
+            <a href="/web/generate.html">Generate</a>
+            <a href="/web/gallery.html">Gallery</a>
+            <a href="/web/prompting.html">Prompting Guide</a>
+            <a href="/web/download.html" class="admin-only">Download</a>
+            <a href="/web/admin.html" class="admin-only">Admin</a>
+            <a href="/docs" target="_blank">API Docs</a>
+            <a href="/web/login.html" class="login-link">Login</a>
+            <a href="#" onclick="window.SDAPI.logout(); return false;" class="logout-link">Logout</a>
+        </div>
+    </nav>
+    
+    <main>
+        <div class="page-header">
+            <h1>Dashboard</h1>
+            <div class="live-indicator">
+                <span class="dot"></span>
+                <span>Live updates every 3s</span>
+            </div>
+        </div>
+        
+        <!-- Service Status -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Service Status
+                </span>
+                <div id="status-badge" class="status-badge loading">
+                    <span class="status-dot"></span>
+                    <span id="status-text">Connecting...</span>
+                </div>
+            </div>
+            
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="stat-value" id="gpu-status">--</div>
+                    <div class="stat-label">GPU</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="models-count">0</div>
+                    <div class="stat-label">Models</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="total-generations">0</div>
+                    <div class="stat-label">Generations</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="avg-time">0s</div>
+                    <div class="stat-label">Avg Time</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Resource Usage -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    Resource Usage
+                </span>
+            </div>
+            
+            <div style="display: grid; gap: 1rem;">
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span style="font-size: 0.85rem; font-weight: 500;">GPU Memory</span>
+                        <span id="gpu-mem-text" style="font-size: 0.85rem; color: var(--text-muted);">0 / 0 GB</span>
+                    </div>
+                    <div class="resource-bar">
+                        <div class="resource-fill gpu-mem" id="gpu-mem-bar" style="width: 0%"></div>
+                        <span class="resource-label" id="gpu-mem-percent">0%</span>
+                    </div>
+                </div>
+                
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span style="font-size: 0.85rem; font-weight: 500;">GPU Utilization</span>
+                        <span id="gpu-util-text" style="font-size: 0.85rem; color: var(--text-muted);">0%</span>
+                    </div>
+                    <div class="resource-bar">
+                        <div class="resource-fill utilization" id="gpu-util-bar" style="width: 0%"></div>
+                        <span class="resource-label" id="gpu-util-percent">0%</span>
+                    </div>
+                </div>
+                
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span style="font-size: 0.85rem; font-weight: 500;">Queue Depth</span>
+                        <span id="queue-text" style="font-size: 0.85rem; color: var(--text-muted);">0 pending</span>
+                    </div>
+                    <div class="resource-bar">
+                        <div class="resource-fill sys-mem" id="queue-bar" style="width: 0%"></div>
+                        <span class="resource-label" id="queue-label">Idle</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="two-column">
+            <!-- Activity Feed -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        Current Activity
+                    </span>
+                </div>
+                <div id="activity-feed">
+                    <div class="activity-item">
+                        <div class="activity-icon idle">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+                            </svg>
+                        </div>
+                        <div class="activity-info">
+                            <div class="activity-title">Idle</div>
+                            <div class="activity-meta">No active generations</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Quick Actions -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                        </svg>
+                        Quick Actions
+                    </span>
+                </div>
+                <div class="quick-actions">
+                    <a href="/web/generate.html" class="quick-action">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <span>Generate</span>
+                    </a>
+                    <a href="/web/gallery.html" class="quick-action">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <span>Gallery</span>
+                    </a>
+                    <a href="/web/models.html" class="quick-action">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                        </svg>
+                        <span>Models</span>
+                    </a>
+                    <a href="/web/download.html" class="quick-action">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        <span>Download</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Server Info -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                    </svg>
+                    Server Information
+                </span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1.5rem;">
+                <div>
+                    <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Version</div>
+                    <div id="server-version" style="font-size: 1rem; font-weight: 600;">--</div>
+                </div>
+                <div>
+                    <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Model Loaded</div>
+                    <div id="current-model" style="font-size: 1rem; font-weight: 600;">None</div>
+                </div>
+                <div>
+                    <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Uptime</div>
+                    <div id="server-uptime" style="font-size: 1rem; font-weight: 600;">--</div>
+                </div>
+                <div>
+                    <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Last Updated</div>
+                    <div id="last-updated" style="font-size: 1rem; font-weight: 600;">--</div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <script src="/web/app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (typeof window.SDAPI === 'undefined') {
+                document.body.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--error);">Error: ALICE JavaScript failed to load. Please refresh the page.</div>';
+                return;
+            }
+            
+            const { API, UI, Toast, StatusPoller, requireAuth } = window.SDAPI;
+            
+            // Check authentication - dashboard is admin-only
+            const authResult = await requireAuth({ adminOnly: true });
+            
+            if (authResult.isAdmin) {
+                document.body.classList.add('is-admin');
+            }
+            
+            let lastMetrics = null;
+            
+            // Update status display
+            function updateStatus(data) {
+                const now = new Date();
+                document.getElementById('last-updated').textContent = now.toLocaleTimeString();
+                
+                if (data.error) {
+                    document.getElementById('status-badge').className = 'status-badge offline';
+                    document.getElementById('status-text').textContent = 'Offline';
+                    return;
+                }
+                
+                const { health, metrics } = data;
+                lastMetrics = metrics;
+                
+                // Status badge
+                const badge = document.getElementById('status-badge');
+                badge.className = `status-badge ${health.status === 'ok' ? 'online' : 'offline'}`;
+                document.getElementById('status-text').textContent = 
+                    health.status === 'ok' ? 'Online' : 'Offline';
+                
+                // Stats
+                document.getElementById('gpu-status').textContent = 
+                    health.gpuAvailable ? 'Active' : 'CPU';
+                document.getElementById('models-count').textContent = health.modelsLoaded || 0;
+                document.getElementById('total-generations').textContent = metrics.totalGenerations || 0;
+                document.getElementById('avg-time').textContent = 
+                    UI.formatDuration(metrics.avgGenerationTime || 0);
+                
+                // GPU Memory
+                const usedMatch = (metrics.gpuMemoryUsed || '0').match(/[\d.]+/);
+                const totalMatch = (metrics.gpuMemoryTotal || '0').match(/[\d.]+/);
+                const gpuMemUsed = parseFloat(usedMatch?.[0] || 0);
+                const gpuMemTotal = parseFloat(totalMatch?.[0] || 1);
+                const gpuMemPercent = Math.round((gpuMemUsed / gpuMemTotal) * 100);
+                
+                document.getElementById('gpu-mem-text').textContent = 
+                    `${metrics.gpuMemoryUsed || '0 GB'} / ${metrics.gpuMemoryTotal || '0 GB'}`;
+                document.getElementById('gpu-mem-bar').style.width = `${gpuMemPercent}%`;
+                document.getElementById('gpu-mem-percent').textContent = `${gpuMemPercent}%`;
+                
+                // GPU Utilization
+                const gpuUtil = Math.round((metrics.gpuUtilization || 0) * 100);
+                document.getElementById('gpu-util-text').textContent = `${gpuUtil}%`;
+                document.getElementById('gpu-util-bar').style.width = `${gpuUtil}%`;
+                document.getElementById('gpu-util-percent').textContent = `${gpuUtil}%`;
+                
+                // Queue
+                const queueDepth = metrics.queueDepth || 0;
+                document.getElementById('queue-text').textContent = 
+                    queueDepth === 0 ? 'Empty' : `${queueDepth} pending`;
+                document.getElementById('queue-bar').style.width = 
+                    queueDepth === 0 ? '0%' : `${Math.min(100, queueDepth * 20)}%`;
+                document.getElementById('queue-label').textContent = 
+                    queueDepth === 0 ? 'Idle' : `${queueDepth} in queue`;
+                
+                // Activity feed
+                updateActivityFeed(health, metrics);
+                
+                // Server info
+                document.getElementById('server-version').textContent = health.version || '--';
+                document.getElementById('current-model').textContent = 
+                    health.modelsLoaded > 0 ? `${health.modelsLoaded} loaded` : 'None';
+            }
+            
+            function updateActivityFeed(health, metrics) {
+                const feed = document.getElementById('activity-feed');
+                const queueDepth = metrics.queueDepth || 0;
+                
+                if (queueDepth > 0) {
+                    feed.innerHTML = `
+                        <div class="activity-item">
+                            <div class="activity-icon generating">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                            </div>
+                            <div class="activity-info">
+                                <div class="activity-title">Generating...</div>
+                                <div class="activity-meta">${queueDepth} request${queueDepth > 1 ? 's' : ''} in queue</div>
+                            </div>
+                        </div>
+                    `;
+                } else if (health.modelsLoaded > 0) {
+                    feed.innerHTML = `
+                        <div class="activity-item">
+                            <div class="activity-icon complete">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                </svg>
+                            </div>
+                            <div class="activity-info">
+                                <div class="activity-title">Ready</div>
+                                <div class="activity-meta">${metrics.totalGenerations || 0} images generated • Avg ${UI.formatDuration(metrics.avgGenerationTime || 0)}</div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    feed.innerHTML = `
+                        <div class="activity-item">
+                            <div class="activity-icon idle">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+                                </svg>
+                            </div>
+                            <div class="activity-info">
+                                <div class="activity-title">Idle</div>
+                                <div class="activity-meta">No model loaded - generate an image to start</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            
+            // Start status polling with faster updates (3 seconds)
+            StatusPoller.onUpdate(updateStatus);
+            StatusPoller.start(3000);
+        });
+    </script>
+</body>
+</html>

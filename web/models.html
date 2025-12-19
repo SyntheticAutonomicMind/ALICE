@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Models - ALICE</title>
+    <link rel="stylesheet" href="/web/fonts/inter.css">
+    <link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+    <nav>
+        <div class="nav-brand">
+            <a href="/web/" class="logo">ALICE</a>
+        </div>
+        <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+        </button>
+        <div class="nav-links">
+            <a href="/web/" class="admin-only">Dashboard</a>
+            <a href="/web/models.html" class="active admin-only">Models</a>
+            <a href="/web/generate.html">Generate</a>
+            <a href="/web/gallery.html">Gallery</a>
+            <a href="/web/prompting.html">Prompting Guide</a>
+            <a href="/web/download.html" class="admin-only">Download</a>
+            <a href="/web/admin.html" class="admin-only">Admin</a>
+            <a href="/docs" target="_blank">API Docs</a>
+            <a href="/web/login.html" class="login-link">Login</a>
+            <a href="#" onclick="window.SDAPI.logout(); return false;" class="logout-link">Logout</a>
+        </div>
+    </nav>
+    
+    <main>
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <h1>Models</h1>
+                <p>Manage your Stable Diffusion models</p>
+            </div>
+            <button id="refresh-btn" class="btn btn-secondary">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+            </button>
+        </div>
+        
+        <!-- Model List -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                    </svg>
+                    Available Models
+                </span>
+                <span id="model-count" style="color: var(--text-secondary); font-size: 0.9rem;">0 models</span>
+            </div>
+            
+            <div id="model-list" class="model-list">
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- LoRA List -->
+        <div class="card" id="lora-card" style="display: none;">
+            <div class="card-header">
+                <span class="card-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                    </svg>
+                    LoRA Models
+                </span>
+                <span id="lora-count" style="color: var(--text-secondary); font-size: 0.9rem;">0 LoRAs</span>
+            </div>
+            
+            <div id="lora-list" class="model-list"></div>
+        </div>
+        
+        <!-- Model Info -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Model Directory
+                </span>
+            </div>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                Place your Stable Diffusion models in the models directory. ALICE supports:
+            </p>
+            <ul style="color: var(--text-secondary); margin-left: 1.5rem; margin-bottom: 1rem;">
+                <li style="margin-bottom: 0.5rem;">Single <code>.safetensors</code> checkpoint files</li>
+                <li style="margin-bottom: 0.5rem;">Diffusers format directories (with <code>model_index.json</code>)</li>
+                <li>LoRA files in the <code>loras/</code> subdirectory</li>
+            </ul>
+            <p style="color: var(--text-secondary);">
+                After adding new models, click "Refresh" to scan for changes.
+            </p>
+        </div>
+        
+        <!-- Supported Model Types -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                    </svg>
+                    Supported Model Types
+                </span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem;">
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <span class="model-type-badge sd">SD</span>
+                        <span style="font-weight: 600;">SD 1.5</span>
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.85rem;">512x512 native, ~4GB VRAM</div>
+                </div>
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <span class="model-type-badge sd">SD</span>
+                        <span style="font-weight: 600;">SD 2.1</span>
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.85rem;">768x768 native, ~6GB VRAM</div>
+                </div>
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <span class="model-type-badge sdxl">SDXL</span>
+                        <span style="font-weight: 600;">SDXL</span>
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.85rem;">1024x1024 native, ~12GB VRAM</div>
+                </div>
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <span class="model-type-badge flux">FLUX</span>
+                        <span style="font-weight: 600;">FLUX</span>
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.85rem;">Various sizes, ~24GB VRAM</div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <script src="/web/app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (typeof window.SDAPI === 'undefined') {
+                document.body.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--error);">Error: ALICE JavaScript failed to load. Please refresh the page.</div>';
+                return;
+            }
+            
+            const { API, Toast, requireAuth } = window.SDAPI;
+            
+            // Check authentication - models page is admin-only
+            const authResult = await requireAuth({ adminOnly: true });
+            
+            // Add admin class to body for CSS to show admin links
+            if (authResult.isAdmin) {
+                document.body.classList.add('is-admin');
+            }
+        
+            async function loadModels() {
+                const listEl = document.getElementById('model-list');
+                const countEl = document.getElementById('model-count');
+                
+                listEl.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+                
+                try {
+                    const response = await API.listModels();
+                    const models = response.data || [];
+                    
+                    countEl.textContent = `${models.length} model${models.length !== 1 ? 's' : ''}`;
+                    
+                    if (models.length === 0) {
+                        listEl.innerHTML = `
+                            <div class="empty-state">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                </svg>
+                                <p class="title">No models found</p>
+                                <p>Add models to the models directory and click Refresh</p>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    listEl.innerHTML = models.map(model => {
+                        // Determine model type badge
+                        let typeClass = 'sd';
+                        let typeLabel = 'SD';
+                        const idLower = model.id.toLowerCase();
+                        
+                        if (idLower.includes('xl') || idLower.includes('sdxl')) {
+                            typeClass = 'sdxl';
+                            typeLabel = 'SDXL';
+                        } else if (idLower.includes('flux')) {
+                            typeClass = 'flux';
+                            typeLabel = 'FLUX';
+                        } else if (idLower.includes('sd3') || idLower.includes('stable-diffusion-3')) {
+                            typeClass = 'sd3';
+                            typeLabel = 'SD3';
+                        }
+                        
+                        return `
+                            <div class="model-item">
+                                <div class="model-info">
+                                    <div class="model-name">${model.id}</div>
+                                    <div class="model-meta">
+                                        <span class="model-type-badge ${typeClass}">${typeLabel}</span>
+                                        <span>Added ${new Date(model.created * 1000).toLocaleDateString()}</span>
+                                    </div>
+                                </div>
+                                <div class="model-actions">
+                                    <a href="/web/generate.html?model=${encodeURIComponent(model.id)}" class="btn btn-primary btn-sm">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                        </svg>
+                                        Generate
+                                    </a>
+                                    <button class="btn btn-ghost btn-sm delete-model-btn" data-model-id="${model.id}" title="Delete model">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    // Add delete handlers
+                    listEl.querySelectorAll('.delete-model-btn').forEach(btn => {
+                        btn.addEventListener('click', async () => {
+                            const modelId = btn.dataset.modelId;
+                            if (!confirm(`Are you sure you want to delete ${modelId}? This cannot be undone.`)) return;
+                            
+                            btn.disabled = true;
+                            try {
+                                await API.fetch(`/v1/models/${encodeURIComponent(modelId)}`, {
+                                    method: 'DELETE'
+                                });
+                                Toast.success(`Model deleted: ${modelId}`);
+                                loadModels();
+                            } catch (error) {
+                                Toast.error(`Delete failed: ${error.message}`);
+                            } finally {
+                                btn.disabled = false;
+                            }
+                        });
+                    });
+                    
+                } catch (error) {
+                    listEl.innerHTML = `
+                        <div class="empty-state" style="color: var(--error);">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p class="title">Failed to load models</p>
+                            <p>${error.message}</p>
+                        </div>
+                    `;
+                }
+            }
+            
+            async function loadLoras() {
+                try {
+                    const response = await API.fetch('/v1/loras');
+                    const loras = response.data || [];
+                    
+                    if (loras.length > 0) {
+                        document.getElementById('lora-card').style.display = 'block';
+                        document.getElementById('lora-count').textContent = `${loras.length} LoRA${loras.length !== 1 ? 's' : ''}`;
+                        
+                        const loraListEl = document.getElementById('lora-list');
+                        loraListEl.innerHTML = loras.map(lora => `
+                            <div class="model-item">
+                                <div class="model-info">
+                                    <div class="model-name">${lora.name || lora.id}</div>
+                                    <div class="model-meta">
+                                        <span class="model-type-badge sd">LoRA</span>
+                                        ${lora.size_mb ? `<span>${lora.size_mb} MB</span>` : ''}
+                                        ${lora.base_model ? `<span>Base: ${lora.base_model}</span>` : ''}
+                                    </div>
+                                </div>
+                                <div class="model-actions">
+                                    <button class="btn btn-ghost btn-sm delete-lora-btn" data-lora-id="${lora.id}" title="Delete LoRA">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('');
+                        
+                        // Add delete handlers for LoRAs
+                        loraListEl.querySelectorAll('.delete-lora-btn').forEach(btn => {
+                            btn.addEventListener('click', async () => {
+                                const loraId = btn.dataset.loraId;
+                                if (!confirm(`Are you sure you want to delete ${loraId}? This cannot be undone.`)) return;
+                                
+                                btn.disabled = true;
+                                try {
+                                    await API.fetch(`/v1/loras/${encodeURIComponent(loraId)}`, {
+                                        method: 'DELETE'
+                                    });
+                                    Toast.success(`LoRA deleted: ${loraId}`);
+                                    loadLoras();
+                                } catch (error) {
+                                    Toast.error(`Delete failed: ${error.message}`);
+                                } finally {
+                                    btn.disabled = false;
+                                }
+                            });
+                        });
+                    } else {
+                        document.getElementById('lora-card').style.display = 'none';
+                    }
+                } catch (e) {
+                    // LoRAs endpoint not available yet
+                }
+            }
+            
+            // Refresh button handler
+            document.getElementById('refresh-btn').addEventListener('click', async () => {
+                const btn = document.getElementById('refresh-btn');
+                btn.disabled = true;
+                btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Refreshing...';
+                
+                try {
+                    await API.refreshModels();
+                    Toast.success('Models refreshed');
+                    await Promise.all([loadModels(), loadLoras()]);
+                } catch (error) {
+                    Toast.error(`Refresh failed: ${error.message}`);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg> Refresh`;
+                }
+            });
+            
+            // Initial load
+            loadModels();
+            loadLoras();
+        }); // End DOMContentLoaded
+    </script>
+</body>
+</html>

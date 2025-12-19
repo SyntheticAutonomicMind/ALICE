@@ -1,0 +1,101 @@
+# ALICE Distribution Exclusions
+# Files and directories to exclude from the public distribution
+
+# Development documentation (internal only)
+project-docs/
+docs/sam-reference/
+AGENT_*.md
+CONTINUATION_*.md
+SESSION_*.md
+HANDOFF_*.md
+PHASE_*.md
+CURRENT_*.md
+NEXT_*.md
+*_PLAN.md
+*_STATUS.md
+*_REPORT.md
+*_PRIORITIES.md
+PROJECT_STATUS.md
+MODEL_SUPPORT.md
+
+# Development scripts
+ask_*.sh
+*_diagnostic.sh
+*_remote.sh
+create-dist.sh
+
+# Build artifacts
+.build/
+build/
+dist/
+*.pyc
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# Python virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git and version control
+.git/
+.gitignore
+.gitattributes
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+dist-creation.log
+dist-build.log
+
+# Personal data and credentials
+.env
+.env.local
+*.key
+*.pem
+secrets/
+
+# Model files (users download their own)
+models/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+
+# Generated images (user data)
+images/
+data/images/
+*.png
+*.jpg
+*.jpeg
+
+# User data directories
+data/auth/
+data/gallery.json
+
+# LoRA files (users add their own)
+loras/
+
+# Test data and outputs
+test_output/
+test_images/
+tests/__pycache__/
+
+# Distribution script itself (not needed in dist)
+create-dist.sh
+
+# System files
+Thumbs.db
+desktop.ini

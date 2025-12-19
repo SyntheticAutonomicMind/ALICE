@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ALICE Debug</title>
+    <style>
+        body { font-family: monospace; padding: 2rem; background: #1a1a1a; color: #fff; }
+        .test { padding: 1rem; margin: 1rem 0; border: 1px solid #333; background: #2a2a2a; }
+        .pass { border-color: #0f0; }
+        .fail { border-color: #f00; }
+        pre { background: #000; padding: 1rem; overflow: auto; }
+    </style>
+</head>
+<body>
+    <h1>ALICE Debug Page</h1>
+    <div id="results"></div>
+    
+    <script src="/web/app.js"></script>
+    <script>
+        const results = document.getElementById('results');
+        
+        function addTest(name, status, data) {
+            const div = document.createElement('div');
+            div.className = `test ${status}`;
+            div.innerHTML = `
+                <h3>${status === 'pass' ? '✓' : '✗'} ${name}</h3>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+            results.appendChild(div);
+        }
+        
+        // Test 1: Check if SDAPI is loaded
+        if (typeof window.SDAPI !== 'undefined') {
+            addTest('SDAPI Object Loaded', 'pass', {
+                API: typeof window.SDAPI.API,
+                Toast: typeof window.SDAPI.Toast,
+                ModelSelector: typeof window.SDAPI.ModelSelector
+            });
+        } else {
+            addTest('SDAPI Object Loaded', 'fail', { error: 'window.SDAPI is undefined' });
+        }
+        
+        // Test 2: Test API calls
+        async function runTests() {
+            if (typeof window.SDAPI === 'undefined') return;
+            
+            const { API } = window.SDAPI;
+            
+            // Test health endpoint
+            try {
+                const health = await API.getHealth();
+                addTest('Health Endpoint', 'pass', health);
+            } catch (error) {
+                addTest('Health Endpoint', 'fail', { error: error.message });
+            }
+            
+            // Test models endpoint
+            try {
+                const models = await API.listModels();
+                addTest('Models Endpoint', 'pass', models);
+            } catch (error) {
+                addTest('Models Endpoint', 'fail', { error: error.message });
+            }
+            
+            // Test metrics endpoint
+            try {
+                const metrics = await API.getMetrics();
+                addTest('Metrics Endpoint', 'pass', metrics);
+            } catch (error) {
+                addTest('Metrics Endpoint', 'fail', { error: error.message });
+            }
+        }
+        
+        runTests();
+    </script>
+</body>
+</html>

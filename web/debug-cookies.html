@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cookie Debug - ALICE</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 2rem;
+            background: #1a1a1a;
+            color: #00ff00;
+        }
+        h1 { color: #00ffff; }
+        pre {
+            background: #000;
+            padding: 1rem;
+            border: 1px solid #00ff00;
+            overflow-x: auto;
+        }
+        .cookie {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #2a2a2a;
+            border-left: 3px solid #ffff00;
+        }
+        button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 0.5rem 1rem;
+            margin: 0.5rem;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        button:hover { background: #00ffff; }
+    </style>
+</head>
+<body>
+    <h1>Cookie Debug Page</h1>
+    <button onclick="location.reload()">Refresh</button>
+    <button onclick="clearAliceCookie()">Clear alice_session Cookie</button>
+    <button onclick="clearAll()">Clear ALL Cookies & localStorage</button>
+    
+    <h2>Current Cookies:</h2>
+    <pre id="cookies"></pre>
+    
+    <h2>localStorage:</h2>
+    <pre id="localStorage"></pre>
+    
+    <h2>Parsed Cookies:</h2>
+    <div id="parsed"></div>
+    
+    <script>
+        function displayCookies() {
+            // Raw cookies
+            document.getElementById('cookies').textContent = document.cookie || '(none)';
+            
+            // localStorage
+            let storage = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                storage[key] = localStorage.getItem(key);
+            }
+            document.getElementById('localStorage').textContent = JSON.stringify(storage, null, 2) || '(empty)';
+            
+            // Parse cookies
+            const parsed = document.getElementById('parsed');
+            parsed.innerHTML = '';
+            
+            const cookies = document.cookie.split(';');
+            cookies.forEach(cookie => {
+                const [name, ...valueParts] = cookie.trim().split('=');
+                const value = valueParts.join('=');
+                
+                if (name) {
+                    const div = document.createElement('div');
+                    div.className = 'cookie';
+                    div.innerHTML = `
+                        <strong>Name:</strong> ${name}<br>
+                        <strong>Value:</strong> ${value}<br>
+                        <strong>Length:</strong> ${value.length}
+                    `;
+                    parsed.appendChild(div);
+                }
+            });
+        }
+        
+        function clearAliceCookie() {
+            document.cookie = 'alice_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+            alert('Cleared alice_session cookie');
+            location.reload();
+        }
+        
+        function clearAll() {
+            // Clear all cookies
+            document.cookie.split(';').forEach(cookie => {
+                const name = cookie.split('=')[0].trim();
+                document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+            });
+            
+            // Clear localStorage
+            localStorage.clear();
+            
+            alert('Cleared all cookies and localStorage');
+            location.reload();
+        }
+        
+        displayCookies();
+    </script>
+</body>
+</html>

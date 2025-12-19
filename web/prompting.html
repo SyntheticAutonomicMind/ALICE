@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prompting Guide - ALICE</title>
+    <link rel="stylesheet" href="/web/fonts/inter.css">
+    <link rel="stylesheet" href="/web/style.css">
+    <style>
+        .guide-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .model-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid var(--border);
+            flex-wrap: wrap;
+        }
+        
+        .model-tab {
+            padding: 0.75rem 1.5rem;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            position: relative;
+            transition: color 0.2s;
+        }
+        
+        .model-tab:hover {
+            color: var(--text-primary);
+        }
+        
+        .model-tab.active {
+            color: var(--primary);
+        }
+        
+        .model-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--primary);
+        }
+        
+        .model-content {
+            display: none;
+        }
+        
+        .model-content.active {
+            display: block;
+        }
+        
+        .section {
+            margin-bottom: 2rem;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+        }
+        
+        .section-title {
+            color: var(--primary);
+            margin: 0 0 1rem 0;
+            font-size: 1.25rem;
+        }
+        
+        .section h3 {
+            color: var(--text-primary);
+            margin: 1.5rem 0 0.75rem 0;
+            font-size: 1.1rem;
+        }
+        
+        .section p {
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin: 0.5rem 0;
+        }
+        
+        .section ul, .section ol {
+            color: var(--text-secondary);
+            line-height: 1.8;
+            margin: 0.5rem 0;
+            padding-left: 1.5rem;
+        }
+        
+        .section li {
+            margin: 0.5rem 0;
+        }
+        
+        .schema-box {
+            background: var(--bg-primary);
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            border-left: 3px solid var(--primary);
+            font-family: monospace;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            line-height: 1.6;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+        
+        .example-box {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .example-label {
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .example-prompt {
+            color: var(--text-primary);
+            font-family: monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.75rem;
+            border-radius: var(--radius-sm);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .negative-prompt-box {
+            background: var(--bg-primary);
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+            border-left: 3px solid #ef4444;
+        }
+        
+        .negative-prompt-box h4 {
+            color: #ef4444;
+            margin: 0 0 0.5rem 0;
+            font-size: 0.95rem;
+        }
+        
+        .negative-prompt {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+        
+        .principles-box {
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+            border: 2px solid var(--primary);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .principles-box h3 {
+            color: var(--primary);
+            margin-top: 0;
+        }
+        
+        .principle-item {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+        }
+        
+        .principle-item h4 {
+            color: var(--primary);
+            margin: 0 0 0.5rem 0;
+        }
+        
+        .emphasis-guide {
+            background: var(--bg-primary);
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+        }
+        
+        .emphasis-guide code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 0.2rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.9rem;
+        }
+        
+        .checklist {
+            background: var(--bg-primary);
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+        }
+        
+        .checklist li {
+            list-style-type: none;
+            position: relative;
+            padding-left: 1.5rem;
+        }
+        
+        .checklist li:before {
+            content: '□';
+            position: absolute;
+            left: 0;
+            color: var(--primary);
+            font-weight: bold;
+        }
+        
+        .highlight {
+            background: rgba(var(--primary-rgb), 0.1);
+            padding: 0.1rem 0.3rem;
+            border-radius: 3px;
+            color: var(--primary);
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-brand">
+            <a href="/web/" class="logo">ALICE</a>
+        </div>
+        <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+        </button>
+        <div class="nav-links">
+            <a href="/web/" class="admin-only">Dashboard</a>
+            <a href="/web/models.html" class="admin-only">Models</a>
+            <a href="/web/generate.html">Generate</a>
+            <a href="/web/gallery.html">Gallery</a>
+            <a href="/web/prompting.html" class="active">Prompting Guide</a>
+            <a href="/web/download.html" class="admin-only">Download</a>
+            <a href="/web/admin.html" class="admin-only">Admin</a>
+            <a href="/docs" target="_blank">API Docs</a>
+            <a href="/web/login.html" class="login-link">Login</a>
+            <a href="#" onclick="window.SDAPI.logout(); return false;" class="logout-link">Logout</a>
+        </div>
+    </nav>
+
+    <div class="guide-container">
+        <h1>Ultimate Prompt Engineering Guide</h1>
+        <p>Master the art of crafting effective prompts for Stable Diffusion models using proven techniques and the Three-Act Structure.</p>
+
+        <!-- Core Principles Section -->
+        <div class="principles-box">
+            <h3>Core Principles: The Three-Act Prompt Structure</h3>
+            <p>All successful prompts follow a narrative structure that models parse sequentially with descending attention weight.</p>
+            
+            <div class="principle-item">
+                <h4>High-Value Start (Act I)</h4>
+                <p><strong>Purpose:</strong> Set artistic medium, quality level, and primary composition</p>
+                <p><strong>Position:</strong> Absolute beginning of prompt</p>
+                <p><strong>Effect:</strong> Strongest influence on style and technical execution</p>
+                <p>The first 10-15 tokens establish the fundamental style and quality. The model gives these concepts the most weight.</p>
+            </div>
+            
+            <div class="principle-item">
+                <h4>Description Middle (Act II)</h4>
+                <p><strong>Purpose:</strong> Define characters, actions, environments, and relationships</p>
+                <p><strong>Position:</strong> Middle section after style tags</p>
+                <p><strong>Effect:</strong> Creates coherence and narrative depth</p>
+                <p>The core narrative containing subject, action, and scene details. This is where specificity and storytelling happen.</p>
+            </div>
+            
+            <div class="principle-item">
+                <h4>High-Value End (Act III)</h4>
+                <p><strong>Purpose:</strong> Specify lighting, perspective, camera effects, and finishing touches</p>
+                <p><strong>Position:</strong> Final section before negative prompt</p>
+                <p><strong>Effect:</strong> Polishes the image and solidifies technical execution</p>
+                <p>Technical and atmospheric refinements that lock in the final look.</p>
+            </div>
+        </div>
+
+        <!-- Emphasis Syntax -->
+        <div class="section">
+            <h2 class="section-title">Bracketing Syntax for Attention Control</h2>
+            <div class="emphasis-guide">
+                <p>Use parentheses to amplify specific elements:</p>
+                <ul>
+                    <li><code>(word)</code> = 1.1x emphasis</li>
+                    <li><code>((word))</code> = 1.21x emphasis</li>
+                    <li><code>(((word)))</code> = 1.33x emphasis</li>
+                    <li><code>{word}</code> = stylistic grouping</li>
+                    <li><code>[word]</code> = 0.9x de-emphasis</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Model Tabs -->
+        <div class="model-tabs">
+            <button class="model-tab active" data-tab="sd15">SD 1.5 / 2.1</button>
+            <button class="model-tab" data-tab="sdxl">SDXL</button>
+            <button class="model-tab" data-tab="pony">SDXL + Pony</button>
+            <button class="model-tab" data-tab="zimage">z-image-turbo</button>
+            <button class="model-tab" data-tab="framework">Scene Development</button>
+            <button class="model-tab" data-tab="advanced">Advanced Techniques</button>
+        </div>
+
+        <!-- SD 1.5 Content -->
+        <div class="model-content active" id="sd15-content">
+            <div class="section">
+                <h2 class="section-title">Stable Diffusion 1.5 / 2.1</h2>
+                <p><strong>Character:</strong> Requires explicit, structured prompting with strong quality tags. Benefits from specific artistic references and concrete details.</p>
+                
+                <h3>Optimal Schema Structure</h3>
+                <div class="schema-box">{QUALITY_TAGS}, {ART_MEDIUM}, {COMPOSITION}, (({SUBJECT})), {ACTION}, in {SCENE}, wearing {CLOTHING}, {FEATURES}, {COLOR_PALETTE}, {LIGHTING}, {TECHNICAL_TAGS}</div>
+                
+                <h3>Complete Example Prompt</h3>
+                <div class="example-box">
+                    <div class="example-prompt">masterpiece, best quality, digital painting, medium shot, ((elderly botanist)), carefully pruning exotic orchids, in a Victorian-era glass greenhouse, wearing tweed vest with leather elbow patches, wire-rimmed glasses, weathered hands, intelligent gaze, muted green and terracotta color scheme, dappled sunlight through glass panes, volumetric fog, intricate details, 8k resolution, trending on ArtStation</div>
+                </div>
+                
+                <h3>Development Strategy</h3>
+                <ol>
+                    <li><strong>Start with Maximum Quality:</strong> Always begin with <code>masterpiece, best quality</code> plus your primary art medium</li>
+                    <li><strong>Establish Composition Immediately:</strong> Follow with shot type (close-up, medium shot, wide shot) before introducing subject</li>
+                    <li><strong>Emphasize Core Subject:</strong> Use double parentheses around your main character or focal point</li>
+                    <li><strong>Build Layered Scene:</strong> Connect action to environment using natural phrasing</li>
+                    <li><strong>Add Texture Through Details:</strong> Include specific materials, textures, and small features</li>
+                    <li><strong>Finish with Technical Polish:</strong> End with lighting, color mood, and resolution tags</li>
+                </ol>
+                
+                <h3>Token Efficiency</h3>
+                <p><span class="highlight">~75 tokens optimal</span></p>
+                
+                <h3>Negative Prompt Essentials</h3>
+                <div class="negative-prompt-box">
+                    <div class="negative-prompt">lowres, bad anatomy, blurry, poorly drawn face, mutated, extra limb, ugly, poorly drawn hands, missing limb, blurry, floating limbs, disconnected limbs, malformed hands, out of focus, long neck, long body, watermark, signature, text, error, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SDXL Content -->
+        <div class="model-content" id="sdxl-content">
+            <div class="section">
+                <h2 class="section-title">SDXL (Stable Diffusion XL)</h2>
+                <p><strong>Character:</strong> Understands natural language better, excels at atmospheric coherence. Less dependent on rigid structure but benefits from scene-based storytelling.</p>
+                
+                <h3>Optimal Schema Structure</h3>
+                <div class="schema-box">{STYLE_DESCRIPTOR} of {MAIN_SUBJECT}, {ACTION_PHRASE}, in {ENVIRONMENT}, {ATMOSPHERIC_DETAILS}. {CHARACTER_DESCRIPTION}, {VISUAL_ELEMENTS}, {COMPOSITION}, {ARTISTIC_INFLUENCES}</div>
+                
+                <h3>Complete Example Prompt</h3>
+                <div class="example-box">
+                    <div class="example-prompt">A cinematic photograph of a marine biologist, releasing a rehabilitated sea turtle at sunrise, in crystal-clear tropical shallows. She wears a practical wetsuit, sun-bleached hair tied back, expression of quiet triumph, gentle hands guiding the turtle. Sunlight penetrates the water creating god rays, schools of small fish in background, sand stirring gently. Shot with medium format camera, shallow depth of field, natural color grading, National Geographic style, sense of movement and transition</div>
+                </div>
+                
+                <h3>Development Strategy</h3>
+                <ol>
+                    <li><strong>Start with Complete Sentence:</strong> Frame as "A [style] of [subject], [action], in [environment]"</li>
+                    <li><strong>Use Periods for Sections:</strong> SDXL understands paragraph-like structure with periods as soft breaks</li>
+                    <li><strong>Focus on Atmosphere:</strong> Describe mood, light quality, and environmental interactions</li>
+                    <li><strong>Include Sensory Details:</strong> Mention textures, temperatures, and movement</li>
+                    <li><strong>Reference Specific Styles:</strong> Use known photographers, publications, or art movements</li>
+                    <li><strong>End with Emotional Quality:</strong> Conclude with the feeling or narrative you want to convey</li>
+                </ol>
+                
+                <h3>Token Efficiency</h3>
+                <p><span class="highlight">~150 tokens optimal</span></p>
+                
+                <h3>Recommended Negative Prompt (Minimal)</h3>
+                <div class="negative-prompt-box">
+                    <div class="negative-prompt">cartoon, 3d, painting, illustration, worst quality, low quality, jpeg artifacts, blurry, deformed, disfigured, watermark, signature</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pony Content -->
+        <div class="model-content" id="pony-content">
+            <div class="section">
+                <h2 class="section-title">SDXL + Pony Diffusion V6</h2>
+                <p><strong>Character:</strong> Specialized for human subjects and dynamic scenes. Exceptional at anatomy, expressions, and complex interactions. Requires explicit relationship and action descriptions.</p>
+                
+                <h3>Optimal Schema Structure</h3>
+                <div class="schema-box">{CINEMATIC_STYLE}, {LIGHTING}, {SHOT_TYPE}, {ANGLE}, (({SCENE_CONTEXT})), (({PRIMARY_ACTION})), ((({CHARACTER}))), {APPEARANCE}. {{FEATURES}}, (({SECONDARY_ACTION})), {INTERACTION_DETAILS}: {PERSPECTIVE}, {TECHNICAL_EXECUTION}</div>
+                
+                <h3>Complete Example Prompt</h3>
+                <div class="example-box">
+                    <div class="example-prompt">film still, dramatic chiaroscuro lighting, full body shot, low angle, ((in a grand library with towering oak bookshelves)), ((two rival academics fiercely debating over an ancient manuscript)), (((a brilliant but disheveled professor in his 40s))), wearing a rumpled corduroy jacket with leather patches. He has intense dark eyes, tousled salt-and-pepper hair, gesturing emphatically with one hand, ((the other hand gripping the edge of the reading table)), scattered papers and open books around them: Dutch angle perspective, deep focus, 35mm film grain, high contrast</div>
+                </div>
+                
+                <h3>Development Strategy</h3>
+                <ol>
+                    <li><strong>Lead with Cinematic Language:</strong> Begin with film/photography terms to establish realism</li>
+                    <li><strong>Establish Spatial Context Early:</strong> Use double parentheses for the environment immediately after shot specs</li>
+                    <li><strong>Amplify Relationships:</strong> Put interactions in double parentheses, main character in triple</li>
+                    <li><strong>Describe Sequential Actions:</strong> Use multiple action clauses to create narrative movement</li>
+                    <li><strong>Group Physical Features:</strong> Use curly braces for facial/body description blocks</li>
+                    <li><strong>End with Director's Perspective:</strong> Conclude with camera technique and post-processing</li>
+                </ol>
+                
+                <h3>Token Efficiency</h3>
+                <p><span class="highlight">~100 tokens optimal</span></p>
+                
+                <h3>Pony-Specific Negative Prompt</h3>
+                <div class="negative-prompt-box">
+                    <div class="negative-prompt">anime, cartoon, 3d, doll, plastic, deformed, disfigured, bad anatomy, wrong anatomy, fused fingers, too many fingers, extra limbs, missing limbs, malformed hands, cloned face, ugly, asian, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- z-image-turbo Content -->
+        <div class="model-content" id="zimage-content">
+            <div class="section">
+                <h2 class="section-title">z-image-turbo</h2>
+                <p><strong>Character:</strong> Optimized for speed, requires concise, efficient prompting. Benefits from fewer but highly specific tokens. Less effective with complex scene descriptions.</p>
+                
+                <h3>Optimal Schema Structure</h3>
+                <div class="schema-box">{STYLE}, {SUBJECT}, {ACTION}, {SCENE}, {KEY_DETAILS}, {QUALITY}</div>
+                
+                <h3>Complete Example Prompt</h3>
+                <div class="example-box">
+                    <div class="example-prompt">portrait photography, street musician playing violin, during golden hour, urban alley with graffiti walls, faded denim jacket, eyes closed in concentration, motion blur on bow, shallow depth of field, photorealistic, sharp focus</div>
+                </div>
+                
+                <h3>Development Strategy</h3>
+                <ol>
+                    <li><strong>Be Extremely Concise:</strong> Limit to 30-50 tokens maximum</li>
+                    <li><strong>Prioritize Visual Keywords:</strong> Use nouns and adjectives that directly translate to visual elements</li>
+                    <li><strong>Skip Connective Language:</strong> Omit "in", "with", "and" when possible</li>
+                    <li><strong>Focus on 3-4 Core Elements:</strong> Subject + action + scene + one key detail</li>
+                    <li><strong>Use Simple Emphasis:</strong> Single parentheses only if absolutely necessary</li>
+                    <li><strong>End with Quality Baseline:</strong> One or two quality/technical tags</li>
+                </ol>
+                
+                <h3>Token Efficiency</h3>
+                <p><span class="highlight">~40 tokens optimal</span></p>
+                
+                <h3>Minimal Negative Prompt</h3>
+                <div class="negative-prompt-box">
+                    <div class="negative-prompt">cartoon, 3d, painting, blurry, deformed</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scene Development Framework -->
+        <div class="model-content" id="framework-content">
+            <div class="section">
+                <h2 class="section-title">Scene Development Framework</h2>
+                
+                <h3>Phase 1: Conceptual Foundation</h3>
+                <ol>
+                    <li>Define the single core story moment</li>
+                    <li>Choose primary subject and their emotional state</li>
+                    <li>Select environment that enhances the narrative</li>
+                    <li>Determine time of day/lighting that matches mood</li>
+                </ol>
+                
+                <h3>Phase 2: Layered Description</h3>
+                <ol>
+                    <li><strong>First Layer:</strong> Primary subject + action + environment (basic sentence)</li>
+                    <li><strong>Second Layer:</strong> Clothing + key physical features + props</li>
+                    <li><strong>Third Layer:</strong> Secondary subjects/interactions + atmospheric details</li>
+                    <li><strong>Fourth Layer:</strong> Camera perspective + lighting effects</li>
+                </ol>
+                
+                <h3>Phase 3: Technical Refinement</h3>
+                <ol>
+                    <li>Add medium/style tags appropriate to your model</li>
+                    <li>Apply emphasis brackets to critical elements</li>
+                    <li>Include quality/resolution tags for final polish</li>
+                    <li>Test with minimal negative prompt first, then expand as needed</li>
+                </ol>
+                
+                <h3>Phase 4: Iterative Testing</h3>
+                <ol>
+                    <li>Generate with core prompt only</li>
+                    <li>Add one detail layer at a time, regenerating each time</li>
+                    <li>Adjust emphasis based on what the model emphasizes</li>
+                    <li>Finalize negative prompt based on recurring artifacts</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Advanced Techniques -->
+        <div class="model-content" id="advanced-content">
+            <div class="section">
+                <h2 class="section-title">Advanced Techniques</h2>
+                
+                <h3>Attention Migration</h3>
+                <p>Move important elements earlier in the prompt to increase their influence. If a detail is being ignored, reposition it within the first 20 tokens.</p>
+                
+                <h3>Cross-Model Adaptation</h3>
+                <p>To adapt a prompt between models:</p>
+                <ul>
+                    <li><strong>SD 1.5 → SDXL:</strong> Convert fragments to complete sentences</li>
+                    <li><strong>SDXL → Pony:</strong> Add cinematic terms and anatomical specificity</li>
+                    <li><strong>Any → z-turbo:</strong> Remove 60% of tokens, keep only visual nouns</li>
+                </ul>
+                
+                <h3>Troubleshooting Common Issues</h3>
+                <div class="example-box">
+                    <div class="example-label">Poor Anatomy</div>
+                    <p><strong>Solution:</strong> Add specific feature descriptions earlier in prompt</p>
+                </div>
+                
+                <div class="example-box">
+                    <div class="example-label">Ignored Details</div>
+                    <p><strong>Solution:</strong> Move detail earlier AND add parentheses</p>
+                </div>
+                
+                <div class="example-box">
+                    <div class="example-label">Style Inconsistency</div>
+                    <p><strong>Solution:</strong> Strengthen style tags at beginning AND end</p>
+                </div>
+                
+                <div class="example-box">
+                    <div class="example-label">Composition Issues</div>
+                    <p><strong>Solution:</strong> Specify shot type, angle, and perspective explicitly</p>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2 class="section-title">Final Checklist Before Generation</h2>
+                <div class="checklist">
+                    <ul>
+                        <li>Starts with style/quality tags</li>
+                        <li>Includes specific shot type and composition</li>
+                        <li>Main subject is clearly defined and emphasized</li>
+                        <li>Action is dynamic and specific</li>
+                        <li>Environment supports the narrative</li>
+                        <li>Ends with technical/quality reinforcement</li>
+                        <li>Token count appropriate for model</li>
+                        <li>Negative prompt addresses model's specific weaknesses</li>
+                    </ul>
+                </div>
+                <p style="margin-top: 1.5rem; font-style: italic; color: var(--text-secondary);">
+                    <strong>Remember:</strong> Prompt engineering is iterative. The perfect prompt often requires 5-15 generations with small adjustments. Document what changes produce what effects to build your personal prompting style.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/web/app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (typeof window.SDAPI === 'undefined') {
+                document.body.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--error);">Error: ALICE JavaScript failed to load. Please refresh the page.</div>';
+                return;
+            }
+            
+            const { requireAuth } = window.SDAPI;
+            
+            // Prompting guide is available to all authenticated users
+            const authResult = await requireAuth();
+            
+            // Add admin class to body for CSS to show admin links
+            if (authResult.isAdmin) {
+                document.body.classList.add('is-admin');
+            }
+            
+            // Tab switching
+            document.querySelectorAll('.model-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    // Remove active from all tabs and contents
+                    document.querySelectorAll('.model-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.model-content').forEach(c => c.classList.remove('active'));
+                    
+                    // Add active to clicked tab and corresponding content
+                    tab.classList.add('active');
+                    document.getElementById(tab.dataset.tab + '-content').classList.add('active');
+                });
+            });
+        });
+    </script>
+</body>
+</html>

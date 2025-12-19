@@ -1,0 +1,11 @@
+[Unit]
+Description=SteamOS Offload - /var/lib/alice
+
+[Mount]
+What=/home/.steamos/offload/var/lib/alice
+Where=/var/lib/alice
+Type=none
+Options=bind
+
+[Install]
+WantedBy=multi-user.target
