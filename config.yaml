@@ -1,0 +1,70 @@
+# ALICE Configuration
+# Remote Stable Diffusion Service
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  api_key: null  # Optional: Set to enable simple API key authentication
+  require_auth: false  # Set to true to require authentication for all endpoints
+  block_nsfw: true  # Block NSFW content generation (enabled by default for safety)
+
+models:
+  directory: ./models
+  auto_unload_timeout: 300  # Seconds before unloading idle model
+  default_model: stable-diffusion-v1-5
+  # CivitAI API key for downloading models (get from https://civitai.com/user/account)
+  civitai_api_key: null
+  # HuggingFace token for private models (get from https://huggingface.co/settings/tokens)
+  huggingface_token: null
+
+generation:
+  default_steps: 20
+  default_guidance_scale: 7.5
+  default_scheduler: dpm++_sde_karras
+  max_concurrent: 1
+  request_timeout: 300
+  default_width: 512
+  default_height: 512
+  
+  # GPU/Device settings
+  force_cpu: false  # Set to true to force CPU mode
+  device_map: null  # Use null for SDXL (directory models). For SD 1.5 single-file: 'sequential' works on AMD gfx1103
+  force_float32: false  # Set to true for AMD GPUs that need fp32 (e.g., gfx1103)
+  force_bfloat16: false  # Set to true for AMD Phoenix APU (gfx1102) - best option
+  
+  # Memory optimization settings (tune for your GPU VRAM)
+  enable_vae_slicing: true  # Reduce memory during VAE decode (recommended)
+  enable_vae_tiling: false  # Enable for very large images (>1024px)
+  enable_model_cpu_offload: false  # Offload to CPU when not in use (slower)
+  enable_sequential_cpu_offload: false  # Most aggressive (slowest, minimum VRAM)
+  attention_slice_size: auto  # 'auto', 'max', or a number
+  vae_decode_cpu: true  # CRITICAL: Decode VAE on CPU (required for SDXL on AMD gfx1103 to prevent GPU hang)
+
+storage:
+  images_directory: ./images
+  gallery_file: ./data/gallery.json  # Image metadata with privacy settings
+  auth_directory: ./data/auth  # API keys and session storage
+  max_storage_gb: 100
+  retention_days: 7
+  public_image_expiration_hours: 168  # Default expiration for public images (7 days)
+
+logging:
+  level: WARNING  # WARNING = less verbose, INFO = verbose, DEBUG = very verbose
+  file: null  # Set to a path like ./logs/alice.log to enable file logging
+  max_size_mb: 100
+  backup_count: 5
+
+model_cache:
+  # Model catalog caching for fast local search
+  enabled: true
+  database_path: ./data/model_cache.db
+  
+  # Sync settings
+  sync_on_startup: true  # Sync catalogs when server starts
+  sync_interval_hours: 24  # Auto-sync every 24 hours
+  
+  # CivitAI settings
+  civitai_page_limit: null  # null = fetch all pages (100k+ models, ~30-45 min)
+  
+  # HuggingFace settings
+  huggingface_limit: 10000  # Max models to fetch (practical limit)

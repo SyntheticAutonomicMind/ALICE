@@ -1,0 +1,49 @@
+# Build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment and secrets
+.env
+.env.local
+*.key
+*.pem
+
+# User data (not part of repository)
+models/
+images/
+data/auth/
+data/gallery.json
+
+# Test output
+test_output/
+test_images/
+
+# Distribution creation
+dist-creation.log
+dist-build.log
+
+# Continuation data
+ai-assisted/202*

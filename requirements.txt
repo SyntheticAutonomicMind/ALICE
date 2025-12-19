@@ -1,0 +1,42 @@
+# ALICE Dependencies
+# NOTE: Python package versions match SAM's bundled Python environment
+# to ensure generate_image_diffusers.py works identically in both projects
+#
+# IMPORTANT: torch and torchvision are NOT listed here because they require
+# platform-specific installation (ROCm on AMD, CUDA on NVIDIA, CPU-only, etc.)
+# Install scripts handle PyTorch installation separately.
+
+# FastAPI and server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.12.5
+pydantic-settings==2.1.0
+
+# Diffusion models - MATCHED TO SAM
+# Note: SAM uses diffusers 0.36.0.dev0, we use latest stable
+# Updated to 0.36.0 to fix EulerAncestralDiscreteScheduler IndexError
+diffusers==0.36.0
+transformers==4.57.3
+accelerate==1.12.0
+safetensors==0.7.0
+
+# Prompt weighting and long prompts - MATCHED TO SAM
+compel==2.3.1
+
+# Image processing - MATCHED TO SAM
+pillow==12.0.0
+
+# Configuration - MATCHED TO SAM
+pyyaml==6.0.3
+
+# Async file handling
+aiofiles==23.2.1
+
+# Async HTTP client (for download manager)
+aiohttp==3.9.1
+
+# Multipart form data (for file uploads)
+python-multipart==0.0.6
+
+# System monitoring - MATCHED TO SAM
+psutil==7.1.3

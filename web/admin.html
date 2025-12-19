@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - ALICE</title>
+    <link rel="stylesheet" href="/web/fonts/inter.css">
+    <link rel="stylesheet" href="/web/style.css">
+    <style>
+        .admin-key-input {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .admin-key-input input {
+            flex: 1;
+        }
+        
+        .key-display {
+            background: var(--bg-secondary);
+            border: 1px solid var(--success);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin: 1rem 0;
+            font-family: monospace;
+            word-break: break-all;
+        }
+        
+        .key-display .warning {
+            color: var(--warning);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            font-family: inherit;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .data-table th,
+        .data-table td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .data-table th {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
+        
+        .data-table tr:hover {
+            background: var(--bg-secondary);
+        }
+        
+        .data-table .actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .badge.admin {
+            background: var(--warning-bg);
+            color: var(--warning);
+        }
+        
+        .badge.enabled {
+            background: var(--success-bg);
+            color: var(--success);
+        }
+        
+        .badge.disabled {
+            background: var(--error-bg);
+            color: var(--error);
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-badge.success {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+        }
+        
+        .status-badge.warning {
+            background: rgba(251, 191, 36, 0.15);
+            color: var(--warning);
+        }
+        
+        .status-badge.error {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--error);
+        }
+        
+        .create-form {
+            display: grid;
+            grid-template-columns: 1fr auto auto auto;
+            gap: 1rem;
+            align-items: end;
+        }
+        
+        .create-form .form-group {
+            margin-bottom: 0;
+        }
+        
+        .create-form .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding-bottom: 0.75rem;
+        }
+        
+        @media (max-width: 768px) {
+            .create-form {
+                grid-template-columns: 1fr;
+            }
+            
+            .admin-key-input {
+                flex-direction: column;
+            }
+            
+            .data-table {
+                display: block;
+                overflow-x: auto;
+            }
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            text-align: center;
+        }
+        
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        
+        .stat-card .label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-brand">
+            <a href="/web/" class="logo">ALICE</a>
+        </div>
+        <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+        </button>
+        <div class="nav-links">
+            <a href="/web/" class="admin-only">Dashboard</a>
+            <a href="/web/models.html" class="admin-only">Models</a>
+            <a href="/web/generate.html">Generate</a>
+            <a href="/web/gallery.html">Gallery</a>
+            <a href="/web/prompting.html">Prompting Guide</a>
+            <a href="/web/download.html" class="admin-only">Download</a>
+            <a href="/web/admin.html" class="active admin-only">Admin</a>
+            <a href="/docs" target="_blank">API Docs</a>
+            <a href="/web/login.html" class="login-link">Login</a>
+            <a href="#" onclick="window.SDAPI.logout(); return false;" class="logout-link">Logout</a>
+        </div>
+    </nav>
+    
+    <main>
+        <div class="page-header">
+            <h1>Admin Panel</h1>
+            <p>Manage API keys and sessions</p>
+        </div>
+        
+        <!-- Admin Key Input -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                    </svg>
+                    Admin Authentication
+                </span>
+            </div>
+            
+            <div id="auth-section">
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">Enter your admin API key to access admin functions.</p>
+                <div class="admin-key-input">
+                    <input type="password" id="admin-key" placeholder="Enter admin API key (sd-...)">
+                    <button class="btn btn-primary" id="auth-btn">Authenticate</button>
+                    <button class="btn btn-secondary" id="bootstrap-btn" title="Create first admin key">Bootstrap</button>
+                </div>
+                <div id="auth-error" style="display: none; color: var(--error); font-size: 0.9rem;"></div>
+            </div>
+            
+            <div id="auth-success" style="display: none;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--success);">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Authenticated as admin
+                </div>
+                <button class="btn btn-ghost" id="logout-btn" style="margin-top: 0.5rem;">Logout</button>
+            </div>
+        </div>
+        
+        <!-- Admin Content (hidden until authenticated) -->
+        <div id="admin-content" style="display: none;">
+            <!-- Stats -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        Statistics
+                    </span>
+                    <button class="btn btn-secondary btn-sm" id="refresh-stats-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="value" id="stat-total-keys">0</div>
+                        <div class="label">Total Keys</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value" id="stat-active-keys">0</div>
+                        <div class="label">Active Keys</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value" id="stat-admin-keys">0</div>
+                        <div class="label">Admin Keys</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value" id="stat-sessions">0</div>
+                        <div class="label">Active Sessions</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- API Keys -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                        </svg>
+                        API Keys
+                    </span>
+                </div>
+                
+                <div class="create-form" style="margin-bottom: 1.5rem;">
+                    <div class="form-group">
+                        <label for="new-key-name">Key Name</label>
+                        <input type="text" id="new-key-name" placeholder="e.g., Production API Key">
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="new-key-admin">
+                        <label for="new-key-admin">Admin</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-key-rate">Rate Limit</label>
+                        <input type="number" id="new-key-rate" value="100" min="1" max="10000" style="width: 100px;">
+                    </div>
+                    <button class="btn btn-primary" id="create-key-btn">Create Key</button>
+                </div>
+                
+                <div id="new-key-display" style="display: none;"></div>
+                
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>ID</th>
+                            <th>Status</th>
+                            <th>Rate Limit</th>
+                            <th>Last Used</th>
+                            <th style="text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="keys-table-body">
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Invite Codes -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Invite Codes
+                    </span>
+                </div>
+                
+                <div class="create-form" style="margin-bottom: 1.5rem;">
+                    <div class="form-group">
+                        <label for="new-invite-uses">Uses (0=unlimited)</label>
+                        <input type="number" id="new-invite-uses" value="1" min="0" max="1000" style="width: 80px;">
+                    </div>
+                    <div class="form-group">
+                        <label for="new-invite-expires">Expires (hours, 0=never)</label>
+                        <input type="number" id="new-invite-expires" value="0" min="0" style="width: 100px;">
+                    </div>
+                    <button class="btn btn-primary" id="create-invite-btn">Create Invite</button>
+                </div>
+                
+                <div id="new-invite-display" style="display: none;"></div>
+                
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Uses Remaining</th>
+                            <th>Used By</th>
+                            <th>Expires</th>
+                            <th style="text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invites-table-body">
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pending Registrations -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                        </svg>
+                        Pending Registrations
+                    </span>
+                </div>
+                
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>ID</th>
+                            <th>Created</th>
+                            <th>Status</th>
+                            <th style="text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pending-table-body">
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Sessions -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                        Active Sessions
+                    </span>
+                </div>
+                
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Session ID</th>
+                            <th>API Key</th>
+                            <th>Created</th>
+                            <th>Last Access</th>
+                            <th>Expires</th>
+                            <th style="text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sessions-table-body">
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Settings -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        Settings
+                    </span>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-primary btn-sm" id="save-settings-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            Save Changes
+                        </button>
+                        <button class="btn btn-sm" id="restart-service-btn" style="background: var(--warning); color: #000;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Restart Service
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="settings-loading" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                    <div class="spinner"></div>
+                    Loading settings...
+                </div>
+                
+                <div id="settings-form" style="display: none;">
+                    <!-- Server Settings -->
+                    <div style="margin-bottom: 2rem;">
+                        <h3 style="font-size: 1rem; color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                            </svg>
+                            Server
+                        </h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                            <div class="form-group">
+                                <label for="setting-server-host">Host</label>
+                                <input type="text" id="setting-server-host" data-key="server.host">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-server-port">Port</label>
+                                <input type="number" id="setting-server-port" data-key="server.port" min="1" max="65535">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-server-require-auth">Require Authentication</label>
+                                <select id="setting-server-require-auth" data-key="server.require_auth">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-server-registration">Registration Mode</label>
+                                <select id="setting-server-registration" data-key="server.registration_mode">
+                                    <option value="disabled">Disabled</option>
+                                    <option value="open">Open (anyone can register)</option>
+                                    <option value="invite">Invite Only</option>
+                                    <option value="approval">Requires Approval</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-server-session-timeout">Session Timeout (seconds)</label>
+                                <input type="number" id="setting-server-session-timeout" data-key="server.session_timeout_seconds" min="60" max="86400" placeholder="900">
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Time before user is logged out due to inactivity (default: 900 = 15 min)</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-server-block-nsfw">Block NSFW Content</label>
+                                <select id="setting-server-block-nsfw" data-key="server.block_nsfw">
+                                    <option value="true">Yes (Enabled - Safe)</option>
+                                    <option value="false">No (Disabled - Unrestricted)</option>
+                                </select>
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Blocks prompts with NSFW keywords (enabled by default)</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Models Settings -->
+                    <div style="margin-bottom: 2rem;">
+                        <h3 style="font-size: 1rem; color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                            </svg>
+                            Models
+                        </h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                            <div class="form-group">
+                                <label for="setting-models-directory">Models Directory</label>
+                                <input type="text" id="setting-models-directory" data-key="models.directory">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-models-auto-unload">Auto Unload Timeout (seconds)</label>
+                                <input type="number" id="setting-models-auto-unload" data-key="models.auto_unload_timeout" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-models-default">Default Model</label>
+                                <input type="text" id="setting-models-default" data-key="models.default_model" placeholder="e.g., sd/my-model">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-models-civitai-key">CivitAI API Key</label>
+                                <input type="password" id="setting-models-civitai-key" data-key="models.civitai_api_key" placeholder="Enter key or leave blank">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-models-hf-token">HuggingFace Token</label>
+                                <input type="password" id="setting-models-hf-token" data-key="models.huggingface_token" placeholder="Enter token or leave blank">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Generation Settings -->
+                    <div style="margin-bottom: 2rem;">
+                        <h3 style="font-size: 1rem; color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            Generation Defaults
+                        </h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+                            <div class="form-group">
+                                <label for="setting-gen-steps">Default Steps</label>
+                                <input type="number" id="setting-gen-steps" data-key="generation.default_steps" min="1" max="150">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-guidance">Guidance Scale</label>
+                                <input type="number" id="setting-gen-guidance" data-key="generation.default_guidance_scale" min="1" max="20" step="0.5">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-scheduler">Default Scheduler</label>
+                                <select id="setting-gen-scheduler" data-key="generation.default_scheduler">
+                                    <option value="ddim">DDIM</option>
+                                    <option value="euler">Euler</option>
+                                    <option value="euler_a">Euler Ancestral</option>
+                                    <option value="dpm++">DPM++</option>
+                                    <option value="dpm++_karras">DPM++ Karras</option>
+                                    <option value="dpm++_sde">DPM++ SDE</option>
+                                    <option value="dpm++_sde_karras">DPM++ SDE Karras</option>
+                                    <option value="pndm">PNDM</option>
+                                    <option value="lms">LMS</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-width">Default Width</label>
+                                <input type="number" id="setting-gen-width" data-key="generation.default_width" min="256" max="2048" step="64">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-height">Default Height</label>
+                                <input type="number" id="setting-gen-height" data-key="generation.default_height" min="256" max="2048" step="64">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-timeout">Request Timeout (seconds)</label>
+                                <input type="number" id="setting-gen-timeout" data-key="generation.request_timeout" min="60">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-max-concurrent">Max Concurrent</label>
+                                <input type="number" id="setting-gen-max-concurrent" data-key="generation.max_concurrent" min="1" max="10">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-force-cpu">Force CPU</label>
+                                <select id="setting-gen-force-cpu" data-key="generation.force_cpu">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-force-float32">Force Float32</label>
+                                <select id="setting-gen-force-float32" data-key="generation.force_float32">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-force-bfloat16">Force BFloat16</label>
+                                <select id="setting-gen-force-bfloat16" data-key="generation.force_bfloat16">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Best for AMD Phoenix APU (gfx1103)</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-gen-device-map">Device Map</label>
+                                <select id="setting-gen-device-map" data-key="generation.device_map">
+                                    <option value="">Auto</option>
+                                    <option value="balanced">Balanced</option>
+                                    <option value="sequential">Sequential</option>
+                                </select>
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">For AMD APUs use 'balanced'</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Storage Settings -->
+                    <div style="margin-bottom: 2rem;">
+                        <h3 style="font-size: 1rem; color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                            </svg>
+                            Storage
+                        </h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                            <div class="form-group">
+                                <label for="setting-storage-dir">Images Directory</label>
+                                <input type="text" id="setting-storage-dir" data-key="storage.images_directory">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-storage-max">Max Storage (GB)</label>
+                                <input type="number" id="setting-storage-max" data-key="storage.max_storage_gb" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-storage-retention">Retention (days)</label>
+                                <input type="number" id="setting-storage-retention" data-key="storage.retention_days" min="1">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Logging Settings -->
+                    <div style="margin-bottom: 1rem;">
+                        <h3 style="font-size: 1rem; color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            Logging
+                        </h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                            <div class="form-group">
+                                <label for="setting-logging-level">Log Level</label>
+                                <select id="setting-logging-level" data-key="logging.level">
+                                    <option value="DEBUG">DEBUG</option>
+                                    <option value="INFO">INFO</option>
+                                    <option value="WARNING">WARNING</option>
+                                    <option value="ERROR">ERROR</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-logging-file">Log File</label>
+                                <input type="text" id="setting-logging-file" data-key="logging.file">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-logging-max-size">Max Size (MB)</label>
+                                <input type="number" id="setting-logging-max-size" data-key="logging.max_size_mb" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-logging-backup-count">Backup Count</label>
+                                <input type="number" id="setting-logging-backup-count" data-key="logging.backup_count" min="0" max="20">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 1rem; padding: 1rem; background: var(--bg-secondary); border-radius: var(--radius-md);">
+                        <strong>Note:</strong> Most changes require a service restart to take effect.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <script src="/web/app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (typeof window.SDAPI === 'undefined') {
+                document.body.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--error);">Error: ALICE JavaScript failed to load. Please refresh the page.</div>';
+                return;
+            }
+            
+            const { API, Toast, requireAuth } = window.SDAPI;
+            
+            // Check auth to update nav visibility (admin page requires admin)
+            const authResult = await requireAuth({ adminOnly: true });
+            
+            // Add admin class to body for CSS
+            if (authResult.isAdmin) {
+                document.body.classList.add('is-admin');
+            }
+            
+            let adminKey = localStorage.getItem('alice-admin-key') || '';
+            
+            // Check if already authenticated
+            if (adminKey) {
+                verifyAndShowAdmin();
+            }
+            
+            // Auth button
+            document.getElementById('auth-btn').addEventListener('click', () => {
+                adminKey = document.getElementById('admin-key').value.trim();
+                if (!adminKey) {
+                    document.getElementById('auth-error').textContent = 'Please enter an admin key';
+                    document.getElementById('auth-error').style.display = 'block';
+                    return;
+                }
+                verifyAndShowAdmin();
+            });
+            
+            // Bootstrap button
+            document.getElementById('bootstrap-btn').addEventListener('click', async () => {
+                try {
+                    const response = await API.fetch('/v1/auth/bootstrap', { method: 'POST' });
+                    
+                    // Show the key
+                    document.getElementById('new-key-display').innerHTML = `
+                        <div class="key-display">
+                            <strong>Your Admin Key:</strong><br>
+                            <code>${response.key}</code>
+                            <p class="warning">Save this key NOW! It will never be shown again.</p>
+                        </div>
+                    `;
+                    document.getElementById('new-key-display').style.display = 'block';
+                    
+                    // Auto-fill and authenticate
+                    document.getElementById('admin-key').value = response.key;
+                    adminKey = response.key;
+                    localStorage.setItem('alice-admin-key', adminKey);
+                    
+                    Toast.success('Admin key created! Save it securely.');
+                    verifyAndShowAdmin();
+                    
+                } catch (error) {
+                    Toast.error(error.message);
+                }
+            });
+            
+            // Logout button
+            document.getElementById('logout-btn').addEventListener('click', () => {
+                adminKey = '';
+                localStorage.removeItem('alice-admin-key');
+                document.getElementById('auth-section').style.display = 'block';
+                document.getElementById('auth-success').style.display = 'none';
+                document.getElementById('admin-content').style.display = 'none';
+                document.getElementById('admin-key').value = '';
+                Toast.info('Logged out');
+            });
+            
+            // Refresh stats
+            document.getElementById('refresh-stats-btn').addEventListener('click', loadStats);
+            
+            // Create key
+            document.getElementById('create-key-btn').addEventListener('click', async () => {
+                const name = document.getElementById('new-key-name').value.trim();
+                const isAdmin = document.getElementById('new-key-admin').checked;
+                const rateLimit = parseInt(document.getElementById('new-key-rate').value);
+                
+                if (!name) {
+                    Toast.warning('Please enter a key name');
+                    return;
+                }
+                
+                try {
+                    const response = await API.fetch('/v1/auth/keys/generate', {
+                        method: 'POST',
+                        headers: { 'X-Admin-Key': adminKey },
+                        body: JSON.stringify({
+                            name: name,
+                            isAdmin: isAdmin,
+                            rateLimit: rateLimit
+                        })
+                    });
+                    
+                    // Show the new key
+                    document.getElementById('new-key-display').innerHTML = `
+                        <div class="key-display">
+                            <strong>New API Key:</strong><br>
+                            <code>${response.key}</code>
+                            <p class="warning">Save this key NOW! It will never be shown again.</p>
+                        </div>
+                    `;
+                    document.getElementById('new-key-display').style.display = 'block';
+                    
+                    // Clear form
+                    document.getElementById('new-key-name').value = '';
+                    document.getElementById('new-key-admin').checked = false;
+                    
+                    Toast.success('API key created');
+                    loadKeys();
+                    loadStats();
+                    
+                } catch (error) {
+                    Toast.error(`Failed to create key: ${error.message}`);
+                }
+            });
+            
+            async function verifyAndShowAdmin() {
+                try {
+                    // Try to get stats to verify key
+                    await API.fetch('/v1/auth/stats', {
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    // Success - save and show admin panel
+                    localStorage.setItem('alice-admin-key', adminKey);
+                    
+                    // Update nav visibility to show admin-only links
+                    if (window.SDAPI.updateNavVisibility) {
+                        window.SDAPI.updateNavVisibility(true, true);
+                    }
+                    
+                    document.getElementById('auth-section').style.display = 'none';
+                    document.getElementById('auth-success').style.display = 'block';
+                    document.getElementById('admin-content').style.display = 'block';
+                    document.getElementById('auth-error').style.display = 'none';
+                    
+                    loadStats();
+                    loadKeys();
+                    loadInvites();
+                    loadPending();
+                    loadSessions();
+                    loadSettings();
+                    
+                } catch (error) {
+                    document.getElementById('auth-error').textContent = 'Invalid admin key';
+                    document.getElementById('auth-error').style.display = 'block';
+                    localStorage.removeItem('alice-admin-key');
+                }
+            }
+            
+            async function loadStats() {
+                try {
+                    const stats = await API.fetch('/v1/auth/stats', {
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    document.getElementById('stat-total-keys').textContent = stats.totalKeys;
+                    document.getElementById('stat-active-keys').textContent = stats.activeKeys;
+                    document.getElementById('stat-admin-keys').textContent = stats.adminKeys;
+                    document.getElementById('stat-sessions').textContent = stats.activeSessions;
+                    
+                } catch (error) {
+                    console.error('Failed to load stats:', error);
+                }
+            }
+            
+            async function loadKeys() {
+                try {
+                    const response = await API.fetch('/v1/auth/keys', {
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    const tbody = document.getElementById('keys-table-body');
+                    const keys = response.data || [];
+                    
+                    if (keys.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No API keys</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = keys.map(key => `
+                        <tr>
+                            <td>
+                                ${key.name}
+                                ${key.isAdmin ? '<span class="badge admin">Admin</span>' : ''}
+                            </td>
+                            <td><code>${key.id}</code></td>
+                            <td>
+                                <span class="badge ${key.enabled ? 'enabled' : 'disabled'}">
+                                    ${key.enabled ? 'Active' : 'Revoked'}
+                                </span>
+                            </td>
+                            <td>${key.rateLimit}/min</td>
+                            <td>${key.lastUsed ? formatTime(key.lastUsed) : 'Never'}</td>
+                            <td class="actions">
+                                ${key.enabled ? `
+                                    <button class="btn btn-ghost btn-sm" onclick="revokeKey('${key.id}')" title="Revoke">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                        </svg>
+                                    </button>
+                                ` : ''}
+                                <button class="btn btn-ghost btn-sm" onclick="deleteKey('${key.id}')" title="Delete">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                    
+                } catch (error) {
+                    console.error('Failed to load keys:', error);
+                }
+            }
+            
+            async function loadInvites() {
+                try {
+                    const response = await API.fetch('/v1/auth/invites', {
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    const tbody = document.getElementById('invites-table-body');
+                    const invites = response.data || [];
+                    
+                    if (invites.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No invite codes</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = invites.map(invite => {
+                        const usedBy = invite.usedBy || invite.used_by || [];
+                        const usesRemaining = invite.usesRemaining ?? invite.uses_remaining ?? invite.max_uses ?? 0;
+                        const usesDisplay = usesRemaining === -1 ? 'Unlimited' : usesRemaining;
+                        const expiresAt = invite.expiresAt || invite.expires_at;
+                        return `
+                            <tr>
+                                <td><code>${invite.code}</code></td>
+                                <td>${usesDisplay}</td>
+                                <td>${usedBy.length > 0 ? usedBy.join(', ') : '-'}</td>
+                                <td>${expiresAt ? formatTime(expiresAt) : 'Never'}</td>
+                                <td class="actions">
+                                    <button class="btn btn-ghost btn-sm" onclick="copyInvite('${invite.code}')" title="Copy">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                        </svg>
+                                    </button>
+                                    <button class="btn btn-ghost btn-sm" onclick="deleteInvite('${invite.code}')" title="Delete">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                    
+                } catch (error) {
+                    console.error('Failed to load invites:', error);
+                }
+            }
+            
+            async function loadPending() {
+                try {
+                    const response = await API.fetch('/v1/auth/pending', {
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    const tbody = document.getElementById('pending-table-body');
+                    const pending = response.data || [];
+                    
+                    // Filter to show pending first
+                    const sorted = pending.sort((a, b) => {
+                        if (a.status === 'pending' && b.status !== 'pending') return -1;
+                        if (a.status !== 'pending' && b.status === 'pending') return 1;
+                        return b.createdAt - a.createdAt;
+                    });
+                    
+                    if (sorted.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No pending registrations</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = sorted.map(reg => `
+                        <tr>
+                            <td>${reg.name}</td>
+                            <td><code>${reg.id}</code></td>
+                            <td>${formatTime(reg.createdAt)}</td>
+                            <td>
+                                <span class="status-badge ${reg.status === 'pending' ? 'warning' : reg.status === 'approved' ? 'success' : 'error'}">
+                                    ${reg.status}
+                                </span>
+                            </td>
+                            <td class="actions">
+                                ${reg.status === 'pending' ? `
+                                    <button class="btn btn-ghost btn-sm" onclick="approveRegistration('${reg.id}')" title="Approve" style="color: var(--success);">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    </button>
+                                    <button class="btn btn-ghost btn-sm" onclick="rejectRegistration('${reg.id}')" title="Reject" style="color: var(--error);">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                ` : ''}
+                                <button class="btn btn-ghost btn-sm" onclick="deleteRegistration('${reg.id}')" title="Delete">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                    
+                } catch (error) {
+                    console.error('Failed to load pending:', error);
+                }
+            }
+            
+            async function loadSessions() {
+                try {
+                    const response = await API.fetch('/v1/auth/sessions', {
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    const tbody = document.getElementById('sessions-table-body');
+                    const sessions = response.data || [];
+                    
+                    if (sessions.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No active sessions</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = sessions.map(session => `
+                        <tr>
+                            <td><code>${session.id}</code></td>
+                            <td>${session.apiKeyId || '-'}</td>
+                            <td>${formatTime(session.createdAt)}</td>
+                            <td>${formatTime(session.lastAccessed)}</td>
+                            <td>${formatTime(session.expiresAt)}</td>
+                            <td class="actions">
+                                <button class="btn btn-ghost btn-sm" onclick="deleteSession('${session.id}')" title="Delete">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                    
+                } catch (error) {
+                    console.error('Failed to load sessions:', error);
+                }
+            }
+            
+            function formatTime(timestamp) {
+                return new Date(timestamp * 1000).toLocaleString();
+            }
+            
+            // Global functions for button handlers
+            window.revokeKey = async (keyId) => {
+                if (!confirm('Are you sure you want to revoke this key?')) return;
+                
+                try {
+                    await API.fetch(`/v1/auth/keys/${keyId}/revoke`, {
+                        method: 'POST',
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    Toast.success('Key revoked');
+                    loadKeys();
+                    loadStats();
+                } catch (error) {
+                    Toast.error(`Failed to revoke key: ${error.message}`);
+                }
+            };
+            
+            window.deleteKey = async (keyId) => {
+                if (!confirm('Are you sure you want to permanently delete this key?')) return;
+                
+                try {
+                    await API.fetch(`/v1/auth/keys/${keyId}`, {
+                        method: 'DELETE',
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    Toast.success('Key deleted');
+                    loadKeys();
+                    loadStats();
+                } catch (error) {
+                    Toast.error(`Failed to delete key: ${error.message}`);
+                }
+            };
+            
+            window.deleteSession = async (sessionId) => {
+                if (!confirm('Are you sure you want to delete this session?')) return;
+                
+                try {
+                    await API.fetch(`/v1/auth/sessions/${sessionId}`, {
+                        method: 'DELETE',
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    Toast.success('Session deleted');
+                    loadSessions();
+                    loadStats();
+                } catch (error) {
+                    Toast.error(`Failed to delete session: ${error.message}`);
+                }
+            };
+            
+            // Invite management
+            window.copyInvite = (code) => {
+                navigator.clipboard.writeText(code);
+                Toast.success('Invite code copied!');
+            };
+            
+            window.deleteInvite = async (code) => {
+                if (!confirm('Are you sure you want to delete this invite code?')) return;
+                
+                try {
+                    await API.fetch(`/v1/auth/invites/${code}`, {
+                        method: 'DELETE',
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    Toast.success('Invite deleted');
+                    loadInvites();
+                } catch (error) {
+                    Toast.error(`Failed to delete invite: ${error.message}`);
+                }
+            };
+            
+            // Pending registration management
+            window.approveRegistration = async (regId) => {
+                try {
+                    const response = await API.fetch(`/v1/auth/pending/${regId}/approve`, {
+                        method: 'POST',
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    // Show the created key
+                    Toast.success('Registration approved!');
+                    alert(`Registration approved!\\n\\nAPI Key for user:\\n${response.key}\\n\\nProvide this key to the user.`);
+                    loadPending();
+                    loadKeys();
+                    loadStats();
+                } catch (error) {
+                    Toast.error(`Failed to approve: ${error.message}`);
+                }
+            };
+            
+            window.rejectRegistration = async (regId) => {
+                if (!confirm('Are you sure you want to reject this registration?')) return;
+                
+                try {
+                    await API.fetch(`/v1/auth/pending/${regId}/reject`, {
+                        method: 'POST',
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    Toast.success('Registration rejected');
+                    loadPending();
+                } catch (error) {
+                    Toast.error(`Failed to reject: ${error.message}`);
+                }
+            };
+            
+            window.deleteRegistration = async (regId) => {
+                if (!confirm('Are you sure you want to delete this registration?')) return;
+                
+                try {
+                    await API.fetch(`/v1/auth/pending/${regId}`, {
+                        method: 'DELETE',
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    Toast.success('Registration deleted');
+                    loadPending();
+                } catch (error) {
+                    Toast.error(`Failed to delete: ${error.message}`);
+                }
+            };
+            
+            // Create invite button handler
+            document.getElementById('create-invite-btn').addEventListener('click', async () => {
+                const uses = parseInt(document.getElementById('new-invite-uses').value);
+                const expiresHours = parseInt(document.getElementById('new-invite-expires').value) || null;
+                
+                try {
+                    const response = await API.fetch('/v1/auth/invites', {
+                        method: 'POST',
+                        headers: { 'X-Admin-Key': adminKey },
+                        body: JSON.stringify({
+                            uses: uses,
+                            expires_hours: expiresHours
+                        })
+                    });
+                    
+                    document.getElementById('new-invite-display').innerHTML = `
+                        <div class="key-display">
+                            <strong>New Invite Code:</strong><br>
+                            <code>${response.code}</code>
+                            <p class="warning">Share this code with the user who needs to register.</p>
+                        </div>
+                    `;
+                    document.getElementById('new-invite-display').style.display = 'block';
+                    
+                    Toast.success('Invite code created!');
+                    loadInvites();
+                } catch (error) {
+                    Toast.error(`Failed to create invite: ${error.message}`);
+                }
+            });
+            
+            // Load settings
+            async function loadSettings() {
+                try {
+                    const config = await API.fetch('/v1/admin/config', {
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    // Server settings
+                    document.getElementById('setting-server-host').value = config.server.host || '';
+                    document.getElementById('setting-server-port').value = config.server.port || 8080;
+                    document.getElementById('setting-server-require-auth').value = config.server.require_auth ? 'true' : 'false';
+                    document.getElementById('setting-server-registration').value = config.server.registrationMode || 'disabled';
+                    document.getElementById('setting-server-session-timeout').value = config.server.session_timeout_seconds || 900;
+                    document.getElementById('setting-server-block-nsfw').value = config.server.block_nsfw !== undefined ? (config.server.block_nsfw ? 'true' : 'false') : 'true';
+                    
+                    // Models settings
+                    document.getElementById('setting-models-directory').value = config.models.directory || '';
+                    document.getElementById('setting-models-auto-unload').value = config.models.auto_unload_timeout || 300;
+                    document.getElementById('setting-models-default').value = config.models.default_model || '';
+                    document.getElementById('setting-models-civitai-key').value = '';
+                    document.getElementById('setting-models-hf-token').value = '';
+                    document.getElementById('setting-models-civitai-key').placeholder = config.models.civitai_api_key === '***' ? '(configured)' : 'Not set';
+                    document.getElementById('setting-models-hf-token').placeholder = config.models.huggingface_token === '***' ? '(configured)' : 'Not set';
+                    
+                    // Generation settings
+                    document.getElementById('setting-gen-steps').value = config.generation.default_steps || 25;
+                    document.getElementById('setting-gen-guidance').value = config.generation.default_guidance_scale || 7.5;
+                    document.getElementById('setting-gen-scheduler').value = config.generation.default_scheduler || 'ddim';
+                    document.getElementById('setting-gen-width').value = config.generation.default_width || 512;
+                    document.getElementById('setting-gen-height').value = config.generation.default_height || 512;
+                    document.getElementById('setting-gen-timeout').value = config.generation.request_timeout || 600;
+                    document.getElementById('setting-gen-max-concurrent').value = config.generation.max_concurrent || 1;
+                    document.getElementById('setting-gen-force-cpu').value = config.generation.force_cpu ? 'true' : 'false';
+                    document.getElementById('setting-gen-force-float32').value = config.generation.force_float32 ? 'true' : 'false';
+                    document.getElementById('setting-gen-force-bfloat16').value = config.generation.force_bfloat16 ? 'true' : 'false';
+                    document.getElementById('setting-gen-device-map').value = config.generation.device_map || '';
+                    
+                    // Storage settings
+                    document.getElementById('setting-storage-dir').value = config.storage.images_directory || '';
+                    document.getElementById('setting-storage-max').value = config.storage.max_storage_gb || 100;
+                    document.getElementById('setting-storage-retention').value = config.storage.retention_days || 7;
+                    
+                    // Logging settings
+                    document.getElementById('setting-logging-level').value = config.logging.level || 'INFO';
+                    document.getElementById('setting-logging-file').value = config.logging.file || '';
+                    document.getElementById('setting-logging-max-size').value = config.logging.max_size_mb || 10;
+                    document.getElementById('setting-logging-backup-count').value = config.logging.backup_count || 5;
+                    
+                    document.getElementById('settings-loading').style.display = 'none';
+                    document.getElementById('settings-form').style.display = 'block';
+                    
+                } catch (error) {
+                    console.error('Failed to load settings:', error);
+                    document.getElementById('settings-loading').innerHTML = `<span style="color: var(--error);">Failed to load settings: ${error.message}</span>`;
+                }
+            }
+            
+            // Save settings
+            document.getElementById('save-settings-btn').addEventListener('click', async () => {
+                const btn = document.getElementById('save-settings-btn');
+                btn.disabled = true;
+                btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Saving...';
+                
+                try {
+                    const updates = {};
+                    
+                    // Collect all settings that have data-key attribute
+                    document.querySelectorAll('#settings-form [data-key]').forEach(el => {
+                        const key = el.dataset.key;
+                        let value = el.value;
+                        
+                        // Skip empty password fields (civitai key, hf token)
+                        if ((el.type === 'password' || key.includes('key') || key.includes('token')) && !value) {
+                            return;
+                        }
+                        
+                        // Convert boolean strings
+                        if (value === 'true') value = true;
+                        else if (value === 'false') value = false;
+                        // Convert numbers
+                        else if (el.type === 'number') value = parseFloat(value);
+                        
+                        updates[key] = value;
+                    });
+                    
+                    console.log('Sending settings update:', JSON.stringify(updates));
+                    
+                    let response;
+                    try {
+                        response = await API.fetch('/v1/admin/config', {
+                            method: 'PUT',
+                            headers: { 'X-Admin-Key': adminKey },
+                            body: JSON.stringify(updates)
+                        });
+                        console.log('Settings update response:', response);
+                    } catch (fetchError) {
+                        console.error('Fetch error:', fetchError);
+                        throw fetchError;
+                    }
+                    
+                    Toast.success('Settings saved! Restart service for changes to take effect.');
+                    
+                    // Note: Don't reload settings here - the server returns the in-memory config
+                    // which won't reflect saved changes until the service is restarted.
+                    // The form already shows what the user entered.
+                    
+                } catch (error) {
+                    console.error('Save settings error (raw):', error);
+                    console.error('Error type:', typeof error);
+                    console.error('Error constructor:', error?.constructor?.name);
+                    console.error('Error message:', error?.message);
+                    console.error('Error keys:', error ? Object.keys(error) : 'null');
+                    
+                    let errorMsg;
+                    if (error instanceof Error) {
+                        errorMsg = error.message;
+                    } else if (typeof error === 'string') {
+                        errorMsg = error;
+                    } else if (error && error.message) {
+                        errorMsg = error.message;
+                    } else {
+                        errorMsg = JSON.stringify(error);
+                    }
+                    Toast.error(`Failed to save settings: ${errorMsg}`);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> Save Changes`;
+                }
+            });
+            
+            // Restart service button
+            document.getElementById('restart-service-btn').addEventListener('click', async () => {
+                if (!confirm('Are you sure you want to restart the ALICE service? Any in-progress generations will be interrupted.')) {
+                    return;
+                }
+                
+                const btn = document.getElementById('restart-service-btn');
+                btn.disabled = true;
+                btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Restarting...';
+                
+                try {
+                    const response = await API.fetch('/v1/admin/restart', {
+                        method: 'POST',
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    Toast.success('Service restart initiated. Please wait a moment and refresh the page.');
+                    
+                    // Wait a few seconds then check health
+                    setTimeout(async () => {
+                        let attempts = 0;
+                        const checkHealth = async () => {
+                            try {
+                                await API.fetch('/health');
+                                Toast.success('Service is back online!');
+                                loadSettings();
+                            } catch (e) {
+                                attempts++;
+                                if (attempts < 10) {
+                                    setTimeout(checkHealth, 2000);
+                                } else {
+                                    Toast.warning('Service may still be restarting. Please refresh the page manually.');
+                                }
+                            }
+                        };
+                        checkHealth();
+                    }, 3000);
+                    
+                } catch (error) {
+                    Toast.error(`Failed to restart service: ${error.message}`);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> Restart Service`;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

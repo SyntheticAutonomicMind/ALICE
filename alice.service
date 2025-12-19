@@ -1,0 +1,59 @@
+[Unit]
+Description=ALICE - Remote Stable Diffusion Service
+Documentation=https://github.com/fewtarius/alice
+After=network.target
+Wants=network-online.target
+Requires=var-lib-alice.mount
+After=var-lib-alice.mount
+
+[Service]
+Type=simple
+User=alice
+Group=alice
+WorkingDirectory=/opt/alice
+
+# Environment configuration
+Environment="ALICE_CONFIG=/etc/alice/config.yaml"
+Environment="PYTHONUNBUFFERED=1"
+
+# For NVIDIA GPUs
+Environment="CUDA_VISIBLE_DEVICES=0"
+
+# For AMD GPUs (ROCm)
+Environment="HIP_VISIBLE_DEVICES=0"
+Environment="HSA_OVERRIDE_GFX_VERSION=11.0.0"
+
+# PyTorch HIP memory management - reduce fragmentation for SDXL
+Environment="PYTORCH_HIP_ALLOC_CONF=expandable_segments:True"
+
+# For AMD Phoenix APU (gfx1103) - CRITICAL for preventing GPU hangs
+# MIOPEN_DEBUG_FIND_ALL=0 disables MIOpen solver search that causes GPU hangs
+Environment="MIOPEN_DEBUG_FIND_ALL=0"
+Environment="PYTORCH_ROCM_ARCH=gfx1103"
+
+# Start command
+ExecStart=/opt/alice/venv/bin/python -m src.main
+
+# Restart configuration
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+TimeoutStopSec=60
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/alice /var/lib/alice /var/log/alice /etc/alice
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=append:/var/log/alice/alice.log
+StandardError=append:/var/log/alice/alice.log
+
+[Install]
+WantedBy=multi-user.target

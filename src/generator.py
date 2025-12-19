@@ -1,0 +1,1037 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-FileCopyrightText: Copyright (c) 2025 Andrew Wyatt (Fewtarius)
+
+"""
+ALICE Image Generator
+
+Image generation engine using PyTorch and diffusers library.
+Based on SAM's generate_image_diffusers.py with service-oriented modifications.
+"""
+
+import asyncio
+import json
+import logging
+import os
+import uuid
+from pathlib import Path
+from typing import Optional, Dict, Any, Tuple, Type, List
+
+import torch
+from PIL import Image
+from compel import CompelForSDXL
+
+logger = logging.getLogger(__name__)
+
+# AMD ROCm gfx1103 (Phoenix APU) compatibility settings
+# CRITICAL: MIOPEN_DEBUG_FIND_ALL=0 prevents GPU hangs during MIOpen solver search
+# This should be set in environment before MIOpen is initialized
+if "MIOPEN_DEBUG_FIND_ALL" not in os.environ:
+    os.environ["MIOPEN_DEBUG_FIND_ALL"] = "0"
+    logger.info("Set MIOPEN_DEBUG_FIND_ALL=0 for AMD GPU compatibility")
+
+# Disable cuDNN/MIOpen which can cause GPU hangs on gfx1103
+# This forces fallback to non-accelerated convolution paths
+if torch.cuda.is_available():
+    torch.backends.cudnn.enabled = False
+    logger.info("Disabled cuDNN/MIOpen for AMD GPU compatibility")
+
+# Disable problematic SDPA backends for AMD GPU compatibility
+# Flash and memory-efficient attention can cause GPU hangs on ROCm
+if torch.cuda.is_available():
+    try:
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+        logger.info("Configured SDPA: disabled flash/mem_efficient, enabled math-only")
+    except Exception as e:
+        logger.debug("Could not configure SDPA backends: %s", e)
+
+# Lazy imports for diffusers to speed up startup
+_diffusers_imported = False
+_pipeline_classes: Dict[str, Type] = {}
+_scheduler_classes: Dict[str, Tuple[Type, Dict[str, Any]]] = {}
+
+
+def _import_diffusers() -> None:
+    """Lazy import diffusers modules."""
+    global _diffusers_imported, _pipeline_classes, _scheduler_classes
+    
+    if _diffusers_imported:
+        return
+    
+    logger.info("Importing diffusers library...")
+    
+    from diffusers import (
+        StableDiffusionPipeline,
+        StableDiffusionImg2ImgPipeline,
+        AutoPipelineForText2Image,
+        DPMSolverMultistepScheduler,
+        EulerDiscreteScheduler,
+        EulerAncestralDiscreteScheduler,
+        DDIMScheduler,
+        PNDMScheduler,
+        LMSDiscreteScheduler,
+    )
+    
+    # Try to import flow matching schedulers (may not be available in all versions)
+    try:
+        from diffusers import FlowMatchEulerDiscreteScheduler
+        _scheduler_classes["flow_match_euler"] = (FlowMatchEulerDiscreteScheduler, {})
+    except ImportError:
+        logger.debug("FlowMatchEulerDiscreteScheduler not available")
+    
+    # Pipeline classes
+    _pipeline_classes.update({
+        "StableDiffusionPipeline": StableDiffusionPipeline,
+        "StableDiffusionImg2ImgPipeline": StableDiffusionImg2ImgPipeline,
+        "AutoPipelineForText2Image": AutoPipelineForText2Image,
+    })
+    
+    # Scheduler mapping
+    # NOTE: All DPM++ variants use solver_order=1 and lower_order_final=True to avoid IndexError
+    # (IndexError: index N is out of bounds for dimension 0 with size N)
+    # This is a known issue with second-order updates in DPMSolverMultistepScheduler on MPS
+    # lower_order_final=True uses first-order on final step to avoid the index error
+    _scheduler_classes.update({
+        "dpm++": (DPMSolverMultistepScheduler, {
+            "use_karras_sigmas": False,
+            "algorithm_type": "dpmsolver++",
+            "solver_order": 1,
+            "lower_order_final": True
+        }),
+        "dpm++_karras": (DPMSolverMultistepScheduler, {
+            "use_karras_sigmas": True,
+            "algorithm_type": "dpmsolver++",
+            "solver_order": 1,
+            "lower_order_final": True
+        }),
+        "dpm++_sde": (DPMSolverMultistepScheduler, {
+            "use_karras_sigmas": False,
+            "algorithm_type": "sde-dpmsolver++",
+            "solver_order": 1,
+            "lower_order_final": True
+        }),
+        "dpm++_sde_karras": (DPMSolverMultistepScheduler, {
+            "use_karras_sigmas": True,
+            "algorithm_type": "sde-dpmsolver++",
+            "solver_order": 1,
+            "lower_order_final": True
+        }),
+        "euler": (EulerDiscreteScheduler, {}),
+        "euler_a": (EulerAncestralDiscreteScheduler, {}),
+        "euler_ancestral": (EulerAncestralDiscreteScheduler, {}),
+        "ddim": (DDIMScheduler, {}),
+        "pndm": (PNDMScheduler, {}),
+        "lms": (LMSDiscreteScheduler, {}),
+    })
+    
+    _diffusers_imported = True
+    logger.info("Diffusers library imported successfully")
+
+
+def _round_to_multiple(value: int, multiple: int = 8) -> int:
+    """
+    Round a value to the nearest multiple.
+    
+    Stable Diffusion models require dimensions divisible by 8 due to VAE downsampling.
+    
+    Args:
+        value: Input dimension
+        multiple: Multiple to round to (default 8)
+        
+    Returns:
+        Rounded dimension
+    """
+    return ((value + multiple - 1) // multiple) * multiple
+
+
+def _detect_pipeline_class(model_path: Path) -> Tuple[str, str]:
+    """
+    Detect appropriate pipeline class for the model.
+    
+    Args:
+        model_path: Path to model file or directory
+        
+    Returns:
+        Tuple of (pipeline_class_name, model_type)
+    """
+    default_pipeline = "StableDiffusionPipeline"
+    default_type = "sd15"
+    
+    # Single file models use default pipeline
+    if model_path.is_file():
+        logger.debug("Single file model - using default pipeline")
+        return default_pipeline, default_type
+    
+    # Check model_index.json for diffusers directories
+    model_index_path = model_path / "model_index.json"
+    if not model_index_path.exists():
+        logger.debug("No model_index.json found - using default pipeline")
+        return default_pipeline, default_type
+    
+    try:
+        with open(model_index_path) as f:
+            model_index = json.load(f)
+        
+        pipeline_class = model_index.get("_class_name", default_pipeline)
+        logger.debug("Detected pipeline class: %s", pipeline_class)
+        
+        # Detect model type from pipeline name
+        model_type = default_type
+        class_lower = pipeline_class.lower()
+        if "xl" in class_lower:
+            model_type = "sdxl"
+        elif "flux" in class_lower:
+            model_type = "flux"
+        elif "sd3" in class_lower:
+            model_type = "sd3"
+        
+        return pipeline_class, model_type
+        
+    except Exception as e:
+        logger.warning("Error reading model_index.json: %s", e)
+        return default_pipeline, default_type
+
+
+def _get_scheduler(scheduler_name: str, pipeline_config: Dict) -> Any:
+    """
+    Get scheduler instance from name.
+    
+    Args:
+        scheduler_name: Name of scheduler
+        pipeline_config: Pipeline scheduler config dict
+        
+    Returns:
+        Configured scheduler instance
+    """
+    if scheduler_name not in _scheduler_classes:
+        available = list(_scheduler_classes.keys())
+        raise ValueError(f"Unknown scheduler: {scheduler_name}. Available: {available}")
+    
+    scheduler_class, scheduler_config = _scheduler_classes[scheduler_name]
+    
+    # For DPM++ schedulers, create completely fresh instance to avoid state corruption
+    # DPMSolverMultistepScheduler maintains internal state (model_outputs, timesteps) that can corrupt
+    if scheduler_name.startswith("dpm"):
+        # Get only essential config keys, ignore any state
+        config_dict = {
+            "num_train_timesteps": pipeline_config.get("num_train_timesteps", 1000),
+            "beta_start": pipeline_config.get("beta_start", 0.00085),
+            "beta_end": pipeline_config.get("beta_end", 0.012),
+            "beta_schedule": pipeline_config.get("beta_schedule", "scaled_linear"),
+        }
+        # Apply our workaround settings
+        config_dict.update(scheduler_config)
+        
+        try:
+            return scheduler_class.from_config(config_dict)
+        except Exception as e:
+            logger.warning("Failed to create DPM++ scheduler with minimal config: %s. Using defaults.", e)
+            return scheduler_class(**scheduler_config)
+    
+    # For Euler Ancestral schedulers, apply boundary check patch
+    # FIX: EulerAncestralDiscreteScheduler has IndexError bug when accessing sigmas[step_index+1] on final step
+    # The scheduler tries to access self.sigmas[self.step_index + 1] without checking if it's the last step
+    # This causes: IndexError: index N is out of bounds for dimension 0 with size N
+    # Monkey-patch to handle the final step correctly
+    if scheduler_name in ["euler_a", "euler_ancestral"]:
+        # Create scheduler instance first
+        config_dict = dict(pipeline_config)
+        incompatible_keys = [
+            "mu", "timestep_type", "rescale_betas_zero_snr", "variance_type",
+            "clip_sample", "clip_sample_range", "thresholding", "dynamic_thresholding_ratio",
+            "sample_max_value", "prediction_type", "steps_offset"
+        ]
+        for key in incompatible_keys:
+            config_dict.pop(key, None)
+        
+        config_dict.update(scheduler_config)
+        
+        try:
+            scheduler = scheduler_class.from_config(config_dict)
+        except Exception as e:
+            logger.warning("Failed to create Euler Ancestral scheduler with pipeline config: %s. Using defaults.", e)
+            scheduler = scheduler_class(**scheduler_config)
+        
+        # Import needed for the patched step method
+        from diffusers.utils.torch_utils import randn_tensor
+        from diffusers.schedulers.scheduling_euler_ancestral_discrete import EulerAncestralDiscreteSchedulerOutput
+        
+        # Store original step method
+        original_step = scheduler.step
+        
+        def patched_step(model_output, timestep, sample, generator=None, return_dict=True):
+            """
+            Patched step() with boundary checking to prevent IndexError on final timestep.
+            
+            This fixes a bug in diffusers.EulerAncestralDiscreteScheduler where it tries to access
+            self.sigmas[self.step_index + 1] without checking if step_index is at the last valid index.
+            """
+            # Validate inputs (copied from original)
+            if isinstance(timestep, (int, torch.IntTensor, torch.LongTensor)):
+                raise ValueError(
+                    (
+                        "Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"
+                        " `EulerDiscreteScheduler.step()` is not supported. Make sure to pass"
+                        " one of the `scheduler.timesteps` as a timestep."
+                    ),
+                )
+
+            if not scheduler.is_scale_input_called:
+                logger.warning(
+                    "The `scale_model_input` function should be called before `step` to ensure correct denoising. "
+                    "See `StableDiffusionPipeline` for a usage example."
+                )
+
+            if scheduler.step_index is None:
+                scheduler._init_step_index(timestep)
+
+            sigma = scheduler.sigmas[scheduler.step_index]
+
+            # Upcast to avoid precision issues when computing prev_sample
+            sample = sample.to(torch.float32)
+
+            # 1. compute predicted original sample (x_0) from sigma-scaled predicted noise
+            if scheduler.config.prediction_type == "epsilon":
+                pred_original_sample = sample - sigma * model_output
+            elif scheduler.config.prediction_type == "v_prediction":
+                # * c_out + input * c_skip
+                pred_original_sample = model_output * (-sigma / (sigma**2 + 1) ** 0.5) + (sample / (sigma**2 + 1))
+            elif scheduler.config.prediction_type == "sample":
+                raise NotImplementedError("prediction_type not implemented yet: sample")
+            else:
+                raise ValueError(
+                    f"prediction_type given as {scheduler.config.prediction_type} must be one of `epsilon`, or `v_prediction`"
+                )
+
+            sigma_from = scheduler.sigmas[scheduler.step_index]
+            
+            # FIX: Check boundaries before accessing step_index + 1
+            # Original bug: sigma_to = scheduler.sigmas[scheduler.step_index + 1]
+            # This fails when step_index == len(sigmas) - 2 (last valid step before final 0)
+            if scheduler.step_index + 1 < len(scheduler.sigmas):
+                sigma_to = scheduler.sigmas[scheduler.step_index + 1]
+            else:
+                # On final step, use the last sigma value (which should be 0)
+                sigma_to = scheduler.sigmas[-1]
+                logger.debug(
+                    "Euler Ancestral final step: using sigma_to=%.6f (last element), step_index=%d/%d",
+                    sigma_to, scheduler.step_index, len(scheduler.sigmas) - 1
+                )
+
+            sigma_up = (sigma_to**2 * (sigma_from**2 - sigma_to**2) / sigma_from**2) ** 0.5
+            sigma_down = (sigma_to**2 - sigma_up**2) ** 0.5
+
+            # 2. Convert to an ODE derivative
+            derivative = (sample - pred_original_sample) / sigma
+
+            dt = sigma_down - sigma
+
+            prev_sample = sample + derivative * dt
+
+            device = model_output.device
+            noise = randn_tensor(model_output.shape, dtype=model_output.dtype, device=device, generator=generator)
+            prev_sample = prev_sample + noise * sigma_up
+
+            # Cast sample back to model compatible dtype
+            prev_sample = prev_sample.to(model_output.dtype)
+
+            # upon completion increase step index by one
+            scheduler._step_index += 1
+
+            if not return_dict:
+                return (
+                    prev_sample,
+                    pred_original_sample,
+                )
+
+            return EulerAncestralDiscreteSchedulerOutput(
+                prev_sample=prev_sample, pred_original_sample=pred_original_sample
+            )
+        
+        # Replace step method with patched version
+        scheduler.step = patched_step
+        logger.info("Applied boundary check patch to EulerAncestralDiscreteScheduler (fixes IndexError on final step)")
+        return scheduler
+    
+    # For other schedulers, use existing logic
+    config_dict = dict(pipeline_config)
+    incompatible_keys = [
+        "mu", "timestep_type", "rescale_betas_zero_snr", "variance_type",
+        "clip_sample", "clip_sample_range", "thresholding", "dynamic_thresholding_ratio",
+        "sample_max_value", "prediction_type", "steps_offset"
+    ]
+    for key in incompatible_keys:
+        config_dict.pop(key, None)
+    
+    config_dict.update(scheduler_config)
+    
+    try:
+        return scheduler_class.from_config(config_dict)
+    except Exception as e:
+        logger.warning("Failed to create scheduler with pipeline config: %s. Using defaults.", e)
+        return scheduler_class(**scheduler_config)
+
+
+class GeneratorService:
+    """
+    Image generation service.
+    
+    Manages model loading, caching, and image generation.
+    """
+    
+    def __init__(
+        self,
+        images_dir: Path,
+        default_steps: int = 25,
+        default_guidance_scale: float = 7.5,
+        default_scheduler: str = "dpm++_sde_karras",
+        default_width: int = 512,
+        default_height: int = 512,
+        force_cpu: bool = False,
+        device_map: Optional[str] = None,
+        force_float32: bool = False,
+        force_bfloat16: bool = False,
+        enable_vae_slicing: bool = True,
+        enable_vae_tiling: bool = False,
+        enable_model_cpu_offload: bool = False,
+        enable_sequential_cpu_offload: bool = False,
+        attention_slice_size: Optional[str] = "auto",
+        vae_decode_cpu: bool = False,
+    ):
+        """
+        Initialize generator service.
+        
+        Args:
+            images_dir: Directory to save generated images
+            default_steps: Default inference steps
+            default_guidance_scale: Default guidance scale
+            default_scheduler: Default scheduler name
+            default_width: Default image width
+            default_height: Default image height
+            force_cpu: Force CPU mode even if GPU is available
+            device_map: Device map for model loading (e.g., 'balanced')
+            force_float32: Force float32 dtype (required for some AMD GPUs)
+            force_bfloat16: Force bfloat16 dtype (better for AMD Phoenix APU)
+            enable_vae_slicing: Enable VAE slicing for lower memory usage
+            enable_vae_tiling: Enable VAE tiling for very large images
+            enable_model_cpu_offload: Enable model CPU offload (slower but uses less VRAM)
+            enable_sequential_cpu_offload: Enable sequential CPU offload (slowest, minimum VRAM)
+            attention_slice_size: Attention slice size: 'auto', 'max', or a number
+            vae_decode_cpu: Decode VAE on CPU (fixes GPU hang on AMD gfx1103)
+        """
+        self.images_dir = Path(images_dir)
+        self.images_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.default_steps = default_steps
+        self.default_guidance_scale = default_guidance_scale
+        self.default_scheduler = default_scheduler
+        self.default_width = default_width
+        self.default_height = default_height
+        self.force_cpu = force_cpu
+        self.device_map = device_map
+        self.force_float32 = force_float32
+        self.force_bfloat16 = force_bfloat16
+        
+        # Memory optimization settings
+        self.enable_vae_slicing = enable_vae_slicing
+        self.enable_vae_tiling = enable_vae_tiling
+        self.enable_model_cpu_offload = enable_model_cpu_offload
+        self.enable_sequential_cpu_offload = enable_sequential_cpu_offload
+        self.attention_slice_size = attention_slice_size
+        self.vae_decode_cpu = vae_decode_cpu
+        
+        # Model caching
+        self._pipeline: Optional[Any] = None
+        self._current_model: Optional[str] = None
+        self._current_model_path: Optional[Path] = None
+        self._device_map_active: bool = False  # Track if device_map was applied to current model
+        self._is_single_file_sdxl: bool = False  # Track if loaded model is single-file SDXL (needs extra memory opts)
+        self._compel: Optional[CompelForSDXL] = None  # CompelForSDXL instance for long prompt support
+        
+        # Device detection
+        self._device = self._detect_device()
+        
+        # Statistics
+        self.total_generations = 0
+        self.total_generation_time = 0.0
+        
+        logger.info(
+            "Generator initialized: device=%s, images_dir=%s, vae_slicing=%s, vae_tiling=%s",
+            self._device, self.images_dir, self.enable_vae_slicing, self.enable_vae_tiling
+        )
+    
+    def _detect_device(self) -> str:
+        """Detect best available compute device."""
+        if self.force_cpu:
+            logger.info("CPU mode forced by configuration")
+            return "cpu"
+        
+        if torch.cuda.is_available():
+            device = "cuda"
+            gpu_name = torch.cuda.get_device_name(0)
+            logger.info("Using CUDA device: %s", gpu_name)
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = "mps"
+            logger.info("Using Apple Silicon MPS device")
+        else:
+            device = "cpu"
+            logger.info("Using CPU device")
+        
+        return device
+    
+    @property
+    def current_model(self) -> Optional[str]:
+        """Get currently loaded model path."""
+        return self._current_model
+    
+    @property
+    def is_model_loaded(self) -> bool:
+        """Check if a model is currently loaded."""
+        return self._pipeline is not None
+    
+    def get_gpu_info(self) -> Dict[str, Any]:
+        """Get GPU information."""
+        info = {
+            "device": self._device,
+            "gpu_available": self._device in ("cuda", "mps"),
+            "memory_used": "0 GB",
+            "memory_total": "0 GB",
+            "utilization": 0.0,
+        }
+        
+        if self._device == "cuda":
+            try:
+                props = torch.cuda.get_device_properties(0)
+                allocated = torch.cuda.memory_allocated(0)
+                total = props.total_memory
+                
+                info["memory_used"] = f"{allocated / (1024**3):.1f} GB"
+                info["memory_total"] = f"{total / (1024**3):.1f} GB"
+                info["utilization"] = allocated / total if total > 0 else 0.0
+                info["gpu_name"] = props.name
+            except Exception as e:
+                logger.warning("Failed to get CUDA info: %s", e)
+        
+        return info
+    
+    def _apply_memory_optimizations(self) -> None:
+        """Apply memory optimization settings to the loaded pipeline."""
+        if self._pipeline is None:
+            return
+        
+        optimizations_applied = []
+        
+        # Sequential CPU offload (most aggressive, takes precedence)
+        if self.enable_sequential_cpu_offload:
+            try:
+                self._pipeline.enable_sequential_cpu_offload()
+                optimizations_applied.append("sequential_cpu_offload")
+            except Exception as e:
+                logger.warning("Could not enable sequential CPU offload: %s", e)
+        # Model CPU offload (less aggressive than sequential)
+        elif self.enable_model_cpu_offload:
+            try:
+                self._pipeline.enable_model_cpu_offload()
+                optimizations_applied.append("model_cpu_offload")
+            except Exception as e:
+                logger.warning("Could not enable model CPU offload: %s", e)
+        
+        # Attention slicing (reduces memory during attention layers)
+        # Only enable if explicitly configured by user
+        if self.attention_slice_size:
+            try:
+                if self.attention_slice_size == "auto":
+                    self._pipeline.enable_attention_slicing()
+                    optimizations_applied.append(f"attention_slicing(auto)")
+                elif self.attention_slice_size == "max":
+                    self._pipeline.enable_attention_slicing(slice_size="max")
+                    optimizations_applied.append(f"attention_slicing(max)")
+                else:
+                    # Try to parse as integer
+                    try:
+                        slice_size = int(self.attention_slice_size)
+                        self._pipeline.enable_attention_slicing(slice_size=slice_size)
+                        optimizations_applied.append(f"attention_slicing({slice_size})")
+                    except ValueError:
+                        self._pipeline.enable_attention_slicing()
+                        optimizations_applied.append(f"attention_slicing(auto)")
+            except Exception as e:
+                logger.warning("Could not enable attention slicing: %s", e)
+        
+        # VAE slicing (reduces memory during decode)
+        if self.enable_vae_slicing:
+            try:
+                self._pipeline.enable_vae_slicing()
+                optimizations_applied.append("vae_slicing")
+            except Exception as e:
+                logger.warning("Could not enable VAE slicing: %s", e)
+        
+        # VAE tiling (for very large images)
+        if self.enable_vae_tiling:
+            try:
+                self._pipeline.enable_vae_tiling()
+                optimizations_applied.append("vae_tiling")
+            except Exception as e:
+                logger.warning("Could not enable VAE tiling: %s", e)
+        
+        if optimizations_applied:
+            logger.info("Memory optimizations enabled: %s", ", ".join(optimizations_applied))
+    
+    async def load_model(self, model_path: Path) -> None:
+        """
+        Load a model into memory.
+        
+        If a different model is already loaded, it will be unloaded first.
+        
+        Args:
+            model_path: Path to model file or directory
+        """
+        model_path = Path(model_path)
+        model_key = str(model_path)
+        
+        # Skip if same model already loaded
+        if self._current_model == model_key and self._pipeline is not None:
+            logger.debug("Model already loaded: %s", model_key)
+            return
+        
+        # Unload current model
+        if self._pipeline is not None:
+            await self.unload_model()
+        
+        # Import diffusers if needed
+        _import_diffusers()
+        
+        logger.info("Loading model: %s", model_path)
+        
+        # Detect pipeline class
+        pipeline_class_name, model_type = _detect_pipeline_class(model_path)
+        
+        # Determine dtype based on device
+        if self._device == "mps":
+            # MPS requires float32 to avoid black images
+            dtype = torch.float32
+        elif self._device == "cuda":
+            dtype = torch.float16
+        else:
+            dtype = torch.float32
+        
+        # Force bfloat16 if configured (best for AMD Phoenix APU gfx1102)
+        if self.force_bfloat16:
+            dtype = torch.bfloat16
+            logger.info("Using bfloat16 dtype for AMD GPU compatibility")
+        # Force float32 if configured (required for some AMD GPUs like gfx1103)
+        elif self.force_float32:
+            dtype = torch.float32
+            logger.info("Forcing float32 dtype as configured for AMD GPU compatibility")
+        
+        logger.info("Using dtype: %s for device: %s", dtype, self._device)
+        
+        # Load pipeline
+        try:
+            # Base load kwargs
+            load_kwargs = {
+                "torch_dtype": dtype,
+                "safety_checker": None,
+                "feature_extractor": None,
+            }
+            
+            if model_path.is_file() and model_path.suffix in [".safetensors", ".ckpt"]:
+                # Load from single file - device_map: sequential works here
+                # Detect if this is an SDXL model (typically >6GB) vs SD 1.5 (~4GB)
+                file_size_gb = model_path.stat().st_size / (1024**3)
+                is_sdxl = file_size_gb > 5.5  # SDXL models are ~6.5-7GB, SD 1.5 is ~4GB
+                
+                if is_sdxl:
+                    logger.info("Detected SDXL single-file model (%.1f GB)", file_size_gb)
+                    from diffusers import StableDiffusionXLPipeline
+                    pipeline_class = StableDiffusionXLPipeline
+                    self._is_single_file_sdxl = True  # Enable extra memory optimizations
+                else:
+                    logger.info("Detected SD 1.5 single-file model (%.1f GB)", file_size_gb)
+                    from diffusers import StableDiffusionPipeline
+                    pipeline_class = StableDiffusionPipeline
+                    self._is_single_file_sdxl = False
+                
+                load_kwargs["use_safetensors"] = True
+                if self.device_map:
+                    load_kwargs["device_map"] = self.device_map
+                    logger.info("Using device_map: %s (single-file mode)", self.device_map)
+                self._pipeline = pipeline_class.from_single_file(
+                    str(model_path),
+                    **load_kwargs,
+                )
+            else:
+                # Load from directory using AutoPipeline
+                # NOTE: device_map: sequential does NOT work with from_pretrained
+                # Only 'balanced' and 'cuda' are valid for from_pretrained
+                self._is_single_file_sdxl = False  # Directory models are more memory efficient
+                from diffusers import AutoPipelineForText2Image
+                if self.device_map and self.device_map in ('balanced', 'cuda'):
+                    load_kwargs["device_map"] = self.device_map
+                    logger.info("Using device_map: %s (directory mode)", self.device_map)
+                elif self.device_map:
+                    logger.warning(
+                        "device_map '%s' not supported for directory models. "
+                        "Valid options: 'balanced', 'cuda'. Loading without device_map.",
+                        self.device_map
+                    )
+                self._pipeline = AutoPipelineForText2Image.from_pretrained(
+                    str(model_path),
+                    **load_kwargs,
+                )
+            
+            # Determine if we need to move to device
+            # - If device_map was in load_kwargs, the model is already on the right device(s)
+            # - If using CPU offload, the pipeline handles device placement
+            # - Otherwise, explicitly move to the target device
+            device_map_applied = "device_map" in load_kwargs
+            self._device_map_active = device_map_applied
+            if not device_map_applied and not self.enable_model_cpu_offload and not self.enable_sequential_cpu_offload:
+                logger.info("Moving pipeline to device: %s", self._device)
+                self._pipeline = self._pipeline.to(self._device)
+            
+            # Apply memory optimizations
+            self._apply_memory_optimizations()
+            
+            # Setup CompelForSDXL for SDXL models (enables long prompt support)
+            if hasattr(self._pipeline, 'text_encoder_2'):
+                logger.info("Initializing CompelForSDXL for long prompt support")
+                try:
+                    logger.debug("Creating CompelForSDXL instance...")
+                    self._compel = CompelForSDXL(self._pipeline)
+                    logger.info("CompelForSDXL initialized successfully - long prompts now supported")
+                except Exception as e:
+                    logger.warning("Failed to initialize CompelForSDXL: %s. Falling back to standard tokenization.", e, exc_info=True)
+                    self._compel = None
+            else:
+                # Not an SDXL model, no compel needed
+                self._compel = None
+            
+            self._current_model = model_key
+            self._current_model_path = model_path
+            
+            logger.info("Model loaded successfully: %s (type=%s)", model_path.name, model_type)
+            
+        except Exception as e:
+            logger.error("Failed to load model: %s", e)
+            self._pipeline = None
+            self._current_model = None
+            raise
+    
+    async def unload_model(self) -> None:
+        """Unload the currently loaded model."""
+        if self._pipeline is None:
+            return
+        
+        logger.info("Unloading model: %s", self._current_model)
+        
+        # Clear CompelForSDXL instance (holds references to text encoders)
+        if self._compel is not None:
+            del self._compel
+            self._compel = None
+        
+        del self._pipeline
+        self._pipeline = None
+        self._current_model = None
+        self._current_model_path = None
+        self._device_map_active = False
+        self._is_single_file_sdxl = False
+        
+        # Clear GPU cache
+        if self._device == "cuda":
+            torch.cuda.empty_cache()
+        
+        logger.info("Model unloaded")
+    
+    async def generate(
+        self,
+        model_path: Path,
+        prompt: str,
+        negative_prompt: str = "",
+        steps: Optional[int] = None,
+        guidance_scale: Optional[float] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        seed: Optional[int] = None,
+        scheduler: Optional[str] = None,
+        num_images: int = 1,
+        lora_paths: Optional[List[Path]] = None,
+        lora_scales: Optional[List[float]] = None,
+    ) -> Tuple[Path, Dict[str, Any]]:
+        """
+        Generate image(s) from prompt.
+        
+        Args:
+            model_path: Path to model
+            prompt: Image generation prompt
+            negative_prompt: Negative prompt
+            steps: Inference steps (uses default if None)
+            guidance_scale: Guidance scale (uses default if None)
+            width: Image width (uses default if None)
+            height: Image height (uses default if None)
+            seed: Random seed for reproducibility
+            scheduler: Scheduler name (uses default if None)
+            num_images: Number of images to generate
+            lora_paths: List of paths to LoRA files to apply
+            lora_scales: List of LoRA weights (0.0-1.0)
+            
+        Returns:
+            Tuple of (image_path, metadata_dict)
+        """
+        import time
+        start_time = time.time()
+        
+        # Apply defaults
+        steps = steps or self.default_steps
+        guidance_scale = guidance_scale or self.default_guidance_scale
+        width = width or self.default_width
+        height = height or self.default_height
+        scheduler = scheduler or self.default_scheduler
+        
+        # Validate and round dimensions to multiple of 8 (required for SD VAE)
+        # The VAE downsampling requires dimensions divisible by 8
+        original_width = width
+        original_height = height
+        width = _round_to_multiple(width, 8)
+        height = _round_to_multiple(height, 8)
+        
+        if width != original_width or height != original_height:
+            logger.info(
+                "Rounded dimensions from %dx%d to %dx%d (SD requires dimensions divisible by 8)",
+                original_width, original_height, width, height
+            )
+        
+        # Load model if needed
+        await self.load_model(model_path)
+        
+        if self._pipeline is None:
+            raise RuntimeError("No model loaded")
+        
+        # Load LoRAs if specified
+        lora_names = []
+        if lora_paths and len(lora_paths) > 0:
+            # Set default scales if not provided
+            if lora_scales is None:
+                lora_scales = [1.0] * len(lora_paths)
+            elif len(lora_scales) < len(lora_paths):
+                # Pad with 1.0 for missing scales
+                lora_scales = list(lora_scales) + [1.0] * (len(lora_paths) - len(lora_scales))
+            
+            try:
+                for i, lora_path in enumerate(lora_paths):
+                    lora_name = Path(lora_path).stem
+                    lora_names.append(lora_name)
+                    adapter_name = f"lora_{i}"
+                    
+                    logger.info("Loading LoRA: %s (scale=%.2f)", lora_name, lora_scales[i])
+                    self._pipeline.load_lora_weights(
+                        str(lora_path),
+                        adapter_name=adapter_name
+                    )
+                
+                # Set LoRA scales
+                if len(lora_paths) > 0:
+                    adapter_names = [f"lora_{i}" for i in range(len(lora_paths))]
+                    self._pipeline.set_adapters(adapter_names, adapter_weights=lora_scales[:len(lora_paths)])
+                    logger.debug("Set LoRA adapters: %s with scales %s", adapter_names, lora_scales[:len(lora_paths)])
+                    
+            except Exception as e:
+                logger.warning("Failed to load LoRAs: %s. Continuing without LoRAs.", e)
+                lora_names = []
+        
+        logger.info(
+            "Generating image: prompt='%s...', steps=%d, guidance=%.1f, size=%dx%d",
+            prompt[:50], steps, guidance_scale, width, height
+        )
+        
+        # Set seed
+        # When device_map is active, latents are generated on CPU
+        generator_device = "cpu" if self._device_map_active else self._device
+        generator = None
+        actual_seed = seed
+        if seed is not None:
+            generator = torch.Generator(device=generator_device).manual_seed(seed)
+        else:
+            # Generate random seed for reproducibility tracking
+            actual_seed = torch.randint(0, 2**32, (1,)).item()
+            generator = torch.Generator(device=generator_device).manual_seed(actual_seed)
+        
+        # Generate in thread pool to avoid blocking
+        def _generate():
+            # CRITICAL FIX: Create scheduler instance PER REQUEST to avoid race conditions
+            # When multiple concurrent requests share the same scheduler, they corrupt
+            # each other's state (step_index, sigmas, timesteps), causing index errors.
+            # Each request must have its own scheduler instance with independent state.
+            request_scheduler = None
+            original_scheduler = None
+            try:
+                request_scheduler = _get_scheduler(scheduler, self._pipeline.scheduler.config)
+                request_scheduler.set_timesteps(steps, device=self._device)
+                
+                # Diagnostic logging for Euler schedulers
+                if scheduler in ["euler_a", "euler", "euler_ancestral"]:
+                    sigmas_len = len(request_scheduler.sigmas)
+                    logger.debug(
+                        "Created fresh scheduler for request: %s, steps=%d, sigmas_len=%d",
+                        scheduler, steps, sigmas_len
+                    )
+                
+                # Temporarily replace pipeline's scheduler with our request-specific instance
+                original_scheduler = self._pipeline.scheduler
+                self._pipeline.scheduler = request_scheduler
+                
+            except Exception as e:
+                logger.warning("Failed to create request scheduler %s: %s. Using shared scheduler (may have race conditions).", scheduler, e)
+            
+            try:
+                with torch.inference_mode():
+                    # If VAE CPU decode is enabled, get latents instead of images
+                    output_type = "latent" if self.vae_decode_cpu else "pil"
+                    
+                    # For SDXL, use prompt_2/negative_prompt_2 for dual text encoder support
+                    # This allows for longer prompts (77 tokens per encoder = 154 tokens total)
+                    pipeline_kwargs = {
+                        "prompt": prompt,
+                        "negative_prompt": negative_prompt if negative_prompt else None,
+                        "num_inference_steps": steps,
+                        "guidance_scale": guidance_scale,
+                        "width": width,
+                        "height": height,
+                        "num_images_per_prompt": num_images,
+                        "generator": generator,
+                        "output_type": output_type,
+                    }
+                    
+                    # Use CompelForSDXL for SDXL models to support long prompts
+                    if self._compel is not None:
+                        logger.info("Using CompelForSDXL for long prompt encoding")
+                        try:
+                            # Encode with CompelForSDXL (proper SDXL support, no length limits)
+                            # CompelForSDXL returns a LabelledConditioning object with:
+                            #   .embeds, .pooled_embeds, .negative_embeds, .negative_pooled_embeds
+                            logger.debug("Encoding prompts with CompelForSDXL")
+                            result = self._compel(
+                                main_prompt=prompt,
+                                negative_prompt=negative_prompt if negative_prompt else None
+                            )
+                            
+                            logger.debug("Embedding shapes: embeds=%s, pooled=%s", 
+                                        result.embeds.shape, result.pooled_embeds.shape)
+                            
+                            # Replace text prompts with pre-computed embeddings
+                            pipeline_kwargs["prompt_embeds"] = result.embeds
+                            pipeline_kwargs["negative_prompt_embeds"] = result.negative_embeds
+                            pipeline_kwargs["pooled_prompt_embeds"] = result.pooled_embeds
+                            pipeline_kwargs["negative_pooled_prompt_embeds"] = result.negative_pooled_embeds
+                            
+                            # Remove text prompts (using embeddings instead)
+                            del pipeline_kwargs["prompt"]
+                            del pipeline_kwargs["negative_prompt"]
+                            
+                            logger.info("CompelForSDXL encoding complete - long prompts fully supported")
+                        except Exception as e:
+                            logger.error("CompelForSDXL encoding failed: %s. Falling back to standard prompts.", e, exc_info=True)
+                            # Keep original prompt/negative_prompt in pipeline_kwargs
+                    
+                    result = self._pipeline(**pipeline_kwargs)
+                
+                # Decode VAE on CPU if enabled (fixes GPU hang on AMD gfx1103)
+                if self.vae_decode_cpu:
+                    logger.info("Decoding VAE on CPU...")
+                    latents = result.images
+                    
+                    # Get VAE's current dtype before moving
+                    vae_dtype = next(self._pipeline.vae.parameters()).dtype
+                    original_vae_device = next(self._pipeline.vae.parameters()).device
+                    
+                    # Move entire VAE to CPU and convert to float32 (CPU doesn't support bfloat16 well)
+                    self._pipeline.vae.cpu().float()
+                    latents_cpu = latents.cpu().float()
+                    
+                    with torch.no_grad():
+                        images = self._pipeline.vae.decode(
+                            latents_cpu / self._pipeline.vae.config.scaling_factor,
+                            return_dict=False
+                        )[0]
+                        pil_images = self._pipeline.image_processor.postprocess(images, output_type="pil")
+                    
+                    # Move VAE back to original device and restore dtype
+                    self._pipeline.vae.to(original_vae_device, dtype=vae_dtype)
+                    
+                    # Create a result-like object with PIL images
+                    class VAEResult:
+                        def __init__(self, images):
+                            self.images = images
+                    result = VAEResult(pil_images)
+                    logger.info("VAE decode on CPU completed")
+                
+                return result
+            finally:
+                # Restore original scheduler after generation completes
+                if original_scheduler is not None:
+                    self._pipeline.scheduler = original_scheduler
+        
+        # Run generation
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _generate)
+        
+        # Save image
+        image_id = uuid.uuid4().hex[:12]
+        image_path = self.images_dir / f"{image_id}.png"
+        
+        # Save first image (or all if num_images > 1)
+        if num_images == 1:
+            result.images[0].save(image_path)
+            saved_paths = [image_path]
+        else:
+            saved_paths = []
+            for i, img in enumerate(result.images):
+                path = self.images_dir / f"{image_id}_{i}.png"
+                img.save(path)
+                saved_paths.append(path)
+            image_path = saved_paths[0]  # Return first image path
+        
+        # Calculate statistics
+        generation_time = time.time() - start_time
+        self.total_generations += 1
+        self.total_generation_time += generation_time
+        
+        logger.info(
+            "Image generated: %s (%.2fs)",
+            image_path.name, generation_time
+        )
+        
+        # Build metadata
+        metadata = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "steps": steps,
+            "guidance_scale": guidance_scale,
+            "width": width,
+            "height": height,
+            "seed": actual_seed,
+            "scheduler": scheduler,
+            "model": str(model_path.name),
+            "generation_time": generation_time,
+            "num_images": num_images,
+            "loras": lora_names if lora_names else None,
+            "lora_scales": list(lora_scales[:len(lora_paths)]) if lora_paths and lora_scales else None,
+        }
+        
+        # Unload LoRAs after generation to prevent memory buildup
+        if lora_names:
+            try:
+                self._pipeline.unload_lora_weights()
+                logger.debug("Unloaded LoRA weights")
+            except Exception as e:
+                logger.warning("Failed to unload LoRAs: %s", e)
+        
+        # Return all saved paths (for multi-image generation)
+        return saved_paths, metadata
+    
+    def get_average_generation_time(self) -> float:
+        """Get average generation time in seconds."""
+        if self.total_generations == 0:
+            return 0.0
+        return self.total_generation_time / self.total_generations

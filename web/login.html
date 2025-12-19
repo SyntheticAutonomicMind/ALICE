@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - ALICE</title>
+    <link rel="stylesheet" href="/web/fonts/inter.css">
+    <link rel="stylesheet" href="/web/style.css">
+    <style>
+        .login-container {
+            max-width: 400px;
+            margin: 4rem auto;
+            padding: 2rem;
+        }
+        
+        .login-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+        }
+        
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .login-header .logo {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-decoration: none;
+        }
+        
+        .login-header p {
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 1.5rem;
+            border-bottom: 2px solid var(--border);
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            position: relative;
+        }
+        
+        .tab:hover {
+            color: var(--text-primary);
+        }
+        
+        .tab.active {
+            color: var(--primary);
+        }
+        
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--primary);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .key-display {
+            background: var(--bg-primary);
+            border: 1px solid var(--success);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin: 1rem 0;
+            font-family: monospace;
+            word-break: break-all;
+            font-size: 0.9rem;
+        }
+        
+        .key-display .warning {
+            color: var(--warning);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            font-family: var(--font-family);
+        }
+        
+        .status-message {
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+        }
+        
+        .status-message.success {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+        
+        .status-message.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error);
+            color: var(--error);
+        }
+        
+        .status-message.info {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid var(--primary);
+            color: var(--primary);
+        }
+        
+        .registration-disabled {
+            text-align: center;
+            padding: 1rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-brand">
+            <a href="/web/generate.html" class="logo">ALICE</a>
+        </div>
+        <div class="nav-links">
+            <a href="/web/generate.html">Generate</a>
+            <a href="/docs" target="_blank">API Docs</a>
+        </div>
+    </nav>
+    
+    <main class="container login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <a href="/web/generate.html" class="logo">ALICE</a>
+                <p>Sign in to access all features</p>
+            </div>
+            
+            <div class="tabs">
+                <button class="tab active" data-tab="login">Login</button>
+                <button class="tab" data-tab="register">Register</button>
+            </div>
+            
+            <!-- Login Tab -->
+            <div id="tab-login" class="tab-content active">
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="api-key">API Key</label>
+                        <input type="password" id="api-key" placeholder="Enter your API key" required>
+                    </div>
+                    <div id="login-error" class="status-message error" style="display: none;"></div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+                </form>
+                
+                <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.9rem;">
+                    Don't have an account? <a href="#" onclick="switchTab('register')" style="color: var(--primary);">Register</a>
+                </p>
+            </div>
+            
+            <!-- Register Tab -->
+            <div id="tab-register" class="tab-content">
+                <div id="registration-mode-content">
+                    <!-- Populated by JavaScript based on registration mode -->
+                    <div class="spinner" style="margin: 2rem auto;"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <script src="/web/app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const { API, Toast } = window.SDAPI;
+            
+            // Check if session expired
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('expired') === '1') {
+                setTimeout(() => {
+                    Toast.warning('Your session expired due to inactivity. Please log in again.');
+                }, 500);
+            }
+            
+            // Check if we have a stored API key that might still be valid
+            const existingKey = localStorage.getItem('alice-admin-key');
+            if (existingKey) {
+                try {
+                    // Verify key is still valid
+                    await API.fetch('/v1/models', {
+                        headers: { 'X-Api-Key': existingKey }
+                    });
+                    // Key is valid - refresh the session cookie (it may have expired)
+                    // Clear any existing cookie first to avoid duplication
+                    document.cookie = 'alice_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                    // Use SameSite=Lax to allow cookie on redirects
+                    document.cookie = `alice_session=${existingKey}; path=/; SameSite=Lax`;
+                    // Redirect to intended page
+                    const returnUrl = urlParams.get('return') || '/web/generate.html';
+                    window.location.href = returnUrl;
+                    return;
+                } catch (e) {
+                    // Key invalid - clear everything
+                    localStorage.removeItem('alice-admin-key');
+                    document.cookie = 'alice_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                }
+            }
+            
+            // Tab switching
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+            });
+            
+            // Login form
+            document.getElementById('login-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const key = document.getElementById('api-key').value.trim();
+                const errorEl = document.getElementById('login-error');
+                
+                if (!key) {
+                    errorEl.textContent = 'Please enter your API key';
+                    errorEl.style.display = 'block';
+                    return;
+                }
+                
+                try {
+                    // Verify key works
+                    await API.fetch('/v1/models', {
+                        headers: { 'X-Api-Key': key }
+                    });
+                    
+                    // Success - save key to localStorage AND set session cookie
+                    localStorage.setItem('alice-admin-key', key);
+                    // Clear any existing cookie first, then set new one
+                    document.cookie = 'alice_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                    // Set session cookie for server-side auth
+                    // Use SameSite=Lax to allow cookie on redirects (Strict blocks top-level navigations)
+                    document.cookie = `alice_session=${key}; path=/; SameSite=Lax`;
+                    Toast.success('Logged in successfully!');
+                    
+                    const returnUrl = urlParams.get('return') || '/web/generate.html';
+                    window.location.href = returnUrl;
+                } catch (error) {
+                    errorEl.textContent = 'Invalid API key';
+                    errorEl.style.display = 'block';
+                }
+            });
+            
+            // Load registration mode
+            loadRegistrationMode();
+        });
+        
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            
+            document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+        
+        async function loadRegistrationMode() {
+            const { API, Toast } = window.SDAPI;
+            const container = document.getElementById('registration-mode-content');
+            
+            try {
+                // First, check if bootstrap is needed
+                try {
+                    const statsResponse = await API.fetch('/v1/auth/stats').catch(() => null);
+                    // If we get stats, keys exist - skip bootstrap check
+                    if (!statsResponse || (statsResponse.total_keys === 0)) {
+                        // No keys exist - show bootstrap option
+                        showBootstrapOption(container);
+                        return;
+                    }
+                } catch (e) {
+                    // 401/403 means auth required = keys exist
+                    // Any other error - try bootstrap anyway
+                    if (e.message && !e.message.includes('401') && !e.message.includes('403') && !e.message.includes('Authentication')) {
+                        showBootstrapOption(container);
+                        return;
+                    }
+                }
+                
+                const response = await API.fetch('/v1/auth/registration-mode');
+                const mode = response.mode;
+                
+                if (mode === 'disabled') {
+                    container.innerHTML = `
+                        <div class="registration-disabled">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="margin-bottom: 1rem; opacity: 0.5;">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                            </svg>
+                            <p>Registration is currently disabled.</p>
+                            <p style="font-size: 0.85rem; margin-top: 0.5rem;">Contact an administrator to get access.</p>
+                        </div>
+                    `;
+                } else if (mode === 'open') {
+                    container.innerHTML = `
+                        <form id="register-form">
+                            <div class="form-group">
+                                <label for="reg-name">Account Name</label>
+                                <input type="text" id="reg-name" placeholder="Enter a name for your account" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: 100%;">Create Account</button>
+                        </form>
+                        <div id="register-result"></div>
+                    `;
+                    setupRegisterForm('open');
+                } else if (mode === 'invite') {
+                    container.innerHTML = `
+                        <form id="register-form">
+                            <div class="form-group">
+                                <label for="reg-name">Account Name</label>
+                                <input type="text" id="reg-name" placeholder="Enter a name for your account" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="reg-invite">Invite Code</label>
+                                <input type="text" id="reg-invite" placeholder="Enter your invite code" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: 100%;">Create Account</button>
+                        </form>
+                        <div id="register-result"></div>
+                        <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.9rem;">
+                            Need an invite code? Contact an administrator.
+                        </p>
+                    `;
+                    setupRegisterForm('invite');
+                } else if (mode === 'approval') {
+                    container.innerHTML = `
+                        <form id="register-form">
+                            <div class="form-group">
+                                <label for="reg-name">Account Name</label>
+                                <input type="text" id="reg-name" placeholder="Enter a name for your account" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: 100%;">Request Access</button>
+                        </form>
+                        <div id="register-result"></div>
+                        <p style="text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.9rem;">
+                            Your request will be reviewed by an administrator.
+                        </p>
+                    `;
+                    setupRegisterForm('approval');
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="status-message error">Failed to load registration options</div>`;
+            }
+        }
+        
+        function setupRegisterForm(mode) {
+            const { API, Toast } = window.SDAPI;
+            
+            document.getElementById('register-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const resultEl = document.getElementById('register-result');
+                const name = document.getElementById('reg-name').value.trim();
+                const inviteCode = document.getElementById('reg-invite')?.value.trim();
+                
+                const btn = e.target.querySelector('button[type="submit"]');
+                btn.disabled = true;
+                btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Processing...';
+                
+                try {
+                    let url = `/v1/auth/register?name=${encodeURIComponent(name)}`;
+                    if (inviteCode) {
+                        url += `&invite_code=${encodeURIComponent(inviteCode)}`;
+                    }
+                    
+                    const response = await API.fetch(url, { method: 'POST' });
+                    
+                    if (response.status === 'created') {
+                        // Account created - show key with copy button and manual continue
+                        const key = response.key;
+                        resultEl.innerHTML = `
+                            <div class="status-message success">Account created successfully!</div>
+                            <div class="key-display">
+                                <strong>Your API Key:</strong><br>
+                                <code id="new-api-key">${key}</code>
+                                <div style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-direction: column;">
+                                    <button type="button" id="copy-key-btn" class="btn btn-primary" onclick="copyKey()">
+                                        Copy Key to Clipboard
+                                    </button>
+                                    <button type="button" id="continue-btn" class="btn" onclick="continueToApp()" style="background: var(--success);">
+                                        Continue to Dashboard
+                                    </button>
+                                </div>
+                                <p class="warning"><strong>IMPORTANT:</strong> Save this key NOW! It will never be shown again.</p>
+                            </div>
+                        `;
+                        
+                        // Store key for later use
+                        window.newApiKey = key;
+                        
+                        // Hide the form
+                        e.target.style.display = 'none';
+                        
+                    } else if (response.status === 'pending') {
+                        // Pending approval
+                        resultEl.innerHTML = `
+                            <div class="status-message info">
+                                <strong>Request Submitted!</strong><br>
+                                Your registration request (ID: ${response.registration_id}) has been submitted.
+                                An administrator will review it shortly.
+                            </div>
+                        `;
+                        e.target.querySelector('button[type="submit"]').style.display = 'none';
+                    }
+                } catch (error) {
+                    resultEl.innerHTML = `<div class="status-message error">${error.message}</div>`;
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = mode === 'approval' ? 'Request Access' : 'Create Account';
+                }
+            });
+        }
+        
+        // Copy key to clipboard
+        function copyKey() {
+            const key = window.newApiKey || document.getElementById('new-api-key')?.textContent;
+            if (key) {
+                navigator.clipboard.writeText(key).then(() => {
+                    const btn = document.getElementById('copy-key-btn');
+                    btn.innerHTML = 'Copied!';
+                    btn.style.background = 'var(--success)';
+                    setTimeout(() => {
+                        btn.innerHTML = 'Copy Key to Clipboard';
+                        btn.style.background = '';
+                    }, 2000);
+                }).catch(() => {
+                    // Fallback for older browsers
+                    const textArea = document.createElement('textarea');
+                    textArea.value = key;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    alert('Key copied to clipboard!');
+                });
+            }
+        }
+        
+        // Continue to app after saving key
+        function continueToApp() {
+            const key = window.newApiKey;
+            if (key) {
+                localStorage.setItem('alice-admin-key', key);
+                // Clear any existing cookie first to avoid duplication
+                document.cookie = 'alice_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                // Set session cookie for server-side auth
+                document.cookie = `alice_session=${key}; path=/; SameSite=Lax`;
+                Toast.success('Logged in successfully!');
+                window.location.href = '/web/generate.html';
+            }
+        }
+        
+        // Show bootstrap option for first-time setup
+        function showBootstrapOption(container) {
+            const { API, Toast } = window.SDAPI;
+            
+            container.innerHTML = `
+                <div style="text-align: center; padding: 1rem;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="margin-bottom: 1rem; color: var(--primary);">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                    </svg>
+                    <h3 style="margin-bottom: 0.5rem;">First-Time Setup</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+                        No administrator account exists yet.<br>
+                        Create the initial admin account to get started.
+                    </p>
+                    <button id="bootstrap-btn" class="btn btn-primary" style="width: 100%;">
+                        Create Admin Account
+                    </button>
+                    <div id="bootstrap-result"></div>
+                </div>
+            `;
+            
+            document.getElementById('bootstrap-btn').addEventListener('click', async () => {
+                const btn = document.getElementById('bootstrap-btn');
+                const resultEl = document.getElementById('bootstrap-result');
+                
+                btn.disabled = true;
+                btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px; display: inline-block;"></div> Creating...';
+                
+                try {
+                    const response = await API.fetch('/v1/auth/bootstrap', { method: 'POST' });
+                    
+                    // Success - show the admin key
+                    const key = response.key;
+                    resultEl.innerHTML = `
+                        <div class="key-display" style="margin-top: 1.5rem;">
+                            <strong style="color: var(--success);">Admin Account Created!</strong><br><br>
+                            <strong>Your Admin API Key:</strong><br>
+                            <code id="new-api-key" style="font-size: 0.85rem;">${key}</code>
+                            <div style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-direction: column;">
+                                <button type="button" id="copy-key-btn" class="btn btn-primary" onclick="copyKey()">
+                                    Copy Key to Clipboard
+                                </button>
+                                <button type="button" class="btn" onclick="continueToApp()" style="background: var(--success); color: white;">
+                                    Continue to Dashboard
+                                </button>
+                            </div>
+                            <p class="warning"><strong>CRITICAL:</strong> Save this key NOW! It will never be shown again. Without it, you cannot access the system.</p>
+                        </div>
+                    `;
+                    
+                    // Store key for continue button
+                    window.newApiKey = key;
+                    btn.style.display = 'none';
+                    
+                } catch (error) {
+                    resultEl.innerHTML = `<div class="status-message error" style="margin-top: 1rem;">${error.message || 'Failed to create admin account'}</div>`;
+                    btn.disabled = false;
+                    btn.innerHTML = 'Create Admin Account';
+                }
+            });
+        }
+    </script>
+</body>
+</html>
