@@ -246,8 +246,11 @@ class ModelCacheService:
                         # CivitAI uses query parameter for authentication, not header
                         if self.civitai_api_key:
                             params["token"] = self.civitai_api_key
+                            logger.info("Using CivitAI API key: %s...", self.civitai_api_key[:10])
+                        else:
+                            logger.warning("No CivitAI API key configured - may be rate limited")
                         
-                        logger.info("Fetching CivitAI page %d...", page)
+                        logger.info("Fetching CivitAI page %d with params: %s", page, {k: v for k,v in params.items() if k != 'token'})
                         self._current_page = page
                         
                         async with session.get(
@@ -255,10 +258,11 @@ class ModelCacheService:
                             params=params,
                             timeout=aiohttp.ClientTimeout(total=30),
                         ) as response:
+                            logger.info("CivitAI response status: %d", response.status)
                             if response.status == 429:
                                 # Rate limited - wait and retry (cap at 10 seconds)
                                 retry_after = min(int(response.headers.get("Retry-After", "10")), 10)
-                                logger.warning("Rate limited, waiting %d seconds (API requested %s)", 
+                                logger.warning("Rate limited (HTTP 429), waiting %d seconds (API requested %s)", 
                                              retry_after, response.headers.get("Retry-After", "unknown"))
                                 await asyncio.sleep(retry_after)
                                 continue
