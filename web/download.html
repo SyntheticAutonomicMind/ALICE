@@ -313,6 +313,12 @@
                     </svg>
                     Search Models
                 </span>
+                <button class="btn btn-secondary" id="sync-catalog-btn" style="margin-left: auto;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Sync Catalog
+                </button>
             </div>
             
             <div class="search-section">
@@ -788,6 +794,41 @@
             document.getElementById('search-btn').addEventListener('click', performSearch);
             document.getElementById('search-query').addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') performSearch();
+            });
+            document.getElementById('sync-catalog-btn').addEventListener('click', async () => {
+                const btn = document.getElementById('sync-catalog-btn');
+                const originalHTML = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Syncing...';
+                
+                try {
+                    const adminKey = localStorage.getItem('alice_admin_key');
+                    if (!adminKey) {
+                        Toast.error('Admin key required. Please log in as admin.');
+                        return;
+                    }
+                    
+                    const response = await API.fetch('/v1/admin/cache/sync', {
+                        method: 'POST',
+                        headers: { 'X-Admin-Key': adminKey }
+                    });
+                    
+                    Toast.success('Catalog sync started! This may take 30-45 minutes. Models will appear as they are cached.');
+                    
+                    // Reload current view after a short delay
+                    setTimeout(() => {
+                        if (currentSource === 'civitai' && !document.getElementById('search-query').value.trim()) {
+                            loadPopularModels();
+                        }
+                    }, 3000);
+                    
+                } catch (error) {
+                    console.error('Sync error:', error);
+                    Toast.error(`Failed to start sync: ${error.message || 'Unknown error'}`);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHTML;
+                }
             });
             document.getElementById('refresh-queue-btn').addEventListener('click', refreshDownloadQueue);
             document.getElementById('type-filter').addEventListener('change', () => {
