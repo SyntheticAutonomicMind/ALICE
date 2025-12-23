@@ -802,7 +802,7 @@
                 btn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Syncing...';
                 
                 try {
-                    const adminKey = localStorage.getItem('alice_admin_key');
+                    const adminKey = localStorage.getItem('alice-admin-key');
                     if (!adminKey) {
                         Toast.error('Admin key required. Please log in as admin.');
                         return;
