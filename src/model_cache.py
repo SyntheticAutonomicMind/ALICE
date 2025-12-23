@@ -105,99 +105,105 @@ class ModelCacheService:
         conn = sqlite3.connect(str(self.database_path))
         cursor = conn.cursor()
         
-        # Create models table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS models (
-                id TEXT PRIMARY KEY,
-                source TEXT NOT NULL,
-                name TEXT NOT NULL,
-                type TEXT,
-                base_model TEXT,
-                creator TEXT,
-                description TEXT,
-                tags TEXT,
-                nsfw INTEGER,
-                download_url TEXT,
-                file_size INTEGER,
-                thumbnail_url TEXT,
-                rating REAL,
-                download_count INTEGER,
-                created_at TEXT,
-                updated_at TEXT,
-                metadata TEXT,
-                last_synced TEXT
-            )
-        """)
-        
-        # Create indexes for fast querying
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_source ON models(source)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_type ON models(type)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_base_model ON models(base_model)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_creator ON models(creator)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_nsfw ON models(nsfw)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_name ON models(name)")
-        
-        # Try to create full-text search table (FTS5) if available
-        # This is optional - degrades gracefully if SQLite doesn't have FTS5 compiled in
-        self._has_fts5 = False
         try:
+            # Create models table
             cursor.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS models_fts USING fts5(
-                    id UNINDEXED,
-                    name,
-                    description,
-                    tags,
-                    creator,
-                    content='models',
-                    content_rowid='rowid'
+                CREATE TABLE IF NOT EXISTS models (
+                    id TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    type TEXT,
+                    base_model TEXT,
+                    creator TEXT,
+                    description TEXT,
+                    tags TEXT,
+                    nsfw INTEGER,
+                    download_url TEXT,
+                    file_size INTEGER,
+                    thumbnail_url TEXT,
+                    rating REAL,
+                    download_count INTEGER,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    metadata TEXT,
+                    last_synced TEXT
                 )
             """)
             
-            # Create triggers to keep FTS in sync
+            # Create indexes for fast querying
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_source ON models(source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_type ON models(type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_base_model ON models(base_model)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_creator ON models(creator)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_nsfw ON models(nsfw)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_name ON models(name)")
+            
+            # Create sync metadata table
             cursor.execute("""
-                CREATE TRIGGER IF NOT EXISTS models_ai AFTER INSERT ON models BEGIN
-                    INSERT INTO models_fts(rowid, id, name, description, tags, creator)
-                    VALUES (new.rowid, new.id, new.name, new.description, new.tags, new.creator);
-                END
+                CREATE TABLE IF NOT EXISTS sync_metadata (
+                    source TEXT PRIMARY KEY,
+                    last_sync TEXT,
+                    record_count INTEGER,
+                    error TEXT
+                )
             """)
             
-            cursor.execute("""
-                CREATE TRIGGER IF NOT EXISTS models_ad AFTER DELETE ON models BEGIN
-                    DELETE FROM models_fts WHERE rowid = old.rowid;
-                END
-            """)
+            # Commit core tables first
+            conn.commit()
             
-            cursor.execute("""
-                CREATE TRIGGER IF NOT EXISTS models_au AFTER UPDATE ON models BEGIN
-                    DELETE FROM models_fts WHERE rowid = old.rowid;
-                    INSERT INTO models_fts(rowid, id, name, description, tags, creator)
-                    VALUES (new.rowid, new.id, new.name, new.description, new.tags, new.creator);
-                END
-            """)
+            # Try to create full-text search table (FTS5) if available
+            # This is optional - degrades gracefully if SQLite doesn't have FTS5 compiled in
+            self._has_fts5 = False
+            try:
+                cursor.execute("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS models_fts USING fts5(
+                        id UNINDEXED,
+                        name,
+                        description,
+                        tags,
+                        creator,
+                        content='models',
+                        content_rowid='rowid'
+                    )
+                """)
+                
+                # Create triggers to keep FTS in sync
+                cursor.execute("""
+                    CREATE TRIGGER IF NOT EXISTS models_ai AFTER INSERT ON models BEGIN
+                        INSERT INTO models_fts(rowid, id, name, description, tags, creator)
+                        VALUES (new.rowid, new.id, new.name, new.description, new.tags, new.creator);
+                    END
+                """)
+                
+                cursor.execute("""
+                    CREATE TRIGGER IF NOT EXISTS models_ad AFTER DELETE ON models BEGIN
+                        DELETE FROM models_fts WHERE rowid = old.rowid;
+                    END
+                """)
+                
+                cursor.execute("""
+                    CREATE TRIGGER IF NOT EXISTS models_au AFTER UPDATE ON models BEGIN
+                        DELETE FROM models_fts WHERE rowid = old.rowid;
+                        INSERT INTO models_fts(rowid, id, name, description, tags, creator)
+                        VALUES (new.rowid, new.id, new.name, new.description, new.tags, new.creator);
+                    END
+                """)
+                
+                conn.commit()
+                self._has_fts5 = True
+                logger.info("FTS5 full-text search enabled")
+                
+            except sqlite3.OperationalError as e:
+                if "no such module: fts5" in str(e):
+                    logger.warning("FTS5 not available in SQLite, using basic search (slower)")
+                else:
+                    logger.error("Error creating FTS5 table: %s", e)
+                    # Don't raise - FTS5 is optional
             
-            self._has_fts5 = True
-            logger.info("FTS5 full-text search enabled")
+            logger.info("Database schema initialized")
             
-        except sqlite3.OperationalError as e:
-            if "no such module: fts5" in str(e):
-                logger.warning("FTS5 not available in SQLite, using basic search (slower)")
-            else:
-                logger.error("Error creating FTS5 table: %s", e)
-                raise        
-        # Create sync metadata table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sync_metadata (
-                source TEXT PRIMARY KEY,
-                last_sync TEXT,
-                record_count INTEGER,
-                error TEXT
-            )
-        """)
-        
-        conn.commit()
-        conn.close()
-        
-        logger.info("Database schema initialized")
+        finally:
+            conn.close()
     
     async def sync_civitai(self, progress_callback: Optional[callable] = None) -> None:
         """
