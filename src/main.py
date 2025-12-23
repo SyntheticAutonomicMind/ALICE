@@ -140,15 +140,22 @@ async def lifespan(app: FastAPI):
     )
     
     # Initialize model cache service if enabled
+    model_cache_service = None
     if config.model_cache.enabled:
-        model_cache_service = ModelCacheService(
-            database_path=config.model_cache.database_path,
-            civitai_api_key=config.models.civitai_api_key,
-            huggingface_token=config.models.huggingface_token,
-            civitai_page_limit=config.model_cache.civitai_page_limit,
-            huggingface_limit=config.model_cache.huggingface_limit,
-        )
-        logger.info("Model cache service initialized")
+        try:
+            model_cache_service = ModelCacheService(
+                database_path=config.model_cache.database_path,
+                civitai_api_key=config.models.civitai_api_key,
+                huggingface_token=config.models.huggingface_token,
+                civitai_page_limit=config.model_cache.civitai_page_limit,
+                huggingface_limit=config.model_cache.huggingface_limit,
+            )
+            logger.info("Model cache service initialized successfully")
+        except Exception as e:
+            logger.error("Failed to initialize model cache service: %s", e, exc_info=True)
+            model_cache_service = None
+    else:
+        logger.warning("Model cache is disabled in configuration")
     
     auth_manager = AuthManager(
         data_dir=config.storage.auth_directory
