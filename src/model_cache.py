@@ -224,34 +224,46 @@ class ModelCacheService:
         try:
             logger.info("Starting CivitAI catalog sync...")
             
-            page = 1
+            cursor = None  # Start with no cursor (first page)
             total_models = 0
+            page_count = 0
             
             async with aiohttp.ClientSession() as session:
                 while True:
                     # Check page limit
-                    if self.civitai_page_limit and page > self.civitai_page_limit:
+                    if self.civitai_page_limit and page_count >= self.civitai_page_limit:
                         logger.info("Reached page limit %d, stopping", self.civitai_page_limit)
                         break
                     
                     try:
-                        # Fetch page
+                        page_count += 1
+                        
+                        # Fetch page using cursor (or page 1 if no cursor yet)
                         params = {
                             "limit": 100,
-                            "page": page,
                             "sort": "Highest Rated",
                             "nsfw": "true",
                         }
                         
+                        if cursor:
+                            # Use cursor for pagination (required after page ~20)
+                            params["cursor"] = cursor
+                            logger.info("Fetching CivitAI page %d with cursor: %s...", page_count, cursor[:50])
+                        else:
+                            # First page uses page=1
+                            params["page"] = 1
+                            logger.info("Fetching CivitAI page 1 (initial request)")
+                        
                         # CivitAI uses query parameter for authentication, not header
                         if self.civitai_api_key:
                             params["token"] = self.civitai_api_key
-                            logger.info("Using CivitAI API key: %s...", self.civitai_api_key[:10])
+                        # CivitAI uses query parameter for authentication, not header
+                        if self.civitai_api_key:
+                            params["token"] = self.civitai_api_key
                         else:
                             logger.warning("No CivitAI API key configured - may be rate limited")
                         
-                        logger.info("Fetching CivitAI page %d with params: %s", page, {k: v for k,v in params.items() if k != 'token'})
-                        self._current_page = page
+                        self._current_page = page_count
                         
                         async with session.get(
                             f"{self.CIVITAI_API_BASE}/models",
@@ -268,22 +280,34 @@ class ModelCacheService:
                                 continue
                             
                             if response.status != 200:
-                                logger.error("CivitAI API error: %s", response.status)
+                                error_text = await response.text()
+                                logger.error("CivitAI API error: %s - %s", response.status, error_text[:200])
                                 break
                             
                             data = await response.json()
                         
-                        # Update total pages
+                        # Get next cursor from metadata
                         metadata = data.get("metadata", {})
-                        self._total_pages = metadata.get("totalPages")
+                        next_cursor = metadata.get("nextCursor")
+                        self._total_pages = metadata.get("totalPages")  # May not be accurate with cursors
+                        
+                        if self._total_pages:
+                            logger.info("Progress: page %d of %d", page_count, self._total_pages)
+                        else:
+                            logger.info("Progress: page %d (total unknown)", page_count)
+                        
+                        if self._total_pages:
+                            logger.info("Progress: page %d of %d", page_count, self._total_pages)
+                        else:
+                            logger.info("Progress: page %d (total unknown)", page_count)
                         
                         if progress_callback:
-                            progress_callback(page, self._total_pages)
+                            progress_callback(page_count, self._total_pages)
                         
                         # Process models from this page
                         items = data.get("items", [])
                         if not items:
-                            logger.info("No more models, stopping at page %d", page)
+                            logger.info("No more models, stopping at page %d", page_count)
                             break
                         
                         # Store models in database
@@ -302,18 +326,18 @@ class ModelCacheService:
                             total_models += len(models_data)
                             logger.info(
                                 "Stored %d models from page %d (total: %d)",
-                                len(models_data), page, total_models
+                                len(models_data), page_count, total_models
                             )
                         
-                        # Check if we've reached the last page
-                        current_page = metadata.get("currentPage")
-                        total_pages = metadata.get("totalPages")
-                        
-                        if current_page and total_pages and current_page >= total_pages:
-                            logger.info("Reached last page %d/%d", current_page, total_pages)
+                        # Check if there's a next cursor
+                        if not next_cursor:
+                            logger.info("No more pages (nextCursor is null), stopping at page %d", page_count)
                             break
                         
-                        page += 1
+                        # Use the next cursor for the next iteration
+                        cursor = next_cursor
+                        # Use the next cursor for the next iteration
+                        cursor = next_cursor
                         
                         # Rate limiting - be nice to the API (2 seconds between requests)
                         await asyncio.sleep(2.0)
@@ -321,10 +345,13 @@ class ModelCacheService:
                     except asyncio.CancelledError:
                         raise
                     except Exception as e:
-                        logger.error("Error fetching page %d: %s", page, e)
+                        logger.error("Error fetching page %d: %s", page_count, e)
                         self._sync_error = str(e)
-                        # Continue to next page on error
-                        page += 1
+                        # Continue to next page on error if we have a cursor
+                        if cursor:
+                            logger.info("Attempting to continue with next cursor...")
+                        else:
+                            break
                         await asyncio.sleep(2.0)
             
             # Update sync metadata
