@@ -660,9 +660,12 @@ class ModelCacheService:
                 where_clauses.append("m.base_model = ?")
                 params.append(base_model)
             
-            if nsfw is not None:
-                where_clauses.append("m.nsfw = ?")
-                params.append(1 if nsfw else 0)
+            # NSFW filter:
+            # - nsfw=True: Include ALL models (NSFW + SFW) - no filter needed
+            # - nsfw=False: Only show SFW models (nsfw=0)
+            # - nsfw=None: Include ALL models - no filter needed
+            if nsfw is False:
+                where_clauses.append("m.nsfw = 0")
             
             # Full-text search if query provided
             if query and query.strip():
@@ -745,11 +748,18 @@ class ModelCacheService:
                 cursor.execute(count_query, params)
                 total = cursor.fetchone()[0]
             
-            # Parse JSON fields
+            # Parse JSON fields and transform data
             for model in models:
                 model["tags"] = json.loads(model["tags"]) if model["tags"] else []
                 model["metadata"] = json.loads(model["metadata"]) if model["metadata"] else {}
                 model["nsfw"] = bool(model["nsfw"])
+                
+                # Strip source prefix from ID for CivitAI models
+                # Database stores as "civitai:12345", API needs integer 12345
+                if model.get("source") == "civitai" and model.get("id"):
+                    model_id_str = str(model["id"])
+                    if ":" in model_id_str:
+                        model["id"] = int(model_id_str.split(":", 1)[1])
             
             return models, total
             
