@@ -60,7 +60,7 @@ model_cache:
   database_path: ./data/model_cache.db
   
   # Sync settings
-  sync_on_startup: true  # Sync catalogs when server starts
+  sync_on_startup: false  # Set to true to sync on startup (will block server start for ~30-45 min)
   sync_interval_hours: 24  # Auto-sync every 24 hours
   
   # CivitAI settings
