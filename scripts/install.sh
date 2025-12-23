@@ -141,6 +141,7 @@ install_files() {
             sed -i "s|images_directory: .*images|images_directory: ${DATA_DIR}/images|g" "${CONFIG_DIR}/config.yaml"
             sed -i "s|gallery_file: .*gallery.json|gallery_file: ${DATA_DIR}/data/gallery.json|g" "${CONFIG_DIR}/config.yaml"
             sed -i "s|auth_directory: .*auth|auth_directory: ${DATA_DIR}/data/auth|g" "${CONFIG_DIR}/config.yaml"
+            sed -i "s|database_path: .*model_cache.db|database_path: ${DATA_DIR}/data/model_cache.db|g" "${CONFIG_DIR}/config.yaml"
             sed -i "s|file: .*alice.log|file: ${LOG_DIR}/alice.log|g" "${CONFIG_DIR}/config.yaml"
             chown "${SERVICE_USER}:${SERVICE_GROUP}" "${CONFIG_DIR}/config.yaml"
         elif [[ "$OS" == "macos" ]]; then
@@ -148,6 +149,7 @@ install_files() {
             sed -i '' "s|images_directory: .*images|images_directory: ${DATA_DIR}/images|g" "${CONFIG_DIR}/config.yaml"
             sed -i '' "s|gallery_file: .*gallery.json|gallery_file: ${DATA_DIR}/data/gallery.json|g" "${CONFIG_DIR}/config.yaml"
             sed -i '' "s|auth_directory: .*auth|auth_directory: ${DATA_DIR}/data/auth|g" "${CONFIG_DIR}/config.yaml"
+            sed -i '' "s|database_path: .*model_cache.db|database_path: ${DATA_DIR}/data/model_cache.db|g" "${CONFIG_DIR}/config.yaml"
             sed -i '' "s|file: .*alice.log|file: ${LOG_DIR}/alice.log|g" "${CONFIG_DIR}/config.yaml"
         fi
     else
