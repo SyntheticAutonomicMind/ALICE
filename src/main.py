@@ -2351,6 +2351,7 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
             "require_auth": config.server.require_auth,
             "registrationMode": config.server.registration_mode,
             "session_timeout_seconds": config.server.session_timeout_seconds,
+            "block_nsfw": config.server.block_nsfw,
         },
         "models": {
             "directory": str(config.models.directory),
