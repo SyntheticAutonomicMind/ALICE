@@ -218,10 +218,6 @@ class ModelCacheService:
         try:
             logger.info("Starting CivitAI catalog sync...")
             
-            headers = {}
-            if self.civitai_api_key:
-                headers["Authorization"] = f"Bearer {self.civitai_api_key}"
-            
             page = 1
             total_models = 0
             
@@ -241,13 +237,16 @@ class ModelCacheService:
                             "nsfw": "true",
                         }
                         
+                        # CivitAI uses query parameter for authentication, not header
+                        if self.civitai_api_key:
+                            params["token"] = self.civitai_api_key
+                        
                         logger.info("Fetching CivitAI page %d...", page)
                         self._current_page = page
                         
                         async with session.get(
                             f"{self.CIVITAI_API_BASE}/models",
                             params=params,
-                            headers=headers,
                             timeout=aiohttp.ClientTimeout(total=30),
                         ) as response:
                             if response.status == 429:
