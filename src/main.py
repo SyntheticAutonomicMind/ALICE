@@ -1550,7 +1550,9 @@ async def search_civitai(
     Returns matching models with version and file information.
     """
     # Use cache if available
+    logger.info("search_civitai: model_cache_service=%s, enabled=%s", model_cache_service is not None, config.model_cache.enabled)
     if model_cache_service and config.model_cache.enabled:
+        logger.info("Using model cache for CivitAI search: query=%s, types=%s, nsfw=%s, limit=%s", request.query, request.types, request.nsfw, request.limit)
         models, total = model_cache_service.search(
             source="civitai",
             query=request.query,
@@ -1561,6 +1563,7 @@ async def search_civitai(
             offset=(request.page - 1) * request.limit if request.page > 1 else 0,
         )
         
+        logger.info("Cache search returned %d models (total=%d)", len(models), total)
         return {
             "object": "list",
             "data": models,
@@ -1570,6 +1573,7 @@ async def search_civitai(
         }
     
     # Fallback to live API search
+    logger.info("Falling back to live CivitAI API search")
     if download_manager is None:
         raise HTTPException(status_code=503, detail="Service not ready")
     
