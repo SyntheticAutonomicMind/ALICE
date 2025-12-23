@@ -1681,6 +1681,58 @@ async def get_cache_status(
     }
 
 
+@app.post("/v1/admin/cache/sync")
+async def trigger_cache_sync(
+    source: Optional[str] = None,
+    admin: bool = Depends(verify_admin_key)
+):
+    """
+    Manually trigger model catalog synchronization.
+    Requires admin privileges.
+    
+    Args:
+        source: Optional source to sync ('civitai', 'huggingface', or null for both)
+    
+    Returns sync status.
+    """
+    if not model_cache_service or not config.model_cache.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Model cache is disabled"
+        )
+    
+    # Check if sync is already running
+    status = model_cache_service.get_sync_status()
+    if status.sync_in_progress:
+        raise HTTPException(
+            status_code=409,
+            detail="Sync already in progress"
+        )
+    
+    # Start sync as background task
+    async def sync_task():
+        try:
+            if source is None or source == "civitai":
+                logger.info("Admin triggered CivitAI sync")
+                await model_cache_service.sync_civitai()
+            
+            if source is None or source == "huggingface":
+                logger.info("Admin triggered HuggingFace sync")
+                await model_cache_service.sync_huggingface()
+            
+            logger.info("Manual sync complete")
+        except Exception as e:
+            logger.error("Manual sync failed: %s", e)
+    
+    asyncio.create_task(sync_task())
+    
+    return {
+        "status": "started",
+        "message": f"Sync started for {source or 'all sources'}",
+        "source": source or "all"
+    }
+
+
 @app.post("/v1/models/download/huggingface")
 async def download_huggingface(
     request: HuggingFaceDownloadRequest,
