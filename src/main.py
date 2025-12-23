@@ -140,7 +140,6 @@ async def lifespan(app: FastAPI):
     )
     
     # Initialize model cache service if enabled
-    model_cache_service = None
     if config.model_cache.enabled:
         try:
             model_cache_service = ModelCacheService(
