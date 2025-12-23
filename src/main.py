@@ -140,7 +140,9 @@ async def lifespan(app: FastAPI):
     )
     
     # Initialize model cache service if enabled
+    logger.info("Checking model cache config: enabled=%s", config.model_cache.enabled)
     if config.model_cache.enabled:
+        logger.info("Model cache is enabled, initializing...")
         try:
             model_cache_service = ModelCacheService(
                 database_path=config.model_cache.database_path,
@@ -154,7 +156,7 @@ async def lifespan(app: FastAPI):
             logger.error("Failed to initialize model cache service: %s", e, exc_info=True)
             model_cache_service = None
     else:
-        logger.warning("Model cache is disabled in configuration")
+        logger.warning("Model cache is DISABLED in configuration")
     
     auth_manager = AuthManager(
         data_dir=config.storage.auth_directory
