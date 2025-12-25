@@ -3,7 +3,7 @@
 
 # TheRock ROCm for gfx1103 (Phoenix APU) Installation Guide
 
-This guide documents how to install TheRock's nightly ROCm and PyTorch builds with proper gfx1103 support for AMD Phoenix APUs (like the Radeon 780M in Steam Deck OLED and Lenovo Legion Go S).
+This guide documents how to install TheRock's nightly ROCm and PyTorch builds with proper gfx1103 support for AMD Phoenix APUs (like the Radeon 780M in the AMD 7840U).
 
 ## Background
 
