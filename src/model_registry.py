@@ -144,7 +144,9 @@ class ModelRegistry:
         name_lower = path.name.lower()
         
         # Check for common model type indicators
-        if "xl" in name_lower or "sdxl" in name_lower:
+        if "qwen" in name_lower:
+            return "qwen"
+        elif "xl" in name_lower or "sdxl" in name_lower:
             return "sdxl"
         elif "flux" in name_lower:
             return "flux"
@@ -164,7 +166,9 @@ class ModelRegistry:
                         data = json.load(f)
                     
                     class_name = data.get("_class_name", "").lower()
-                    if "xl" in class_name:
+                    if "qwen" in class_name:
+                        return "qwen"
+                    elif "xl" in class_name:
                         return "sdxl"
                     elif "flux" in class_name:
                         return "flux"

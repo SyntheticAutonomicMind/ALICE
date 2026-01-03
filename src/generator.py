@@ -449,6 +449,11 @@ class GeneratorService:
         self._is_single_file_sdxl: bool = False  # Track if loaded model is single-file SDXL (needs extra memory opts)
         self._compel: Optional[CompelForSDXL] = None  # CompelForSDXL instance for long prompt support
         
+        # Concurrency control
+        self._model_lock: asyncio.Lock = asyncio.Lock()
+        self._generation_semaphore: asyncio.Semaphore = asyncio.Semaphore(1)
+        self._current_model_type: Optional[str] = None  # For Qwen support later
+        
         # Device detection
         self._device = self._detect_device()
         
@@ -587,17 +592,18 @@ class GeneratorService:
         Args:
             model_path: Path to model file or directory
         """
-        model_path = Path(model_path)
-        model_key = str(model_path)
-        
-        # Skip if same model already loaded
-        if self._current_model == model_key and self._pipeline is not None:
-            logger.debug("Model already loaded: %s", model_key)
-            return
-        
-        # Unload current model
-        if self._pipeline is not None:
-            await self.unload_model()
+        async with self._model_lock:
+            model_path = Path(model_path)
+            model_key = str(model_path)
+            
+            # Skip if same model already loaded
+            if self._current_model == model_key and self._pipeline is not None:
+                logger.debug("Model already loaded: %s", model_key)
+                return
+            
+            # Unload current model
+            if self._pipeline is not None:
+                await self._unload_model_internal()
         
         # Import diffusers if needed
         _import_diffusers()
@@ -710,6 +716,7 @@ class GeneratorService:
             
             self._current_model = model_key
             self._current_model_path = model_path
+            self._current_model_type = model_type  # Store for Qwen support
             
             logger.info("Model loaded successfully: %s (type=%s)", model_path.name, model_type)
             
@@ -717,10 +724,11 @@ class GeneratorService:
             logger.error("Failed to load model: %s", e)
             self._pipeline = None
             self._current_model = None
+            self._current_model_type = None
             raise
     
-    async def unload_model(self) -> None:
-        """Unload the currently loaded model."""
+    async def _unload_model_internal(self) -> None:
+        """Unload current model without acquiring lock (for internal use when lock already held)."""
         if self._pipeline is None:
             return
         
@@ -735,6 +743,7 @@ class GeneratorService:
         self._pipeline = None
         self._current_model = None
         self._current_model_path = None
+        self._current_model_type = None
         self._device_map_active = False
         self._is_single_file_sdxl = False
         
@@ -743,6 +752,11 @@ class GeneratorService:
             torch.cuda.empty_cache()
         
         logger.info("Model unloaded")
+    
+    async def unload_model(self) -> None:
+        """Unload the currently loaded model (public API, acquires lock)."""
+        async with self._model_lock:
+            await self._unload_model_internal()
     
     async def generate(
         self,
@@ -784,7 +798,7 @@ class GeneratorService:
         
         # Apply defaults
         steps = steps or self.default_steps
-        guidance_scale = guidance_scale or self.default_guidance_scale
+        guidance_scale = guidance_scale if guidance_scale is not None else self.default_guidance_scale
         width = width or self.default_width
         height = height or self.default_height
         scheduler = scheduler or self.default_scheduler
@@ -808,227 +822,239 @@ class GeneratorService:
         if self._pipeline is None:
             raise RuntimeError("No model loaded")
         
-        # Load LoRAs if specified
-        lora_names = []
-        if lora_paths and len(lora_paths) > 0:
-            # Set default scales if not provided
-            if lora_scales is None:
-                lora_scales = [1.0] * len(lora_paths)
-            elif len(lora_scales) < len(lora_paths):
-                # Pad with 1.0 for missing scales
-                lora_scales = list(lora_scales) + [1.0] * (len(lora_paths) - len(lora_scales))
+        # ACQUIRE SEMAPHORE - serializes all concurrent generation requests
+        async with self._generation_semaphore:
+            logger.debug("Acquired generation semaphore, proceeding with generation")
             
-            try:
-                for i, lora_path in enumerate(lora_paths):
-                    lora_name = Path(lora_path).stem
-                    lora_names.append(lora_name)
-                    adapter_name = f"lora_{i}"
+            # Load LoRAs if specified
+            lora_names = []
+            if lora_paths and len(lora_paths) > 0:
+                # Set default scales if not provided
+                if lora_scales is None:
+                    lora_scales = [1.0] * len(lora_paths)
+                elif len(lora_scales) < len(lora_paths):
+                    # Pad with 1.0 for missing scales
+                    lora_scales = list(lora_scales) + [1.0] * (len(lora_paths) - len(lora_scales))
+                
+                try:
+                    for i, lora_path in enumerate(lora_paths):
+                        lora_name = Path(lora_path).stem
+                        lora_names.append(lora_name)
+                        adapter_name = f"lora_{i}"
+                        
+                        logger.info("Loading LoRA: %s (scale=%.2f)", lora_name, lora_scales[i])
+                        self._pipeline.load_lora_weights(
+                            str(lora_path),
+                            adapter_name=adapter_name
+                        )
                     
-                    logger.info("Loading LoRA: %s (scale=%.2f)", lora_name, lora_scales[i])
-                    self._pipeline.load_lora_weights(
-                        str(lora_path),
-                        adapter_name=adapter_name
-                    )
-                
-                # Set LoRA scales
-                if len(lora_paths) > 0:
-                    adapter_names = [f"lora_{i}" for i in range(len(lora_paths))]
-                    self._pipeline.set_adapters(adapter_names, adapter_weights=lora_scales[:len(lora_paths)])
-                    logger.debug("Set LoRA adapters: %s with scales %s", adapter_names, lora_scales[:len(lora_paths)])
-                    
-            except Exception as e:
-                logger.warning("Failed to load LoRAs: %s. Continuing without LoRAs.", e)
-                lora_names = []
-        
-        logger.info(
-            "Generating image: prompt='%s...', steps=%d, guidance=%.1f, size=%dx%d",
-            prompt[:50], steps, guidance_scale, width, height
-        )
-        
-        # Set seed
-        # When device_map is active, latents are generated on CPU
-        generator_device = "cpu" if self._device_map_active else self._device
-        generator = None
-        actual_seed = seed
-        if seed is not None:
-            generator = torch.Generator(device=generator_device).manual_seed(seed)
-        else:
-            # Generate random seed for reproducibility tracking
-            actual_seed = torch.randint(0, 2**32, (1,)).item()
-            generator = torch.Generator(device=generator_device).manual_seed(actual_seed)
-        
-        # Generate in thread pool to avoid blocking
-        def _generate():
-            # CRITICAL FIX: Create scheduler instance PER REQUEST to avoid race conditions
-            # When multiple concurrent requests share the same scheduler, they corrupt
-            # each other's state (step_index, sigmas, timesteps), causing index errors.
-            # Each request must have its own scheduler instance with independent state.
-            request_scheduler = None
-            original_scheduler = None
-            try:
-                request_scheduler = _get_scheduler(scheduler, self._pipeline.scheduler.config)
-                request_scheduler.set_timesteps(steps, device=self._device)
-                
-                # Diagnostic logging for Euler schedulers
-                if scheduler in ["euler_a", "euler", "euler_ancestral"]:
-                    sigmas_len = len(request_scheduler.sigmas)
-                    logger.debug(
-                        "Created fresh scheduler for request: %s, steps=%d, sigmas_len=%d",
-                        scheduler, steps, sigmas_len
-                    )
-                
-                # Temporarily replace pipeline's scheduler with our request-specific instance
-                original_scheduler = self._pipeline.scheduler
-                self._pipeline.scheduler = request_scheduler
-                
-            except Exception as e:
-                logger.warning("Failed to create request scheduler %s: %s. Using shared scheduler (may have race conditions).", scheduler, e)
+                    # Set LoRA scales
+                    if len(lora_paths) > 0:
+                        adapter_names = [f"lora_{i}" for i in range(len(lora_paths))]
+                        self._pipeline.set_adapters(adapter_names, adapter_weights=lora_scales[:len(lora_paths)])
+                        logger.debug("Set LoRA adapters: %s with scales %s", adapter_names, lora_scales[:len(lora_paths)])
+                        
+                except Exception as e:
+                    logger.warning("Failed to load LoRAs: %s. Continuing without LoRAs.", e)
+                    lora_names = []
             
-            try:
-                with torch.inference_mode():
-                    # If VAE CPU decode is enabled, get latents instead of images
-                    output_type = "latent" if self.vae_decode_cpu else "pil"
+            logger.info(
+                "Generating image: prompt='%s...', steps=%d, guidance=%.1f, size=%dx%d",
+                prompt[:50], steps, guidance_scale, width, height
+            )
+            
+            # Set seed
+            # When device_map is active, latents are generated on CPU
+            generator_device = "cpu" if self._device_map_active else self._device
+            generator = None
+            actual_seed = seed
+            if seed is not None:
+                generator = torch.Generator(device=generator_device).manual_seed(seed)
+            else:
+                # Generate random seed for reproducibility tracking
+                actual_seed = torch.randint(0, 2**32, (1,)).item()
+                generator = torch.Generator(device=generator_device).manual_seed(actual_seed)
+            
+            # Generate in thread pool to avoid blocking
+            def _generate():
+                # CRITICAL FIX: Create scheduler instance PER REQUEST to avoid race conditions
+                # When multiple concurrent requests share the same scheduler, they corrupt
+                # each other's state (step_index, sigmas, timesteps), causing index errors.
+                # Each request must have its own scheduler instance with independent state.
+                request_scheduler = None
+                original_scheduler = None
+                try:
+                    request_scheduler = _get_scheduler(scheduler, self._pipeline.scheduler.config)
+                    request_scheduler.set_timesteps(steps, device=self._device)
                     
-                    # For SDXL, use prompt_2/negative_prompt_2 for dual text encoder support
-                    # This allows for longer prompts (77 tokens per encoder = 154 tokens total)
-                    pipeline_kwargs = {
-                        "prompt": prompt,
-                        "negative_prompt": negative_prompt if negative_prompt else None,
-                        "num_inference_steps": steps,
-                        "guidance_scale": guidance_scale,
-                        "width": width,
-                        "height": height,
-                        "num_images_per_prompt": num_images,
-                        "generator": generator,
-                        "output_type": output_type,
-                    }
+                    # Diagnostic logging for Euler schedulers
+                    if scheduler in ["euler_a", "euler", "euler_ancestral"]:
+                        sigmas_len = len(request_scheduler.sigmas)
+                        logger.debug(
+                            "Created fresh scheduler for request: %s, steps=%d, sigmas_len=%d",
+                            scheduler, steps, sigmas_len
+                        )
                     
-                    # Use CompelForSDXL for SDXL models to support long prompts
-                    if self._compel is not None:
-                        logger.info("Using CompelForSDXL for long prompt encoding")
-                        try:
-                            # Encode with CompelForSDXL (proper SDXL support, no length limits)
-                            # CompelForSDXL returns a LabelledConditioning object with:
-                            #   .embeds, .pooled_embeds, .negative_embeds, .negative_pooled_embeds
-                            logger.debug("Encoding prompts with CompelForSDXL")
-                            result = self._compel(
-                                main_prompt=prompt,
-                                negative_prompt=negative_prompt if negative_prompt else None
-                            )
-                            
-                            logger.debug("Embedding shapes: embeds=%s, pooled=%s", 
-                                        result.embeds.shape, result.pooled_embeds.shape)
-                            
-                            # Replace text prompts with pre-computed embeddings
-                            pipeline_kwargs["prompt_embeds"] = result.embeds
-                            pipeline_kwargs["negative_prompt_embeds"] = result.negative_embeds
-                            pipeline_kwargs["pooled_prompt_embeds"] = result.pooled_embeds
-                            pipeline_kwargs["negative_pooled_prompt_embeds"] = result.negative_pooled_embeds
-                            
-                            # Remove text prompts (using embeddings instead)
-                            del pipeline_kwargs["prompt"]
-                            del pipeline_kwargs["negative_prompt"]
-                            
-                            logger.info("CompelForSDXL encoding complete - long prompts fully supported")
-                        except Exception as e:
-                            logger.error("CompelForSDXL encoding failed: %s. Falling back to standard prompts.", e, exc_info=True)
-                            # Keep original prompt/negative_prompt in pipeline_kwargs
+                    # Temporarily replace pipeline's scheduler with our request-specific instance
+                    original_scheduler = self._pipeline.scheduler
+                    self._pipeline.scheduler = request_scheduler
                     
-                    result = self._pipeline(**pipeline_kwargs)
+                except Exception as e:
+                    logger.warning("Failed to create request scheduler %s: %s. Using shared scheduler (may have race conditions).", scheduler, e)
                 
-                # Decode VAE on CPU if enabled (fixes GPU hang on AMD gfx1103)
-                if self.vae_decode_cpu:
-                    logger.info("Decoding VAE on CPU...")
-                    latents = result.images
+                try:
+                    with torch.inference_mode():
+                        # If VAE CPU decode is enabled, get latents instead of images
+                        output_type = "latent" if self.vae_decode_cpu else "pil"
+                        
+                        # For SDXL, use prompt_2/negative_prompt_2 for dual text encoder support
+                        # This allows for longer prompts (77 tokens per encoder = 154 tokens total)
+                        pipeline_kwargs = {
+                            "prompt": prompt,
+                            "negative_prompt": negative_prompt if negative_prompt else None,
+                            "num_inference_steps": steps,
+                            "width": width,
+                            "height": height,
+                            "num_images_per_prompt": num_images,
+                            "generator": generator,
+                            "output_type": output_type,
+                        }
+                        
+                        # Qwen models use true_cfg_scale instead of guidance_scale
+                        if self._current_model_type == "qwen":
+                            pipeline_kwargs["true_cfg_scale"] = guidance_scale
+                            logger.debug("Using true_cfg_scale=%s for Qwen model", guidance_scale)
+                        else:
+                            pipeline_kwargs["guidance_scale"] = guidance_scale
+                        
+                        # Use CompelForSDXL for SDXL models to support long prompts
+                        if self._compel is not None:
+                            logger.info("Using CompelForSDXL for long prompt encoding")
+                            try:
+                                # Encode with CompelForSDXL (proper SDXL support, no length limits)
+                                # CompelForSDXL returns a LabelledConditioning object with:
+                                #   .embeds, .pooled_embeds, .negative_embeds, .negative_pooled_embeds
+                                logger.debug("Encoding prompts with CompelForSDXL")
+                                result = self._compel(
+                                    main_prompt=prompt,
+                                    negative_prompt=negative_prompt if negative_prompt else None
+                                )
+                                
+                                logger.debug("Embedding shapes: embeds=%s, pooled=%s", 
+                                            result.embeds.shape, result.pooled_embeds.shape)
+                                
+                                # Replace text prompts with pre-computed embeddings
+                                pipeline_kwargs["prompt_embeds"] = result.embeds
+                                pipeline_kwargs["negative_prompt_embeds"] = result.negative_embeds
+                                pipeline_kwargs["pooled_prompt_embeds"] = result.pooled_embeds
+                                pipeline_kwargs["negative_pooled_prompt_embeds"] = result.negative_pooled_embeds
+                                
+                                # Remove text prompts (using embeddings instead)
+                                del pipeline_kwargs["prompt"]
+                                del pipeline_kwargs["negative_prompt"]
+                                
+                                logger.info("CompelForSDXL encoding complete - long prompts fully supported")
+                            except Exception as e:
+                                logger.error("CompelForSDXL encoding failed: %s. Falling back to standard prompts.", e, exc_info=True)
+                                # Keep original prompt/negative_prompt in pipeline_kwargs
+                        
+                        result = self._pipeline(**pipeline_kwargs)
                     
-                    # Get VAE's current dtype before moving
-                    vae_dtype = next(self._pipeline.vae.parameters()).dtype
-                    original_vae_device = next(self._pipeline.vae.parameters()).device
+                    # Decode VAE on CPU if enabled (fixes GPU hang on AMD gfx1103)
+                    if self.vae_decode_cpu:
+                        logger.info("Decoding VAE on CPU...")
+                        latents = result.images
+                        
+                        # Get VAE's current dtype before moving
+                        vae_dtype = next(self._pipeline.vae.parameters()).dtype
+                        original_vae_device = next(self._pipeline.vae.parameters()).device
+                        
+                        # Move entire VAE to CPU and convert to float32 (CPU doesn't support bfloat16 well)
+                        self._pipeline.vae.cpu().float()
+                        latents_cpu = latents.cpu().float()
+                        
+                        with torch.no_grad():
+                            images = self._pipeline.vae.decode(
+                                latents_cpu / self._pipeline.vae.config.scaling_factor,
+                                return_dict=False
+                            )[0]
+                            pil_images = self._pipeline.image_processor.postprocess(images, output_type="pil")
+                        
+                        # Move VAE back to original device and restore dtype
+                        self._pipeline.vae.to(original_vae_device, dtype=vae_dtype)
+                        
+                        # Create a result-like object with PIL images
+                        class VAEResult:
+                            def __init__(self, images):
+                                self.images = images
+                        result = VAEResult(pil_images)
+                        logger.info("VAE decode on CPU completed")
                     
-                    # Move entire VAE to CPU and convert to float32 (CPU doesn't support bfloat16 well)
-                    self._pipeline.vae.cpu().float()
-                    latents_cpu = latents.cpu().float()
-                    
-                    with torch.no_grad():
-                        images = self._pipeline.vae.decode(
-                            latents_cpu / self._pipeline.vae.config.scaling_factor,
-                            return_dict=False
-                        )[0]
-                        pil_images = self._pipeline.image_processor.postprocess(images, output_type="pil")
-                    
-                    # Move VAE back to original device and restore dtype
-                    self._pipeline.vae.to(original_vae_device, dtype=vae_dtype)
-                    
-                    # Create a result-like object with PIL images
-                    class VAEResult:
-                        def __init__(self, images):
-                            self.images = images
-                    result = VAEResult(pil_images)
-                    logger.info("VAE decode on CPU completed")
-                
-                return result
-            finally:
-                # Restore original scheduler after generation completes
-                if original_scheduler is not None:
-                    self._pipeline.scheduler = original_scheduler
-        
-        # Run generation
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, _generate)
-        
-        # Save image
-        image_id = uuid.uuid4().hex[:12]
-        image_path = self.images_dir / f"{image_id}.png"
-        
-        # Save first image (or all if num_images > 1)
-        if num_images == 1:
-            result.images[0].save(image_path)
-            saved_paths = [image_path]
-        else:
-            saved_paths = []
-            for i, img in enumerate(result.images):
-                path = self.images_dir / f"{image_id}_{i}.png"
-                img.save(path)
-                saved_paths.append(path)
-            image_path = saved_paths[0]  # Return first image path
-        
-        # Calculate statistics
-        generation_time = time.time() - start_time
-        self.total_generations += 1
-        self.total_generation_time += generation_time
-        
-        logger.info(
-            "Image generated: %s (%.2fs)",
-            image_path.name, generation_time
-        )
-        
-        # Build metadata
-        metadata = {
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "steps": steps,
-            "guidance_scale": guidance_scale,
-            "width": width,
-            "height": height,
-            "seed": actual_seed,
-            "scheduler": scheduler,
-            "model": str(model_path.name),
-            "generation_time": generation_time,
-            "num_images": num_images,
-            "loras": lora_names if lora_names else None,
-            "lora_scales": list(lora_scales[:len(lora_paths)]) if lora_paths and lora_scales else None,
-        }
-        
-        # Unload LoRAs after generation to prevent memory buildup
-        if lora_names:
-            try:
-                self._pipeline.unload_lora_weights()
-                logger.debug("Unloaded LoRA weights")
-            except Exception as e:
-                logger.warning("Failed to unload LoRAs: %s", e)
-        
-        # Return all saved paths (for multi-image generation)
-        return saved_paths, metadata
+                    return result
+                finally:
+                    # Restore original scheduler after generation completes
+                    if original_scheduler is not None:
+                        self._pipeline.scheduler = original_scheduler
+            
+            # Run generation
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, _generate)
+            
+            # Save image
+            image_id = uuid.uuid4().hex[:12]
+            image_path = self.images_dir / f"{image_id}.png"
+            
+            # Save first image (or all if num_images > 1)
+            if num_images == 1:
+                result.images[0].save(image_path)
+                saved_paths = [image_path]
+            else:
+                saved_paths = []
+                for i, img in enumerate(result.images):
+                    path = self.images_dir / f"{image_id}_{i}.png"
+                    img.save(path)
+                    saved_paths.append(path)
+                image_path = saved_paths[0]  # Return first image path
+            
+            # Calculate statistics
+            generation_time = time.time() - start_time
+            self.total_generations += 1
+            self.total_generation_time += generation_time
+            
+            logger.info(
+                "Image generated: %s (%.2fs)",
+                image_path.name, generation_time
+            )
+            
+            # Build metadata
+            metadata = {
+                "prompt": prompt,
+                "negative_prompt": negative_prompt,
+                "steps": steps,
+                "guidance_scale": guidance_scale,
+                "width": width,
+                "height": height,
+                "seed": actual_seed,
+                "scheduler": scheduler,
+                "model": str(model_path.name),
+                "generation_time": generation_time,
+                "num_images": num_images,
+                "loras": lora_names if lora_names else None,
+                "lora_scales": list(lora_scales[:len(lora_paths)]) if lora_paths and lora_scales else None,
+            }
+            
+            # Unload LoRAs after generation to prevent memory buildup
+            if lora_names:
+                try:
+                    self._pipeline.unload_lora_weights()
+                    logger.debug("Unloaded LoRA weights")
+                except Exception as e:
+                    logger.warning("Failed to unload LoRAs: %s", e)
+            
+            logger.debug("Released generation semaphore")
+            
+            # Return all saved paths (for multi-image generation)
+            return saved_paths, metadata
     
     def get_average_generation_time(self) -> float:
         """Get average generation time in seconds."""

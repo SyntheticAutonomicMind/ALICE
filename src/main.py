@@ -911,6 +911,18 @@ async def get_model_info(model_id: str, access: AccessLevel = Depends(require_ac
                 {"width": 768, "height": 1344, "label": "Portrait (768×1344)"},
                 {"width": 1344, "height": 768, "label": "Landscape (1344×768)"}
             ]
+        },
+        "qwen": {
+            "native_resolution": 1328,
+            "recommended_resolutions": [
+                {"width": 1328, "height": 1328, "label": "Square (1328×1328)"},
+                {"width": 928, "height": 1664, "label": "Portrait 9:16 (928×1664)"},
+                {"width": 1664, "height": 928, "label": "Landscape 16:9 (1664×928)"},
+                {"width": 1104, "height": 1472, "label": "Portrait 3:4 (1104×1472)"},
+                {"width": 1472, "height": 1104, "label": "Landscape 4:3 (1472×1104)"},
+                {"width": 1056, "height": 1584, "label": "Portrait 2:3 (1056×1584)"},
+                {"width": 1584, "height": 1056, "label": "Landscape 3:2 (1584×1056)"}
+            ]
         }
     }
     

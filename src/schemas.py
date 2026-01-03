@@ -38,7 +38,7 @@ class SAMImageConfig(BaseModel):
     """
     negative_prompt: Optional[str] = Field(default=None, description="Negative prompt")
     steps: Optional[int] = Field(default=None, ge=1, le=150, description="Inference steps")
-    guidance_scale: Optional[float] = Field(default=None, ge=1.0, le=20.0, description="Guidance scale")
+    guidance_scale: Optional[float] = Field(default=None, ge=0.0, le=20.0, description="Guidance scale (0 for SD Turbo)")
     width: Optional[int] = Field(default=None, ge=64, le=2048, description="Image width (will be rounded to multiple of 8)")
     height: Optional[int] = Field(default=None, ge=64, le=2048, description="Image height (will be rounded to multiple of 8)")
     seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
