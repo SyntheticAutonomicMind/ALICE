@@ -337,6 +337,10 @@ def _verify_web_auth_cookie(alice_session: Optional[str]) -> bool:
 
 def _verify_web_admin_cookie(alice_session: Optional[str]) -> bool:
     """Verify if request has valid admin session cookie."""
+    # If auth is disabled, allow access
+    if not config.server.require_auth:
+        return True
+    
     if auth_manager is None:
         return False
     
@@ -1116,14 +1120,14 @@ async def chat_completions(
         )
     
     # Extract generation parameters from sam_config
-    sam_config = request.sam_config or {}
+    sam_config = request.sam_config
     
     # Resolve LoRA paths - combine sam_config LoRAs with prompt-parsed LoRAs
     lora_paths = []
     lora_scales = []
     
     # First add LoRAs from sam_config (UI-selected)
-    lora_ids = getattr(sam_config, "lora_paths", None)
+    lora_ids = sam_config.lora_paths if sam_config else None
     if lora_ids and len(lora_ids) > 0:
         for lora_id in lora_ids:
             lora_path = model_registry.get_lora_path(lora_id)
@@ -1132,7 +1136,7 @@ async def chat_completions(
             else:
                 logger.warning("LoRA not found: %s (skipping)", lora_id)
         
-        config_lora_scales = getattr(sam_config, "lora_scales", None)
+        config_lora_scales = sam_config.lora_scales if sam_config else None
         if config_lora_scales:
             lora_scales.extend(config_lora_scales)
         else:
@@ -1157,26 +1161,30 @@ async def chat_completions(
         lora_scales = None
     
     # Debug: Log generation parameters
-    gen_scheduler = getattr(sam_config, "scheduler", None)
-    gen_steps = getattr(sam_config, "steps", None)
-    gen_width = getattr(sam_config, "width", None)
-    gen_height = getattr(sam_config, "height", None)
-    logger.info("Generation params from sam_config: scheduler=%s, steps=%s, size=%sx%s", 
-                gen_scheduler, gen_steps, gen_width, gen_height)
+    gen_scheduler = sam_config.scheduler if sam_config else None
+    gen_steps = sam_config.steps if sam_config else None
+    gen_width = sam_config.width if sam_config else None
+    gen_height = sam_config.height if sam_config else None
+    gen_guidance_scale = sam_config.guidance_scale if sam_config else None
+    gen_negative_prompt = sam_config.negative_prompt if sam_config else None
+    gen_seed = sam_config.seed if sam_config else None
+    gen_num_images = sam_config.num_images if sam_config else None
+    logger.info("Generation params from sam_config: scheduler=%s, steps=%s, guidance=%.1f, size=%sx%s", 
+                gen_scheduler, gen_steps, gen_guidance_scale if gen_guidance_scale is not None else -1, gen_width, gen_height)
     
     try:
         # Generate image(s)
         image_paths, metadata = await generator.generate(
             model_path=Path(model_info.path),
             prompt=prompt,
-            negative_prompt=getattr(sam_config, "negative_prompt", "") or "",
+            negative_prompt=gen_negative_prompt or "",
             steps=gen_steps,
-            guidance_scale=getattr(sam_config, "guidance_scale", None),
+            guidance_scale=gen_guidance_scale,
             width=gen_width,
             height=gen_height,
-            seed=getattr(sam_config, "seed", None),
+            seed=gen_seed,
             scheduler=gen_scheduler,
-            num_images=getattr(sam_config, "num_images", 1) or 1,
+            num_images=gen_num_images or 1,
             lora_paths=lora_paths if lora_paths else None,
             lora_scales=lora_scales,
         )
