@@ -432,6 +432,8 @@
                 const gpuMemSection = document.getElementById('gpu-mem-section');
                 const gpuUtilSection = document.getElementById('gpu-util-section');
                 
+                console.log('GPU Stats Available:', gpuStatsAvailable, 'Device:', health.gpuAvailable ? 'GPU' : 'CPU');
+                
                 if (gpuStatsAvailable) {
                     // Show GPU stats
                     gpuMemSection.style.display = 'block';
