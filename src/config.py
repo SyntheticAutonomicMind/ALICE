@@ -70,7 +70,7 @@ class StorageConfig(BaseModel):
     max_storage_gb: int = Field(default=100, ge=1, description="Maximum storage in GB")
     retention_days: int = Field(default=7, ge=1, description="Image retention period in days")
     public_image_expiration_hours: int = Field(default=168, ge=1, description="Default expiration for public images (hours)")
-    gallery_page_size: int = Field(default=100, ge=1, description="Number of images to display per page in gallery (use 0 for all)")
+    gallery_page_size: int = Field(default=100, ge=0, description="Number of images to display per page in gallery (use 0 for all)")
 
 
 class LoggingConfig(BaseModel):
