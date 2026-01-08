@@ -1247,7 +1247,7 @@
                     document.getElementById('setting-storage-dir').value = config.storage.images_directory || '';
                     document.getElementById('setting-storage-max').value = config.storage.max_storage_gb || 100;
                     document.getElementById('setting-storage-retention').value = config.storage.retention_days || 7;
-                    document.getElementById('setting-gallery-page-size').value = config.storage.gallery_page_size || 100;
+                    document.getElementById('setting-gallery-page-size').value = config.storage.gallery_page_size ?? 100;
                     
                     // Logging settings
                     document.getElementById('setting-logging-level').value = config.logging.level || 'INFO';
