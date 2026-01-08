@@ -821,6 +821,7 @@ async def health_check():
         return HealthResponse(
             status="starting",
             gpu_available=False,
+            gpu_stats_available=False,
             models_loaded=0,
             version="1.2.1"
         )
@@ -830,6 +831,7 @@ async def health_check():
     return HealthResponse(
         status="ok",
         gpu_available=gpu_info["gpu_available"],
+        gpu_stats_available=gpu_info.get("stats_available", False),
         models_loaded=1 if generator.is_model_loaded else 0,
         version="1.2.1"
     )

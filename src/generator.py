@@ -505,6 +505,7 @@ class GeneratorService:
             "memory_used": "0 GB",
             "memory_total": "0 GB",
             "utilization": 0.0,
+            "stats_available": False,  # Whether detailed stats are available
         }
         
         if self._device == "cuda":
@@ -517,8 +518,15 @@ class GeneratorService:
                 info["memory_total"] = f"{total / (1024**3):.1f} GB"
                 info["utilization"] = allocated / total if total > 0 else 0.0
                 info["gpu_name"] = props.name
+                info["stats_available"] = True
             except Exception as e:
                 logger.warning("Failed to get CUDA info: %s", e)
+        elif self._device == "mps":
+            # MPS (Apple Silicon) - PyTorch doesn't expose detailed memory stats yet
+            info["gpu_name"] = "Apple Silicon (MPS)"
+            info["stats_available"] = False
+            # MPS memory stats are not available through PyTorch API
+            logger.debug("MPS device detected - detailed stats not available")
         
         return info
     

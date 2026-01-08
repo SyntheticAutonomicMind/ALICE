@@ -175,6 +175,7 @@ class HealthResponse(BaseModel):
     """Health check response."""
     status: str = Field(default="ok")
     gpu_available: bool = Field(default=False, alias="gpuAvailable")
+    gpu_stats_available: bool = Field(default=False, alias="gpuStatsAvailable")
     models_loaded: int = Field(default=0, alias="modelsLoaded")
     version: str = Field(default="1.0.0")
 

@@ -249,7 +249,7 @@
             </div>
             
             <div style="display: grid; gap: 1rem;">
-                <div>
+                <div id="gpu-mem-section">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                         <span style="font-size: 0.85rem; font-weight: 500;">GPU Memory</span>
                         <span id="gpu-mem-text" style="font-size: 0.85rem; color: var(--text-muted);">0 / 0 GB</span>
@@ -260,7 +260,7 @@
                     </div>
                 </div>
                 
-                <div>
+                <div id="gpu-util-section">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                         <span style="font-size: 0.85rem; font-weight: 500;">GPU Utilization</span>
                         <span id="gpu-util-text" style="font-size: 0.85rem; color: var(--text-muted);">0%</span>
@@ -427,23 +427,38 @@
                 document.getElementById('avg-time').textContent = 
                     UI.formatDuration(metrics.avgGenerationTime || 0);
                 
-                // GPU Memory
-                const usedMatch = (metrics.gpuMemoryUsed || '0').match(/[\d.]+/);
-                const totalMatch = (metrics.gpuMemoryTotal || '0').match(/[\d.]+/);
-                const gpuMemUsed = parseFloat(usedMatch?.[0] || 0);
-                const gpuMemTotal = parseFloat(totalMatch?.[0] || 1);
-                const gpuMemPercent = Math.round((gpuMemUsed / gpuMemTotal) * 100);
+                // Show/hide GPU stat sections based on availability
+                const gpuStatsAvailable = health.gpuStatsAvailable || false;
+                const gpuMemSection = document.getElementById('gpu-mem-section');
+                const gpuUtilSection = document.getElementById('gpu-util-section');
                 
-                document.getElementById('gpu-mem-text').textContent = 
-                    `${metrics.gpuMemoryUsed || '0 GB'} / ${metrics.gpuMemoryTotal || '0 GB'}`;
-                document.getElementById('gpu-mem-bar').style.width = `${gpuMemPercent}%`;
-                document.getElementById('gpu-mem-percent').textContent = `${gpuMemPercent}%`;
-                
-                // GPU Utilization
-                const gpuUtil = Math.round((metrics.gpuUtilization || 0) * 100);
-                document.getElementById('gpu-util-text').textContent = `${gpuUtil}%`;
-                document.getElementById('gpu-util-bar').style.width = `${gpuUtil}%`;
-                document.getElementById('gpu-util-percent').textContent = `${gpuUtil}%`;
+                if (gpuStatsAvailable) {
+                    // Show GPU stats
+                    gpuMemSection.style.display = 'block';
+                    gpuUtilSection.style.display = 'block';
+                    
+                    // GPU Memory
+                    const usedMatch = (metrics.gpuMemoryUsed || '0').match(/[\d.]+/);
+                    const totalMatch = (metrics.gpuMemoryTotal || '0').match(/[\d.]+/);
+                    const gpuMemUsed = parseFloat(usedMatch?.[0] || 0);
+                    const gpuMemTotal = parseFloat(totalMatch?.[0] || 1);
+                    const gpuMemPercent = Math.round((gpuMemUsed / gpuMemTotal) * 100);
+                    
+                    document.getElementById('gpu-mem-text').textContent = 
+                        `${metrics.gpuMemoryUsed || '0 GB'} / ${metrics.gpuMemoryTotal || '0 GB'}`;
+                    document.getElementById('gpu-mem-bar').style.width = `${gpuMemPercent}%`;
+                    document.getElementById('gpu-mem-percent').textContent = `${gpuMemPercent}%`;
+                    
+                    // GPU Utilization
+                    const gpuUtil = Math.round((metrics.gpuUtilization || 0) * 100);
+                    document.getElementById('gpu-util-text').textContent = `${gpuUtil}%`;
+                    document.getElementById('gpu-util-bar').style.width = `${gpuUtil}%`;
+                    document.getElementById('gpu-util-percent').textContent = `${gpuUtil}%`;
+                } else {
+                    // Hide GPU stats on Mac/MPS or CPU mode
+                    gpuMemSection.style.display = 'none';
+                    gpuUtilSection.style.display = 'none';
+                }
                 
                 // Queue
                 const queueDepth = metrics.queueDepth || 0;
