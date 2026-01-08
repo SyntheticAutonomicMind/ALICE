@@ -21,7 +21,7 @@ generation:
   default_steps: 20
   default_guidance_scale: 7.5
   default_scheduler: dpm++_sde_karras
-  max_concurrent: 1
+  max_concurrent: 1  # Maximum concurrent generation requests (1=serial, 2+=parallel). Set to 1 for stable operation.
   request_timeout: 300
   default_width: 512
   default_height: 512

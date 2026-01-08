@@ -392,6 +392,7 @@ class GeneratorService:
         enable_sequential_cpu_offload: bool = False,
         attention_slice_size: Optional[str] = "auto",
         vae_decode_cpu: bool = False,
+        max_concurrent_generations: int = 1,
     ):
         """
         Initialize generator service.
@@ -445,7 +446,8 @@ class GeneratorService:
         
         # Concurrency control
         self._model_lock: asyncio.Lock = asyncio.Lock()
-        self._generation_semaphore: asyncio.Semaphore = asyncio.Semaphore(1)
+        self._generation_semaphore: asyncio.Semaphore = asyncio.Semaphore(max_concurrent_generations)
+        self._max_concurrent = max_concurrent_generations
         self._current_model_type: Optional[str] = None  # For Qwen support later
         
         # Request queue tracking
@@ -460,8 +462,8 @@ class GeneratorService:
         self.total_generation_time = 0.0
         
         logger.info(
-            "Generator initialized: device=%s, images_dir=%s, vae_slicing=%s, vae_tiling=%s",
-            self._device, self.images_dir, self.enable_vae_slicing, self.enable_vae_tiling
+            "Generator initialized: device=%s, images_dir=%s, max_concurrent=%d, vae_slicing=%s, vae_tiling=%s",
+            self._device, self.images_dir, max_concurrent_generations, self.enable_vae_slicing, self.enable_vae_tiling
         )
     
     def _detect_device(self) -> str:

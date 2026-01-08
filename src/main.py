@@ -130,6 +130,7 @@ async def lifespan(app: FastAPI):
         enable_sequential_cpu_offload=config.generation.enable_sequential_cpu_offload,
         attention_slice_size=config.generation.attention_slice_size,
         vae_decode_cpu=config.generation.vae_decode_cpu,
+        max_concurrent_generations=config.generation.max_concurrent,
     )
     download_manager = DownloadManager(
         models_dir=config.models.directory,
