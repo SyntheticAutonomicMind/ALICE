@@ -350,6 +350,7 @@ server:
   host: 0.0.0.0
   port: 8080
   api_key: null  # Set to enable authentication
+  block_nsfw: true  # Block NSFW content (enabled by default)
 
 models:
   directory: ./models
@@ -373,6 +374,28 @@ storage:
 logging:
   level: INFO
   file: ./logs/alice.log
+```
+
+### NSFW Content Filtering
+
+ALICE includes comprehensive NSFW content filtering enabled by default:
+
+**Features:**
+- 100+ explicit keyword detection
+- Obfuscation detection (leetspeak, spacing, symbols)
+- Unicode character substitution detection
+- Context-based pattern matching
+- Checks both prompt and negative_prompt fields
+
+**Configuration:**
+```yaml
+server:
+  block_nsfw: true  # Set to false to disable filtering
+```
+
+When enabled, requests containing NSFW content return HTTP 400 with:
+```
+NSFW content detected and blocked. This server has NSFW generation disabled.
 ```
 
 ---

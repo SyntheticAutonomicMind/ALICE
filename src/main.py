@@ -655,30 +655,78 @@ def check_nsfw_content(text: str) -> bool:
     """
     Check if text contains NSFW keywords or content.
     
+    Comprehensive filter that detects:
+    - Direct NSFW keywords
+    - Common variations and euphemisms
+    - Obfuscation attempts (leetspeak, spacing, symbols)
+    - Medical/technical terms used inappropriately
+    - Context-based detection
+    
     Returns True if NSFW content detected, False otherwise.
     
-    Note: Filter keywords are stored in Base64-encoded format to keep the source code clean
+    Note: Filter lists are stored in Base64-encoded format to keep the source code clean
     while maintaining full filtering functionality.
     """
+    import re
     import base64
     import json
-    import re
     
-    # Base64-encoded filter keywords (obfuscated for code cleanliness)
-    NSFW_KEYWORDS_B64 = 'WyJudWRlIiwgIm5ha2VkIiwgIm5zZnciLCAicG9ybiIsICJlcm90aWMiLCAieHh4IiwgInNleCIsICJzZXh1YWwiLCAiZXhwbGljaXQiLCAiYWR1bHQgb25seSIsICJ0b3BsZXNzIiwgImJvdHRvbWxlc3MiLCAibGluZ2VyaWUiLCAidW5kZXJ3ZWFyIiwgImhlbnRhaSIsICJsZXdkIiwgImFyb3VzZWQiLCAic2VkdWN0aXZlIiwgInByb3ZvY2F0aXZlIiwgInN1Z2dlc3RpdmUiLCAic3VsdHJ5Il0='
+    # Base64-encoded filter lists (obfuscated for code cleanliness)
+    # These are decoded at runtime for filtering
+    NSFW_KEYWORDS_B64 = 'WyJudWRlIiwgIm5ha2VkIiwgIm5zZnciLCAicG9ybiIsICJwb3Jub2dyYXBoaWMiLCAiZXJvdGljIiwgInh4eCIsICJzZXgiLCAic2V4dWFsIiwgInNleHVhbGl0eSIsICJleHBsaWNpdCIsICJhZHVsdCBvbmx5IiwgIjE4KyIsICJyMTgiLCAidG9wbGVzcyIsICJib3R0b21sZXNzIiwgIm5pcHBsZSIsICJuaXBwbGVzIiwgImJyZWFzdHMiLCAiZ2VuaXRhbGlhIiwgImdlbml0YWwiLCAicGVuaXMiLCAidmFnaW5hIiwgInZ1bHZhIiwgImFudXMiLCAiY29jayIsICJkaWNrIiwgInB1c3N5IiwgImN1bnQiLCAiYXNzIiwgInRpdHMiLCAiYm9vYnMiLCAibGluZ2VyaWUiLCAidW5kZXJ3ZWFyIiwgInBhbnRpZXMiLCAiYnJhIiwgInRob25nIiwgImctc3RyaW5nIiwgImJpa2luaSBib3R0b20iLCAic2VlLXRocm91Z2giLCAidHJhbnNwYXJlbnQgY2xvdGhpbmciLCAiaW50ZXJjb3Vyc2UiLCAiY29pdHVzIiwgImNvcHVsYXRpb24iLCAibWF0aW5nIiwgImZlbGxhdGlvIiwgImN1bm5pbGluZ3VzIiwgIm9yYWwgc2V4IiwgImJsb3dqb2IiLCAiYmxvdyBqb2IiLCAiaGFuZGpvYiIsICJoYW5kIGpvYiIsICJmaW5nZXJpbmciLCAicGVuZXRyYXRpb24iLCAicGVuZXRyYXRpbmciLCAibWFzdHVyYmF0aW9uIiwgIm1hc3R1cmJhdGluZyIsICJvcmdhc20iLCAiY2xpbWF4IiwgImVqYWN1bGF0aW9uIiwgImFyb3VzYWwiLCAiYXJvdXNlZCIsICJlcmVjdGlvbiIsICJoYXJkLW9uIiwgIndldCIsICJ0aHJlZXNvbWUiLCAiZ2FuZ2JhbmciLCAiZ2FuZyBiYW5nIiwgIm9yZ3kiLCAiYnVra2FrZSIsICJiZHNtIiwgImJvbmRhZ2UiLCAiZG9taW5hdGlvbiIsICJzdWJtaXNzaW9uIiwgInNhZGlzbSIsICJtYXNvY2hpc20iLCAiZmV0aXNoIiwgImtpbmsiLCAia2lua3kiLCAic2VkdWN0aXZlIiwgInByb3ZvY2F0aXZlIiwgInN1Z2dlc3RpdmUiLCAic3VsdHJ5IiwgInNlbnN1YWwiLCAibGV3ZCIsICJsYXNjaXZpb3VzIiwgImx1c3RmdWwiLCAiaG9ybnkiLCAicmFuZHkiLCAiaW50aW1hdGUiLCAiaW50aW1hY3kiLCAicGFzc2lvbmF0ZSIsICJoZW50YWkiLCAiZG91amluIiwgImVjY2hpIiwgImFoZWdhbyIsICJ5YW9pIiwgInl1cmkiLCAicnVsZTM0IiwgInJ1bGUgMzQiLCAibnNmbCIsICJhZHVsdCBhY3Rpdml0eSIsICJiZWRyb29tIHNjZW5lIiwgImhvcml6b250YWwiLCAibWFraW5nIGxvdmUiLCAic2xlZXBpbmcgdG9nZXRoZXIiLCAibmV0ZmxpeCBhbmQgY2hpbGwiLCAic3RlYW15IiwgInNwaWN5IiwgInNhdWN5IiwgIm5hdWdodHkiLCAiZGlydHkiLCAiZnVjayIsICJmdWNraW5nIiwgImZ1Y2tlZCIsICJzY3Jld2luZyIsICJiYW5naW5nIiwgImh1bXBpbmciLCAiZ3JpbmRpbmciLCAicmlkaW5nIiwgImRpbGRvIiwgInZpYnJhdG9yIiwgInNleCB0b3kiLCAiYnV0dHBsdWciLCAiYnV0dCBwbHVnIiwgImFuYWwiLCAidmFnaW5hbCIsICJjdW0iLCAiY3VtbWluZyIsICJzZW1lbiIsICJjcmVhbXBpZSIsICJmYWNpYWwiLCAic3F1aXJ0IiwgInNxdWlydGluZyIsICJsYWN0YXRpb24iLCAibGFjdGF0aW5nIiwgImluY2VzdCIsICJsb2xpIiwgImxvbGljb24iLCAic2hvdGEiLCAic2hvdGFjb24iLCAicGVkb3BoaWxlIiwgInJhcGUiLCAicmFwaW5nIiwgIm1vbGVzdCIsICJhc3NhdWx0IiwgImxhYmlhIiwgImNsaXRvcmlzIiwgInRlc3RpY2xlcyIsICJzY3JvdHVtIiwgInByb3N0YXRlIiwgImVyb2dlbm91cyIsICJtYW1tYXJ5IiwgInBoYWxsdXMiLCAiZm9yZXNraW4iXQ=='
     
-    # Decode the filter keywords
+    # Decode the filter lists
     nsfw_keywords = json.loads(base64.b64decode(NSFW_KEYWORDS_B64).decode())
     
     # Normalize text for checking
     text_lower = text.lower().strip()
+    
+    # Remove extra spaces for detection
     text_normalized = re.sub(r'\s+', ' ', text_lower)
     
-    # Check keywords with word boundaries to avoid false positives
+    # Check direct keywords with word boundaries to avoid false positives
     for keyword in nsfw_keywords:
+        # Use word boundary matching for better accuracy
         pattern = r'\b' + re.escape(keyword) + r'\b'
         if re.search(pattern, text_normalized):
             logger.warning("NSFW content blocked: keyword detected in prompt")
+            return True
+    
+    # Obfuscation patterns (Base64-encoded)
+    OBFUSCATION_PATTERNS_B64 = 'W1sibltcXFdfXSp1W1xcV19dKmRbXFxXX10qZSIsICJudWRlIl0sIFsic1tcXFdfXSplW1xcV19dKngiLCAic2V4Il0sIFsicFtcXFdfXSpvW1xcV19dKnJbXFxXX10qbiIsICJwb3JuIl0sIFsibltcXFdfXSphW1xcV19dKmtbXFxXX10qZVtcXFdfXSpkIiwgIm5ha2VkIl0sIFsiZltcXFdfXSp1W1xcV19dKmNbXFxXX10qayIsICJmdWNrIl0sIFsicFtcXFdfXSp1W1xcV19dKnNbXFxXX10qc1tcXFdfXSp5IiwgInB1c3N5Il0sIFsiW2JwXVtcXFdfXSpbbzBdW1xcV19dKltvMF1bXFxXX10qW2JwXSIsICJib29iIl0sIFsidFtcXFdfXSppW1xcV19dKnRbXFxXX10qcyIsICJ0aXRzIl0sIFsiW2JwXVtvMF1bbzBdW2JwXXM/IiwgImJvb2JzIl0sIFsibltpITFdcHBsW2UzXXM/IiwgIm5pcHBsZSJdLCBbInNbZTNdeFt5dV1hP2w/IiwgInNleHVhbCJdLCBbIltlM11yW28wXXRbaTFdYyIsICJlcm90aWMiXSwgWyJwW28wXXJuW28wXT8iLCAicG9ybiJdLCBbInh4eCsiLCAieHh4Il0sIFsiblthQF1rW2UzXWQiLCAibmFrZWQiXSwgWyJuW3VcXFddZFtlM10iLCAibnVkZSJdLCBbInNbZTNdeCIsICJzZXgiXSwgWyJkW28wXW1baTFdbmF0cltpMV14IiwgImRvbWluYXRyaXgiXV0='
+    obfuscation_patterns = json.loads(base64.b64decode(OBFUSCATION_PATTERNS_B64).decode())
+    
+    # Detect leetspeak/obfuscation patterns
+    for pattern, keyword in obfuscation_patterns:
+        if re.search(pattern, text_lower):
+            logger.warning("NSFW content blocked: obfuscated content detected in prompt")
+            return True
+    
+    # Detect suspicious character substitutions (unicode lookalikes)
+    suspicious_chars = {
+        'а': 'a', 'е': 'e', 'і': 'i', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'u', 'х': 'x',
+        'ė': 'e', 'ṇ': 'n', 'ū': 'u', 'ṡ': 's', 'ḋ': 'd'
+    }
+    text_decoded = text_lower
+    for char, replacement in suspicious_chars.items():
+        text_decoded = text_decoded.replace(char, replacement)
+    
+    if text_decoded != text_lower:
+        # Recheck with decoded text
+        for keyword in nsfw_keywords:
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, text_decoded):
+                logger.warning("NSFW content blocked: unicode-obfuscated content detected in prompt")
+                return True
+    
+    # Context patterns (Base64-encoded)
+    CONTEXT_PATTERNS_B64 = 'W1siXFxiKGJlZHxiZWRyb29tfHJvb20pXFxiLipcXGIobmFrZWR8bnVkZXx1bmRyZXNzZWQpXFxiIiwgImJlZHJvb20gbnVkaXR5Il0sIFsiXFxiKHRvdWNoaW5nfHRvdWNofGNhcmVzc2luZ3xjYXJlc3N8cnViYmluZylcXGIuKlxcYihicmVhc3R8Y2hlc3R8Ym9keXxpbnRpbWF0ZSlcXGIoPyEuKihjYW5jZXJ8YXdhcmVuZXNzfGhlYWx0aHxtZWRpY2FsfGV4YW0pKSIsICJpbnRpbWF0ZSB0b3VjaGluZyJdLCBbIlxcYihzcHJlYWR8c3ByZWFkaW5nfG9wZW58b3BlbmluZylcXGIuKlxcYihsZWdzfHRoaWdocylcXGIiLCAic3VnZ2VzdGl2ZSBwb3NlIl0sIFsiXFxiKHdldHxtb2lzdHxkcmlwcGluZylcXGIuKlxcYihib2R5fHNraW58Y2xvdGhlc3xjbG90aGluZylcXGIiLCAic3VnZ2VzdGl2ZSB3ZXRuZXNzIl0sIFsiXFxiKHJlbW92aW5nfHJlbW92ZXx0YWtpbmcgb2ZmfHN0cmlwcGluZylcXGIuKlxcYihjbG90aGVzfGNsb3RoaW5nfGRyZXNzfHNoaXJ0fHBhbnRzKVxcYiIsICJ1bmRyZXNzaW5nIl0sIFsiXFxiKGV4cG9zZWR8cmV2ZWFsaW5nfHNob3dpbmcpXFxiLipcXGIoYnJlYXN0fG5pcHBsZXxnZW5pdGFsKSg/IS4qKGNhbmNlcnxhd2FyZW5lc3N8aGVhbHRofG1lZGljYWx8ZXhhbSkpIiwgImV4cGxpY2l0IGV4cG9zdXJlIl1d'
+    context_patterns = json.loads(base64.b64decode(CONTEXT_PATTERNS_B64).decode())
+    
+    # Context-based detection (combinations of borderline words)
+    for pattern, description in context_patterns:
+        if re.search(pattern, text_normalized):
+            logger.warning("NSFW content blocked: context pattern detected in prompt")
             return True
     
     return False
@@ -1172,6 +1220,13 @@ async def chat_completions(
     logger.info("Generation params from sam_config: scheduler=%s, steps=%s, guidance=%.1f, size=%sx%s", 
                 gen_scheduler, gen_steps, gen_guidance_scale if gen_guidance_scale is not None else -1, gen_width, gen_height)
     
+    # Check negative_prompt for NSFW content if blocking is enabled
+    if config.server.block_nsfw and gen_negative_prompt and check_nsfw_content(gen_negative_prompt):
+        raise HTTPException(
+            status_code=400,
+            detail="NSFW content detected in negative_prompt and blocked. This server has NSFW generation disabled."
+        )
+    
     try:
         # Generate image(s)
         image_paths, metadata = await generator.generate(
@@ -1538,6 +1593,18 @@ async def get_gallery_stats(
     
     stats = gallery_manager.get_stats()
     return GalleryStatsResponse(**stats)
+
+
+@app.get("/v1/gallery/config")
+async def get_gallery_config():
+    """
+    Get public gallery configuration (no auth required).
+    
+    Returns settings like page size that the UI needs.
+    """
+    return {
+        "page_size": config.storage.gallery_page_size
+    }
 
 
 @app.post("/v1/gallery/cleanup")
@@ -2415,6 +2482,7 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
             "images_directory": str(config.storage.images_directory),
             "max_storage_gb": config.storage.max_storage_gb,
             "retention_days": config.storage.retention_days,
+            "gallery_page_size": config.storage.gallery_page_size,
         },
         "logging": {
             "level": config.logging.level,

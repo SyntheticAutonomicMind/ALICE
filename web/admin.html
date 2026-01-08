@@ -640,6 +640,11 @@
                                 <label for="setting-storage-retention">Retention (days)</label>
                                 <input type="number" id="setting-storage-retention" data-key="storage.retention_days" min="1">
                             </div>
+                            <div class="form-group">
+                                <label for="setting-gallery-page-size">Gallery Page Size</label>
+                                <input type="number" id="setting-gallery-page-size" data-key="storage.gallery_page_size" min="0" placeholder="100 (0 = ALL)">
+                                <small style="color: var(--text-secondary); font-size: 0.85rem;">Images per page (0 = show all)</small>
+                            </div>
                         </div>
                     </div>
                     
@@ -1242,6 +1247,7 @@
                     document.getElementById('setting-storage-dir').value = config.storage.images_directory || '';
                     document.getElementById('setting-storage-max').value = config.storage.max_storage_gb || 100;
                     document.getElementById('setting-storage-retention').value = config.storage.retention_days || 7;
+                    document.getElementById('setting-gallery-page-size').value = config.storage.gallery_page_size || 100;
                     
                     // Logging settings
                     document.getElementById('setting-logging-level').value = config.logging.level || 'INFO';

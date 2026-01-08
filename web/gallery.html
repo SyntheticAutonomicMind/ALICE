@@ -560,7 +560,19 @@
         let currentImages = [];
         let currentOffset = 0;
         let hasMore = true;
-        const BATCH_SIZE = 100;
+        let BATCH_SIZE = 100;  // Default, will be loaded from config
+        
+        // Fetch gallery page size from server config
+        async function loadGalleryPageSize() {
+            try {
+                const config = await window.SDAPI.API.fetch('/v1/gallery/config');
+                BATCH_SIZE = config.page_size || 100;
+                console.log('Gallery page size:', BATCH_SIZE);
+            } catch (error) {
+                console.warn('Failed to load gallery page size from config, using default:', error);
+                BATCH_SIZE = 100;
+            }
+        }
         
         async function loadGallery(append = false) {
             const grid = document.getElementById('galleryGrid');
@@ -581,14 +593,21 @@
                 loadMoreBtn.disabled = true;
                 loadMoreBtn.textContent = 'Loading...';
                 
+                // Use 0 to mean "load all images"
+                const limit = BATCH_SIZE === 0 ? 999999 : BATCH_SIZE;
+                
                 const data = await window.SDAPI.API.fetch(
-                    `/v1/gallery?include_public=${includePublic}&include_private=${includePrivate}&limit=${BATCH_SIZE}&offset=${currentOffset}`
+                    `/v1/gallery?include_public=${includePublic}&include_private=${includePrivate}&limit=${limit}&offset=${currentOffset}`
                 );
                 
                 const newImages = data.data || [];
                 
-                // Check if there are more images
-                hasMore = newImages.length === BATCH_SIZE;
+                // Check if there are more images (unless BATCH_SIZE is 0 = load all)
+                if (BATCH_SIZE === 0) {
+                    hasMore = false;  // Loaded everything in one go
+                } else {
+                    hasMore = newImages.length === BATCH_SIZE;
+                }
                 currentOffset += newImages.length;
                 
                 if (append) {
@@ -1042,6 +1061,9 @@
             if (authResult.isAdmin) {
                 document.body.classList.add('is-admin');
             }
+            
+            // Load gallery page size configuration
+            await loadGalleryPageSize();
             
             loadGallery();
         });

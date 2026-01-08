@@ -88,34 +88,28 @@ def _import_diffusers() -> None:
     })
     
     # Scheduler mapping
-    # NOTE: All DPM++ variants use solver_order=1 and lower_order_final=True to avoid IndexError
-    # (IndexError: index N is out of bounds for dimension 0 with size N)
-    # This is a known issue with second-order updates in DPMSolverMultistepScheduler on MPS
-    # lower_order_final=True uses first-order on final step to avoid the index error
+    # NOTE: DPM++ schedulers use solver_order=2 for proper second-order accuracy
+    # Per-request scheduler instances (implemented below) prevent state corruption and IndexError
     _scheduler_classes.update({
         "dpm++": (DPMSolverMultistepScheduler, {
             "use_karras_sigmas": False,
             "algorithm_type": "dpmsolver++",
-            "solver_order": 1,
-            "lower_order_final": True
+            "solver_order": 2,
         }),
         "dpm++_karras": (DPMSolverMultistepScheduler, {
             "use_karras_sigmas": True,
             "algorithm_type": "dpmsolver++",
-            "solver_order": 1,
-            "lower_order_final": True
+            "solver_order": 2,
         }),
         "dpm++_sde": (DPMSolverMultistepScheduler, {
             "use_karras_sigmas": False,
             "algorithm_type": "sde-dpmsolver++",
-            "solver_order": 1,
-            "lower_order_final": True
+            "solver_order": 2,
         }),
         "dpm++_sde_karras": (DPMSolverMultistepScheduler, {
             "use_karras_sigmas": True,
             "algorithm_type": "sde-dpmsolver++",
-            "solver_order": 1,
-            "lower_order_final": True
+            "solver_order": 2,
         }),
         "euler": (EulerDiscreteScheduler, {}),
         "euler_a": (EulerAncestralDiscreteScheduler, {}),
@@ -772,7 +766,7 @@ class GeneratorService:
         num_images: int = 1,
         lora_paths: Optional[List[Path]] = None,
         lora_scales: Optional[List[float]] = None,
-    ) -> Tuple[Path, Dict[str, Any]]:
+    ) -> Tuple[List[Path], Dict[str, Any]]:
         """
         Generate image(s) from prompt.
         
@@ -791,7 +785,7 @@ class GeneratorService:
             lora_scales: List of LoRA weights (0.0-1.0)
             
         Returns:
-            Tuple of (image_path, metadata_dict)
+            Tuple of (list_of_image_paths, metadata_dict)
         """
         import time
         start_time = time.time()

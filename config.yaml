@@ -47,6 +47,7 @@ storage:
   max_storage_gb: 100
   retention_days: 7
   public_image_expiration_hours: 168  # Default expiration for public images (7 days)
+  gallery_page_size: 100  # Images per page in gallery (100, 200, or 0 for ALL)
 
 logging:
   level: WARNING  # WARNING = less verbose, INFO = verbose, DEBUG = very verbose
