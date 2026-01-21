@@ -47,3 +47,7 @@ dist-build.log
 
 # Continuation data
 ai-assisted/202*
+
+# CLIO
+.clio/logs/
+.clio/sessions/
