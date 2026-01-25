@@ -45,9 +45,11 @@ test_images/
 dist-creation.log
 dist-build.log
 
-# Continuation data
+# CLIO AI Assistant
 ai-assisted/202*
-
-# CLIO
+scratch/
 .clio/logs/
 .clio/sessions/
+.clio/memory/
+.clio/*.json
+

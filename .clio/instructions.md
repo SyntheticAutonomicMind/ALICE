@@ -521,7 +521,9 @@ git status
 git reset HEAD ai-assisted/
 
 # Then commit only actual code/docs:
-git add -A && git commit -m "type(scope): description"
+git add -A
+git status  # Double-check no ai-assisted/ in staged
+git commit -m "type(scope): description"
 ```
 
 **Why:** Handoff documentation contains internal session context, work notes, and continuation details that should NEVER be in the public repository. This is a HARD REQUIREMENT.
