@@ -392,6 +392,8 @@ class GeneratorService:
         enable_sequential_cpu_offload: bool = False,
         attention_slice_size: Optional[str] = "auto",
         vae_decode_cpu: bool = False,
+        enable_torch_compile: bool = False,
+        torch_compile_mode: str = "reduce-overhead",
         max_concurrent_generations: int = 1,
     ):
         """
@@ -414,6 +416,8 @@ class GeneratorService:
             enable_sequential_cpu_offload: Enable sequential CPU offload (slowest, minimum VRAM)
             attention_slice_size: Attention slice size: 'auto', 'max', or a number
             vae_decode_cpu: Decode VAE on CPU (fixes GPU hang on AMD gfx1103)
+            enable_torch_compile: Enable torch.compile for UNet (PyTorch 2.0+)
+            torch_compile_mode: Torch compile mode ('default', 'reduce-overhead', 'max-autotune')
         """
         self.images_dir = Path(images_dir)
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -436,6 +440,10 @@ class GeneratorService:
         self.attention_slice_size = attention_slice_size
         self.vae_decode_cpu = vae_decode_cpu
         
+        # Performance optimization settings
+        self.enable_torch_compile = enable_torch_compile
+        self.torch_compile_mode = torch_compile_mode
+        
         # Model caching
         self._pipeline: Optional[Any] = None
         self._current_model: Optional[str] = None
@@ -443,6 +451,7 @@ class GeneratorService:
         self._device_map_active: bool = False  # Track if device_map was applied to current model
         self._is_single_file_sdxl: bool = False  # Track if loaded model is single-file SDXL (needs extra memory opts)
         self._compel: Optional[CompelForSDXL] = None  # CompelForSDXL instance for long prompt support
+        self._unet_compiled: bool = False  # Track if UNet has been compiled
         
         # Concurrency control
         self._model_lock: asyncio.Lock = asyncio.Lock()
@@ -591,6 +600,25 @@ class GeneratorService:
                 optimizations_applied.append("vae_tiling")
             except Exception as e:
                 logger.warning("Could not enable VAE tiling: %s", e)
+        
+        # Torch compile (PyTorch 2.0+ performance optimization)
+        if self.enable_torch_compile and not self._unet_compiled:
+            try:
+                import torch
+                if hasattr(torch, 'compile'):
+                    logger.info("Compiling UNet with torch.compile (mode=%s). First run will be slower...", self.torch_compile_mode)
+                    self._pipeline.unet = torch.compile(
+                        self._pipeline.unet,
+                        mode=self.torch_compile_mode,
+                        fullgraph=False,  # Allow graph breaks for compatibility
+                    )
+                    self._unet_compiled = True
+                    optimizations_applied.append(f"torch_compile({self.torch_compile_mode})")
+                    logger.info("UNet compilation complete. Subsequent generations will be faster.")
+                else:
+                    logger.warning("torch.compile not available (requires PyTorch 2.0+)")
+            except Exception as e:
+                logger.warning("Could not compile UNet: %s", e)
         
         if optimizations_applied:
             logger.info("Memory optimizations enabled: %s", ", ".join(optimizations_applied))

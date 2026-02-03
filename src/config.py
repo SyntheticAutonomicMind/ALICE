@@ -60,6 +60,9 @@ class GenerationConfig(BaseModel):
     attention_slice_size: Optional[str] = Field(default="auto", description="Attention slice size: 'auto', 'max', or number")
     # AMD gfx1103 workaround: decode VAE on CPU to prevent GPU hang during decode
     vae_decode_cpu: bool = Field(default=False, description="Decode VAE on CPU (fixes GPU hang on AMD gfx1103)")
+    # Performance optimization settings
+    enable_torch_compile: bool = Field(default=False, description="Enable torch.compile for UNet (PyTorch 2.0+, 30-50% speedup after warmup)")
+    torch_compile_mode: str = Field(default="reduce-overhead", description="Torch compile mode: 'default', 'reduce-overhead', 'max-autotune'")
 
 
 class StorageConfig(BaseModel):

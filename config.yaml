@@ -34,11 +34,15 @@ generation:
   
   # Memory optimization settings (tune for your GPU VRAM)
   enable_vae_slicing: true  # Reduce memory during VAE decode (recommended)
-  enable_vae_tiling: false  # Enable for very large images (>1024px)
+  enable_vae_tiling: true  # Enable for very large images (>1024px) - RECOMMENDED for your 1296x800 images
   enable_model_cpu_offload: false  # Offload to CPU when not in use (slower)
   enable_sequential_cpu_offload: false  # Most aggressive (slowest, minimum VRAM)
   attention_slice_size: auto  # 'auto', 'max', or a number
   vae_decode_cpu: true  # CRITICAL: Decode VAE on CPU (required for SDXL on AMD gfx1103 to prevent GPU hang)
+  
+  # Performance optimization settings (PyTorch 2.0+)
+  enable_torch_compile: true  # Enable torch.compile for 30-50% speedup (first run slower due to compilation)
+  torch_compile_mode: reduce-overhead  # 'default', 'reduce-overhead', or 'max-autotune'
 
 storage:
   images_directory: ./images
