@@ -130,6 +130,8 @@ async def lifespan(app: FastAPI):
         enable_sequential_cpu_offload=config.generation.enable_sequential_cpu_offload,
         attention_slice_size=config.generation.attention_slice_size,
         vae_decode_cpu=config.generation.vae_decode_cpu,
+        enable_torch_compile=config.generation.enable_torch_compile,
+        torch_compile_mode=config.generation.torch_compile_mode,
         max_concurrent_generations=config.generation.max_concurrent,
     )
     download_manager = DownloadManager(
@@ -188,6 +190,11 @@ async def lifespan(app: FastAPI):
         @app.get("/web/app.js")
         async def serve_app_js():
             return FileResponse(web_dir / "app.js", media_type="application/javascript")
+        
+        # Serve logo image
+        @app.get("/web/alice-logo.png")
+        async def serve_logo():
+            return FileResponse(web_dir / "alice-logo.png", media_type="image/png")
         
         # Serve fonts directory for offline use
         @app.get("/web/fonts/{filename}")
