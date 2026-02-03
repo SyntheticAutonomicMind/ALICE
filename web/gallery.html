@@ -7,11 +7,165 @@
     <link rel="stylesheet" href="/web/fonts/inter.css">
     <link rel="stylesheet" href="/web/style.css">
     <style>
-        .filters {
+        /* Modern Masonry Gallery Layout */
+        .gallery-container {
+            column-count: 4;
+            column-gap: 16px;
+            padding: 0;
+        }
+        
+        @media (max-width: 1400px) {
+            .gallery-container {
+                column-count: 3;
+            }
+        }
+        
+        @media (max-width: 1024px) {
+            .gallery-container {
+                column-count: 2;
+            }
+        }
+        
+        @media (max-width: 640px) {
+            .gallery-container {
+                column-count: 1;
+            }
+        }
+        
+        .gallery-item {
+            break-inside: avoid;
+            margin-bottom: 16px;
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            background: var(--bg-secondary);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            cursor: pointer;
+        }
+        
+        .gallery-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        }
+        
+        .gallery-item img {
+            width: 100%;
+            display: block;
+            border-radius: 12px 12px 0 0;
+        }
+        
+        /* Hover Overlay */
+        .gallery-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.2) 40%, rgba(0,0,0,0.6) 100%);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 12px;
+            border-radius: 12px;
+        }
+        
+        .gallery-item:hover .gallery-overlay {
+            opacity: 1;
+        }
+        
+        /* Top badges */
+        .overlay-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        
+        .privacy-badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .privacy-badge.public {
+            background: rgba(52, 211, 153, 0.9);
+            color: white;
+        }
+        
+        .privacy-badge.private {
+            background: rgba(251, 146, 60, 0.9);
+            color: white;
+        }
+        
+        .model-badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            background: rgba(14, 165, 233, 0.9);
+            color: white;
+            font-weight: 500;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        /* Bottom quick actions */
+        .overlay-actions {
+            display: flex;
+            gap: 6px;
+        }
+        
+        .overlay-btn {
+            flex: 1;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.95);
+            border: none;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        
+        .overlay-btn:hover {
+            background: white;
+            transform: scale(1.05);
+        }
+        
+        .overlay-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        
+        .overlay-btn.danger {
+            background: rgba(239, 68, 68, 0.95);
+            color: white;
+        }
+        
+        .overlay-btn.danger:hover {
+            background: rgb(239, 68, 68);
+        }
+        
+        /* Filters Bar */
+        .filters-bar {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
             display: flex;
             gap: 1rem;
-            margin-bottom: 1.5rem;
             flex-wrap: wrap;
+            align-items: center;
         }
         
         .filter-group {
@@ -21,245 +175,235 @@
         }
         
         .filter-group label {
-            font-size: 0.9rem;
+            font-size: 0.875rem;
+            font-weight: 500;
             color: var(--text-secondary);
+            white-space: nowrap;
         }
         
-        .gallery-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 1.5rem;
-        }
-        
-        .image-card {
-            background: var(--bg-secondary);
+        .filter-group select,
+        .filter-group input {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border);
             border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        
-        .image-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-        }
-        
-        .image-card img {
-            width: 100%;
-            height: 300px;
-            object-fit: cover;
-            cursor: pointer;
-        }
-        
-        .image-info {
-            padding: 1rem;
-        }
-        
-        .image-prompt {
-            font-size: 0.9rem;
-            color: var(--text-primary);
-            margin-bottom: 0.75rem;
-            line-height: 1.4;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-        
-        .image-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-            margin-bottom: 0.75rem;
-        }
-        
-        .meta-badge {
-            font-size: 0.75rem;
-            padding: 0.25rem 0.5rem;
             background: var(--bg-primary);
-            border-radius: 4px;
-            color: var(--text-secondary);
+            color: var(--text-primary);
+            font-size: 0.875rem;
         }
         
-        .image-actions {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 0.75rem;
-        }
-        
-        .image-actions button {
+        .search-box {
             flex: 1;
-            padding: 0.5rem;
-            font-size: 0.85rem;
+            min-width: 200px;
         }
         
-        .privacy-badge {
-            display: inline-block;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 600;
+        .search-box input {
+            width: 100%;
         }
         
-        .privacy-badge.public {
-            background: rgba(52, 211, 153, 0.1);
-            color: #34d399;
-        }
-        
-        .privacy-badge.private {
-            background: rgba(251, 146, 60, 0.1);
-            color: #fb923c;
-        }
-        
-        /* Modal styles - replaced with fullscreen viewer */
-        .fullscreen-viewer {
+        /* Image Viewer with Side Panel */
+        .viewer-container {
             display: none;
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: #000;
+            background: rgba(0, 0, 0, 0.95);
             z-index: 1000;
-            touch-action: none;
         }
         
-        .fullscreen-viewer.active {
+        .viewer-container.active {
             display: flex;
         }
         
-        .fullscreen-image-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+        .viewer-image-area {
+            flex: 1;
             display: flex;
             align-items: center;
             justify-content: center;
+            position: relative;
+            padding: 2rem;
         }
         
-        .fullscreen-image {
+        .viewer-image {
             max-width: 100%;
             max-height: 100%;
             object-fit: contain;
-            user-select: none;
-            -webkit-user-drag: none;
-        }
-        
-        /* Navigation zones */
-        .nav-zone {
-            position: absolute;
-            top: 0;
-            height: 100%;
-            width: 33.33%;
-            z-index: 10;
-            cursor: pointer;
-        }
-        
-        .nav-zone-left {
-            left: 0;
-        }
-        
-        .nav-zone-center {
-            left: 33.33%;
-        }
-        
-        .nav-zone-right {
-            right: 0;
-        }
-        
-        /* Navigation hints (shown on hover for desktop) */
-        @media (hover: hover) {
-            .nav-zone-left:hover::after,
-            .nav-zone-right:hover::after {
-                content: '';
-                position: absolute;
-                top: 50%;
-                transform: translateY(-50%);
-                width: 48px;
-                height: 48px;
-                background: rgba(255, 255, 255, 0.2);
-                border-radius: 50%;
-            }
-            
-            .nav-zone-left:hover::after {
-                left: 20px;
-            }
-            
-            .nav-zone-right:hover::after {
-                right: 20px;
-            }
-        }
-        
-        /* Close button overlay */
-        .fullscreen-close-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 20;
-        }
-        
-        .fullscreen-close-overlay.active {
-            display: flex;
-        }
-        
-        .fullscreen-close-btn {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.9);
-            color: #333;
-            border: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 36px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        }
-        
-        /* Image counter */
-        .fullscreen-counter {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: white;
-            font-size: 14px;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 8px 16px;
-            border-radius: 20px;
-            z-index: 15;
-        }
-        
-        /* Info overlay */
-        .fullscreen-info {
-            position: absolute;
-            bottom: 60px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 12px 20px;
             border-radius: 8px;
-            max-width: 90%;
-            text-align: center;
-            font-size: 14px;
-            z-index: 15;
-            display: none;
         }
         
-        .fullscreen-info.active {
-            display: block;
+        .viewer-sidebar {
+            width: 400px;
+            background: var(--bg-primary);
+            height: 100%;
+            overflow-y: auto;
+            border-left: 1px solid var(--border);
         }
         
+        @media (max-width: 1024px) {
+            .viewer-sidebar {
+                width: 100%;
+                position: absolute;
+                bottom: 0;
+                max-height: 50vh;
+                border-top: 1px solid var(--border);
+                border-left: none;
+            }
+            
+            .viewer-image-area {
+                padding-bottom: 50vh;
+            }
+        }
+        
+        .viewer-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            z-index: 10;
+        }
+        
+        .viewer-close:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+        
+        .viewer-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .viewer-nav:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-50%) scale(1.1);
+        }
+        
+        .viewer-nav.prev {
+            left: 1rem;
+        }
+        
+        .viewer-nav.next {
+            right: 1rem;
+        }
+        
+        /* Sidebar Content */
+        .sidebar-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .sidebar-section {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .sidebar-section h3 {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+        
+        .prompt-text {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            line-height: 1.6;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .copy-btn {
+            width: 100%;
+            padding: 0.5rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .copy-btn:hover {
+            background: var(--bg-secondary);
+            border-color: var(--primary);
+        }
+        
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+        
+        .setting-item {
+            background: var(--bg-secondary);
+            padding: 0.75rem;
+            border-radius: 8px;
+        }
+        
+        .setting-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
+        
+        .setting-value {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .action-buttons {
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        
+        .action-btn {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        
+        /* Empty State */
         .empty-state {
             text-align: center;
             padding: 4rem 2rem;
@@ -267,188 +411,50 @@
         }
         
         .empty-state svg {
-            width: 64px;
-            height: 64px;
-            margin-bottom: 1rem;
-            opacity: 0.5;
+            width: 80px;
+            height: 80px;
+            margin-bottom: 1.5rem;
+            opacity: 0.3;
         }
         
-        /* Image Details Modal */
-        .details-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            z-index: 2000;
-            overflow-y: auto;
+        .empty-state h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
         }
         
-        .details-modal.active {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 2rem;
-        }
-        
-        .details-content {
-            background: var(--bg-primary);
-            border-radius: 12px;
-            max-width: 800px;
-            width: 100%;
-            max-height: 90vh;
-            overflow-y: auto;
-            position: relative;
-        }
-        
-        .details-header {
-            position: sticky;
-            top: 0;
-            background: var(--bg-primary);
-            padding: 1.5rem;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            z-index: 10;
-        }
-        
-        .details-header h2 {
-            margin: 0;
-            font-size: 1.25rem;
-        }
-        
-        .details-close {
-            background: none;
-            border: none;
-            font-size: 2rem;
-            color: var(--text-secondary);
-            cursor: pointer;
-            padding: 0;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 50%;
-            transition: background 0.2s;
-        }
-        
-        .details-close:hover {
-            background: var(--bg-secondary);
-        }
-        
-        .details-body {
-            padding: 1.5rem;
-        }
-        
-        .details-section {
+        .empty-state p {
             margin-bottom: 1.5rem;
         }
         
-        .details-section:last-child {
-            margin-bottom: 0;
+        /* Loading */
+        .loading-container {
+            text-align: center;
+            padding: 3rem;
         }
         
-        .details-section h3 {
-            font-size: 1rem;
-            margin: 0 0 0.75rem 0;
-            color: var(--text-secondary);
-            font-weight: 600;
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid var(--bg-tertiary);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
         }
         
-        .details-textarea {
-            width: 100%;
-            min-height: 80px;
-            padding: 0.75rem;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            color: var(--text-primary);
-            font-family: inherit;
-            font-size: 0.9rem;
-            line-height: 1.5;
-            resize: vertical;
-            cursor: pointer;
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
         
-        .details-textarea:focus {
-            outline: none;
-            border-color: var(--primary);
-        }
-        
-        .details-copy-btn {
-            margin-top: 0.5rem;
-            padding: 0.5rem 1rem;
-            font-size: 0.85rem;
-        }
-        
-        .details-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        
-        .details-table td {
-            padding: 0.5rem 0;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .details-table tr:last-child td {
-            border-bottom: none;
-        }
-        
-        .details-table td:first-child {
-            font-weight: 600;
-            color: var(--text-secondary);
-            width: 40%;
-        }
-        
-        .details-table td:last-child {
-            color: var(--text-primary);
-        }
-        
-        .details-actions {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 0.75rem;
-            margin-top: 1.5rem;
-            padding-top: 1.5rem;
-            border-top: 1px solid var(--border-color);
-        }
-        
-        .details-actions button {
-            padding: 0.75rem 1rem;
-        }
-        
-        .lora-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
-        
-        .lora-list li {
-            padding: 0.5rem 0.75rem;
-            background: var(--bg-secondary);
-            border-radius: 6px;
-            margin-bottom: 0.5rem;
+        /* Image counter */
+        .gallery-stats {
             display: flex;
             justify-content: space-between;
             align-items: center;
-        }
-        
-        .lora-list li:last-child {
-            margin-bottom: 0;
-        }
-        
-        .lora-name {
-            font-weight: 500;
-        }
-        
-        .lora-scale {
+            margin-bottom: 1rem;
             color: var(--text-secondary);
-            font-size: 0.85rem;
+            font-size: 0.875rem;
         }
     </style>
 </head>
@@ -477,540 +483,345 @@
     </nav>
     
     <main>
-        <div class="container">
-            <h1>Image Gallery</h1>
-            
-            <div class="filters">
-                <div class="filter-group">
-                    <label>
-                        <input type="checkbox" id="filterPublic" checked onchange="loadGallery()">
-                        Show Public
-                    </label>
-                </div>
-                <div class="filter-group">
-                    <label>
-                        <input type="checkbox" id="filterPrivate" checked onchange="loadGallery()">
-                        Show My Private
-                    </label>
-                </div>
-                <div class="filter-group">
-                    <button class="btn btn-secondary" onclick="loadGallery()">
-                        Refresh
-                    </button>
-                </div>
+        <div class="page-header">
+            <h1>Gallery</h1>
+            <p>Your generated images</p>
+        </div>
+        
+        <!-- Filters -->
+        <div class="filters-bar">
+            <div class="filter-group">
+                <label>Model</label>
+                <select id="filter-model">
+                    <option value="">All Models</option>
+                </select>
             </div>
             
-            <div id="galleryGrid" class="gallery-grid">
-                <div class="empty-state">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    <p>Loading gallery...</p>
-                </div>
+            <div class="filter-group">
+                <label>Privacy</label>
+                <select id="filter-privacy">
+                    <option value="">All Images</option>
+                    <option value="private">Private Only</option>
+                    <option value="public">Public Only</option>
+                </select>
             </div>
             
-            <!-- Load More Button -->
-            <div id="loadMoreContainer" style="text-align: center; margin-top: 2rem; display: none;">
-                <button class="btn btn-primary" id="loadMoreBtn" onclick="loadMoreImages()">
-                    Load More Images
-                </button>
-                <p id="imageCount" style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;"></p>
+            <div class="filter-group">
+                <label>Sort</label>
+                <select id="filter-sort">
+                    <option value="newest">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                </select>
+            </div>
+            
+            <div class="filter-group search-box">
+                <input type="text" id="search-prompt" placeholder="Search by prompt...">
+            </div>
+        </div>
+        
+        <!-- Gallery Stats -->
+        <div class="gallery-stats">
+            <span id="gallery-count">Loading...</span>
+            <button class="btn btn-secondary btn-sm" onclick="loadGallery()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+            </button>
+        </div>
+        
+        <!-- Gallery Grid -->
+        <div id="gallery" class="gallery-container">
+            <div class="loading-container">
+                <div class="spinner"></div>
+                <p>Loading gallery...</p>
             </div>
         </div>
     </main>
     
-    <!-- Fullscreen Image Viewer -->
-    <div id="fullscreenViewer" class="fullscreen-viewer">
-        <div class="fullscreen-image-container">
-            <img id="fullscreenImage" class="fullscreen-image" src="" alt="">
+    <!-- Image Viewer with Sidebar -->
+    <div id="viewer" class="viewer-container">
+        <div class="viewer-image-area">
+            <button class="viewer-close" onclick="closeViewer()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+            
+            <button class="viewer-nav prev" onclick="navigateImage(-1)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                </svg>
+            </button>
+            
+            <img id="viewer-image" class="viewer-image" src="" alt="">
+            
+            <button class="viewer-nav next" onclick="navigateImage(1)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+            </button>
         </div>
         
-        <!-- Navigation zones -->
-        <div class="nav-zone nav-zone-left" onclick="navigateImage(-1)"></div>
-        <div class="nav-zone nav-zone-center" onclick="toggleCloseOverlay()"></div>
-        <div class="nav-zone nav-zone-right" onclick="navigateImage(1)"></div>
-        
-        <!-- Close overlay (shown on center tap) -->
-        <div id="closeOverlay" class="fullscreen-close-overlay" onclick="hideCloseOverlay(event)">
-            <button class="fullscreen-close-btn" onclick="closeFullscreen()">✕</button>
-        </div>
-        
-        <!-- Image counter -->
-        <div id="imageCounter" class="fullscreen-counter">1 / 1</div>
-        
-        <!-- Info overlay (optional, tap counter to show) -->
-        <div id="fullscreenInfo" class="fullscreen-info"></div>
-    </div>
-    
-    <!-- Image Details Modal -->
-    <div id="detailsModal" class="details-modal">
-        <div class="details-content">
-            <div class="details-header">
-                <h2>Image Details</h2>
-                <button class="details-close" onclick="closeDetailsModal()">×</button>
-            </div>
-            <div class="details-body" id="detailsBody">
-                <!-- Content dynamically inserted -->
-            </div>
+        <div class="viewer-sidebar" id="viewer-sidebar">
+            <!-- Content populated by JavaScript -->
         </div>
     </div>
     
     <script src="/web/app.js"></script>
     <script>
         let currentImages = [];
-        let currentOffset = 0;
-        let hasMore = true;
-        let BATCH_SIZE = 100;  // Default, will be loaded from config
+        let filteredImages = [];
+        let currentViewerIndex = -1;
         
-        // Fetch gallery page size from server config
-        async function loadGalleryPageSize() {
-            try {
-                const config = await window.SDAPI.API.fetch('/v1/gallery/config');
-                BATCH_SIZE = config.page_size || 100;
-                console.log('Gallery page size:', BATCH_SIZE);
-            } catch (error) {
-                console.warn('Failed to load gallery page size from config, using default:', error);
-                BATCH_SIZE = 100;
-            }
-        }
-        
-        async function loadGallery(append = false) {
-            const grid = document.getElementById('galleryGrid');
-            const loadMoreContainer = document.getElementById('loadMoreContainer');
-            const loadMoreBtn = document.getElementById('loadMoreBtn');
-            const imageCount = document.getElementById('imageCount');
-            const includePublic = document.getElementById('filterPublic').checked;
-            const includePrivate = document.getElementById('filterPrivate').checked;
-            
-            // Reset if not appending
-            if (!append) {
-                currentOffset = 0;
-                currentImages = [];
-                hasMore = true;
-            }
+        // Load gallery
+        async function loadGallery() {
+            const gallery = document.getElementById('gallery');
+            gallery.innerHTML = '<div class="loading-container"><div class="spinner"></div><p>Loading gallery...</p></div>';
             
             try {
-                loadMoreBtn.disabled = true;
-                loadMoreBtn.textContent = 'Loading...';
+                const { API, Toast } = window.SDAPI;
+                const response = await API.fetch('/v1/gallery');
                 
-                // Use 0 to mean "load all images"
-                const limit = BATCH_SIZE === 0 ? 999999 : BATCH_SIZE;
-                
-                const data = await window.SDAPI.API.fetch(
-                    `/v1/gallery?include_public=${includePublic}&include_private=${includePrivate}&limit=${limit}&offset=${currentOffset}`
-                );
-                
-                const newImages = data.data || [];
-                
-                // Check if there are more images (unless BATCH_SIZE is 0 = load all)
-                if (BATCH_SIZE === 0) {
-                    hasMore = false;  // Loaded everything in one go
-                } else {
-                    hasMore = newImages.length === BATCH_SIZE;
-                }
-                currentOffset += newImages.length;
-                
-                if (append) {
-                    currentImages = currentImages.concat(newImages);
-                } else {
-                    currentImages = newImages;
+                if (!response || !response.images) {
+                    throw new Error('Invalid response from server');
                 }
                 
-                if (currentImages.length === 0) {
-                    grid.innerHTML = `
-                        <div class="empty-state">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <p>No images found. Generate some images to get started!</p>
-                        </div>
-                    `;
-                    loadMoreContainer.style.display = 'none';
-                    return;
-                }
+                currentImages = response.images;
+                applyFilters();
                 
-                grid.innerHTML = currentImages.map(img => createImageCard(img)).join('');
-                
-                // Show/hide load more button
-                if (hasMore) {
-                    loadMoreContainer.style.display = 'block';
-                    imageCount.textContent = `Showing ${currentImages.length} images`;
-                } else {
-                    loadMoreContainer.style.display = 'block';
-                    imageCount.textContent = `All ${currentImages.length} images loaded`;
-                    loadMoreBtn.style.display = 'none';
-                }
+                // Populate model filter
+                const models = [...new Set(currentImages.map(img => img.model))];
+                const modelFilter = document.getElementById('filter-model');
+                modelFilter.innerHTML = '<option value="">All Models</option>' +
+                    models.map(model => `<option value="${model}">${model}</option>`).join('');
                 
             } catch (error) {
                 console.error('Failed to load gallery:', error);
-                grid.innerHTML = `
+                gallery.innerHTML = `
                     <div class="empty-state">
-                        <p style="color: var(--error);">Failed to load gallery: ${error.message}</p>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <h2>Failed to load gallery</h2>
+                        <p>${error.message}</p>
+                        <button class="btn btn-primary" onclick="loadGallery()">Try Again</button>
                     </div>
                 `;
-            } finally {
-                loadMoreBtn.disabled = false;
-                loadMoreBtn.textContent = 'Load More Images';
             }
         }
         
-        async function loadMoreImages() {
-            await loadGallery(true);
+        // Apply filters and render
+        function applyFilters() {
+            const modelFilter = document.getElementById('filter-model').value;
+            const privacyFilter = document.getElementById('filter-privacy').value;
+            const sortFilter = document.getElementById('filter-sort').value;
+            const searchQuery = document.getElementById('search-prompt').value.toLowerCase();
+            
+            // Filter
+            filteredImages = currentImages.filter(img => {
+                if (modelFilter && img.model !== modelFilter) return false;
+                if (privacyFilter === 'private' && img.isPublic) return false;
+                if (privacyFilter === 'public' && !img.isPublic) return false;
+                if (searchQuery && !img.prompt.toLowerCase().includes(searchQuery)) return false;
+                return true;
+            });
+            
+            // Sort
+            if (sortFilter === 'newest') {
+                filteredImages.sort((a, b) => new Date(b.created) - new Date(a.created));
+            } else {
+                filteredImages.sort((a, b) => new Date(a.created) - new Date(b.created));
+            }
+            
+            renderGallery();
         }
         
-        function createImageCard(img) {
-            const privacyBadge = img.isPublic 
-                ? '<span class="privacy-badge public">Public</span>'
-                : '<span class="privacy-badge private">Private</span>';
+        // Render gallery
+        function renderGallery() {
+            const gallery = document.getElementById('gallery');
+            const count = document.getElementById('gallery-count');
             
-            const expiresInfo = img.isPublic && img.expiresAt 
-                ? `<span class="meta-badge">Expires: ${new Date(img.expiresAt * 1000).toLocaleDateString()}</span>`
-                : '';
+            count.textContent = `${filteredImages.length} image${filteredImages.length !== 1 ? 's' : ''}`;
             
-            const ownerActions = img.isOwner ? `
-                <button class="btn btn-secondary" onclick="event.stopPropagation(); showImageDetails('${img.id}')">View Details</button>
-                <button class="btn btn-secondary" onclick="event.stopPropagation(); togglePrivacy('${img.id}', ${!img.isPublic})">
-                    ${img.isPublic ? 'Make Private' : 'Make Public'}
-                </button>
-                <button class="btn btn-danger" onclick="event.stopPropagation(); confirmDelete('${img.id}')">Delete</button>
-            ` : `
-                <button class="btn btn-secondary" onclick="event.stopPropagation(); showImageDetails('${img.id}')">View Details</button>
-            `;
+            if (filteredImages.length === 0) {
+                gallery.innerHTML = `
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <h2>No images found</h2>
+                        <p>Try adjusting your filters or generate your first image</p>
+                        <a href="/web/generate.html" class="btn btn-primary">Generate Image</a>
+                    </div>
+                `;
+                return;
+            }
             
-            return `
-                <div class="image-card" onclick="openFullscreen('${img.id}')">
-                    <img src="${img.url}" alt="${escapeHtml(img.prompt)}" loading="lazy">
-                    <div class="image-info">
-                        <div style="margin-bottom: 0.5rem;">${privacyBadge}</div>
-                        <div class="image-prompt" title="${escapeHtml(img.prompt)}">${escapeHtml(img.prompt)}</div>
-                        <div class="image-meta">
-                            <span class="meta-badge">${escapeHtml(img.model)}</span>
-                            <span class="meta-badge">${img.width}x${img.height}</span>
-                            <span class="meta-badge">${img.steps} steps</span>
-                            ${img.generationTime ? `<span class="meta-badge">${img.generationTime.toFixed(1)}s (${(img.generationTime / img.steps).toFixed(2)}s/step)</span>` : ''}
-                            ${expiresInfo}
+            gallery.innerHTML = filteredImages.map((img, index) => {
+                const modelName = img.model.replace('sd/', '').substring(0, 20);
+                return `
+                    <div class="gallery-item" onclick="openViewer(${index})">
+                        <img src="${img.url}" alt="${escapeHtml(img.prompt).substring(0, 100)}" loading="lazy">
+                        <div class="gallery-overlay">
+                            <div class="overlay-top">
+                                <span class="privacy-badge ${img.isPublic ? 'public' : 'private'}">
+                                    ${img.isPublic ? 'Public' : 'Private'}
+                                </span>
+                                <span class="model-badge" title="${img.model}">${modelName}</span>
+                            </div>
+                            <div class="overlay-actions">
+                                <button class="overlay-btn" onclick="event.stopPropagation(); regenerateImage('${img.id}')" title="Regenerate">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                </button>
+                                <button class="overlay-btn" onclick="event.stopPropagation(); downloadImage('${img.url}', '${img.id}')" title="Download">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                </button>
+                                ${img.isOwner ? `
+                                <button class="overlay-btn danger" onclick="event.stopPropagation(); confirmDelete('${img.id}')" title="Delete">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                                ` : ''}
+                            </div>
                         </div>
-                        ${ownerActions ? `<div class="image-actions">${ownerActions}</div>` : ''}
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Fullscreen viewer variables
-        let currentImageIndex = 0;
-        
-        async function openFullscreen(imageId) {
-            const index = currentImages.findIndex(i => i.id === imageId);
-            if (index === -1) return;
-            
-            currentImageIndex = index;
-            showImageAtIndex(currentImageIndex);
-            
-            const viewer = document.getElementById('fullscreenViewer');
-            viewer.classList.add('active');
-            document.body.style.overflow = 'hidden';
-            
-            // Request true fullscreen using Fullscreen API
-            try {
-                if (viewer.requestFullscreen) {
-                    await viewer.requestFullscreen();
-                } else if (viewer.webkitRequestFullscreen) {
-                    await viewer.webkitRequestFullscreen(); // Safari
-                } else if (viewer.msRequestFullscreen) {
-                    await viewer.msRequestFullscreen(); // IE11
-                }
-            } catch (err) {
-                console.log('Fullscreen request failed or not supported:', err);
-                // Continue with overlay mode if fullscreen not available
-            }
-        }
-        
-        function closeFullscreen() {
-            // Exit fullscreen if active
-            if (document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement) {
-                if (document.exitFullscreen) {
-                    document.exitFullscreen();
-                } else if (document.webkitExitFullscreen) {
-                    document.webkitExitFullscreen();
-                } else if (document.msExitFullscreen) {
-                    document.msExitFullscreen();
-                }
-            }
-            
-            const viewer = document.getElementById('fullscreenViewer');
-            viewer.classList.remove('active');
-            document.body.style.overflow = '';
-            hideCloseOverlay();
-        }
-        
-        function showImageAtIndex(index) {
-            if (index < 0 || index >= currentImages.length) return;
-            
-            const img = currentImages[index];
-            document.getElementById('fullscreenImage').src = img.url;
-            document.getElementById('imageCounter').textContent = `${index + 1} / ${currentImages.length}`;
-            
-            // Update info overlay
-            document.getElementById('fullscreenInfo').innerHTML = `
-                <strong>${escapeHtml(img.prompt.substring(0, 100))}${img.prompt.length > 100 ? '...' : ''}</strong>
-                <br><small>${img.model} • ${img.width}x${img.height} • ${img.steps} steps</small>
-            `;
-        }
-        
-        function navigateImage(direction) {
-            let newIndex = currentImageIndex + direction;
-            
-            // Wrap around
-            if (newIndex < 0) {
-                newIndex = currentImages.length - 1;
-            } else if (newIndex >= currentImages.length) {
-                newIndex = 0;
-            }
-            
-            currentImageIndex = newIndex;
-            showImageAtIndex(currentImageIndex);
-        }
-        
-        function toggleCloseOverlay() {
-            const overlay = document.getElementById('closeOverlay');
-            overlay.classList.toggle('active');
-            const info = document.getElementById('fullscreenInfo');
-            info.classList.toggle('active');
-        }
-        
-        function hideCloseOverlay(event) {
-            if (event && event.target.classList.contains('fullscreen-close-btn')) {
-                return; // Let the button handle its own click
-            }
-            const overlay = document.getElementById('closeOverlay');
-            overlay.classList.remove('active');
-            const info = document.getElementById('fullscreenInfo');
-            info.classList.remove('active');
-        }
-        
-        async function togglePrivacy(imageId, makePublic) {
-            try {
-                await window.SDAPI.API.fetch(`/v1/gallery/${imageId}/privacy`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ isPublic: makePublic })
-                });
-                
-                // Reload gallery
-                await loadGallery();
-                window.SDAPI.Toast.success('Privacy updated');
-            } catch (error) {
-                console.error('Failed to update privacy:', error);
-                window.SDAPI.Toast.error('Failed to update privacy: ' + error.message);
-            }
-        }
-        
-        async function deleteImage(imageId, confirmationModal) {
-            try {
-                // Close confirmation modal immediately
-                if (confirmationModal) {
-                    confirmationModal.remove();
-                }
-                
-                // Close details modal if open (using proper method)
-                closeDetailsModal();
-                
-                await window.SDAPI.API.fetch(`/v1/gallery/${imageId}`, {
-                    method: 'DELETE'
-                });
-                
-                // Reload gallery
-                await loadGallery();
-                window.SDAPI.Toast.success('Image deleted');
-            } catch (error) {
-                console.error('Failed to delete image:', error);
-                window.SDAPI.Toast.error('Failed to delete image: ' + error.message);
-            }
-        }
-        
-        function confirmDelete(imageId) {
-            // Close details modal first to avoid overlay stacking (using proper method)
-            closeDetailsModal();
-            
-            const modal = document.createElement('div');
-            modal.id = 'deleteConfirmationModal';
-            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 3000; display: flex; align-items: center; justify-content: center;';
-            modal.innerHTML = `
-                <div style="background: var(--bg-primary); padding: 2rem; border-radius: 12px; max-width: 400px; text-align: center;">
-                    <h3 style="margin: 0 0 1rem 0; color: var(--error);">Delete Image?</h3>
-                    <p style="margin: 0 0 1.5rem 0; color: var(--text-secondary);">This action cannot be undone. The image will be permanently deleted.</p>
-                    <div style="display: flex; gap: 0.75rem;">
-                        <button id="deleteCancelBtn" class="btn btn-secondary" style="flex: 1;">Cancel</button>
-                        <button id="deleteConfirmBtn" class="btn btn-danger" style="flex: 1;">Delete</button>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(modal);
-            
-            // Add event listeners instead of inline onclick
-            const cancelBtn = modal.querySelector('#deleteCancelBtn');
-            const confirmBtn = modal.querySelector('#deleteConfirmBtn');
-            
-            cancelBtn.addEventListener('click', () => {
-                modal.remove();
-            });
-            
-            confirmBtn.addEventListener('click', () => {
-                deleteImage(imageId, modal);
-            });
-            
-            // Click outside to cancel
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    modal.remove();
-                }
-            });
-        }
-        
-        function showImageDetails(imageId) {
-            const img = currentImages.find(i => i.id === imageId);
-            if (!img) return;
-            
-            const modal = document.getElementById('detailsModal');
-            const body = document.getElementById('detailsBody');
-            
-            // Build LoRA section if present
-            let loraSection = '';
-            if (img.loras && img.loras.length > 0) {
-                const loraItems = img.loras.map((lora, idx) => {
-                    const scale = img.loraScales && img.loraScales[idx] !== undefined ? img.loraScales[idx] : 1.0;
-                    return `
-                        <li>
-                            <span class="lora-name">${escapeHtml(lora)}</span>
-                            <span class="lora-scale">Scale: ${scale.toFixed(2)}</span>
-                        </li>
-                    `;
-                }).join('');
-                
-                loraSection = `
-                    <div class="details-section">
-                        <h3>LoRAs</h3>
-                        <ul class="lora-list">${loraItems}</ul>
                     </div>
                 `;
-            }
+            }).join('');
+        }
+        
+        // Open viewer
+        function openViewer(index) {
+            currentViewerIndex = index;
+            const img = filteredImages[index];
+            const viewer = document.getElementById('viewer');
+            const viewerImage = document.getElementById('viewer-image');
+            const sidebar = document.getElementById('viewer-sidebar');
             
-            // Format generation time
-            const timeInfo = img.generationTime 
-                ? `${img.generationTime.toFixed(1)}s (${(img.generationTime / img.steps).toFixed(2)}s/step)`
-                : 'N/A';
+            viewerImage.src = img.url;
             
-            // Format created timestamp
-            const createdDate = img.createdAt 
-                ? new Date(img.createdAt * 1000).toLocaleString()
-                : 'N/A';
-            
-            body.innerHTML = `
-                <div class="details-section">
+            // Build sidebar content
+            sidebar.innerHTML = `
+                <div class="sidebar-header">
+                    <div class="privacy-badge ${img.isPublic ? 'public' : 'private'}" style="margin-bottom: 0.5rem;">
+                        ${img.isPublic ? 'Public' : 'Private'}
+                    </div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">
+                        ${new Date(img.created).toLocaleString()}
+                    </div>
+                </div>
+                
+                <div class="sidebar-section">
                     <h3>Prompt</h3>
-                    <textarea class="details-textarea" readonly onclick="this.select()">${escapeHtml(img.prompt)}</textarea>
-                    <button class="btn btn-primary details-copy-btn" onclick="copyToClipboard(\`${escapeHtml(img.prompt).replace(/`/g, '\\`')}\`, 'Prompt copied!')">
+                    <div class="prompt-text">${escapeHtml(img.prompt)}</div>
+                    <button class="copy-btn" onclick="copyToClipboard(\`${escapeHtml(img.prompt).replace(/`/g, '\\`')}\`, 'Prompt copied!')">
                         Copy Prompt
                     </button>
                 </div>
                 
                 ${img.negativePrompt ? `
-                <div class="details-section">
+                <div class="sidebar-section">
                     <h3>Negative Prompt</h3>
-                    <textarea class="details-textarea" readonly onclick="this.select()">${escapeHtml(img.negativePrompt)}</textarea>
-                    <button class="btn btn-primary details-copy-btn" onclick="copyToClipboard(\`${escapeHtml(img.negativePrompt).replace(/`/g, '\\`')}\`, 'Negative prompt copied!')">
+                    <div class="prompt-text">${escapeHtml(img.negativePrompt)}</div>
+                    <button class="copy-btn" onclick="copyToClipboard(\`${escapeHtml(img.negativePrompt).replace(/`/g, '\\`')}\`, 'Negative prompt copied!')">
                         Copy Negative Prompt
                     </button>
                 </div>
                 ` : ''}
                 
-                <div class="details-section">
+                <div class="sidebar-section">
                     <h3>Generation Settings</h3>
-                    <table class="details-table">
-                        <tr>
-                            <td>Model:</td>
-                            <td>${escapeHtml(img.model)}</td>
-                        </tr>
-                        <tr>
-                            <td>Resolution:</td>
-                            <td>${img.width} × ${img.height}</td>
-                        </tr>
-                        <tr>
-                            <td>Steps:</td>
-                            <td>${img.steps}</td>
-                        </tr>
-                        <tr>
-                            <td>Guidance Scale:</td>
-                            <td>${img.guidanceScale !== undefined ? img.guidanceScale : 'N/A'}</td>
-                        </tr>
-                        <tr>
-                            <td>Scheduler:</td>
-                            <td>${img.scheduler || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                            <td>Seed:</td>
-                            <td>
-                                ${img.seed !== undefined ? img.seed : 'N/A'}
-                                ${img.seed !== undefined ? `<button class="btn btn-primary" style="margin-left: 0.5rem; padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="copyToClipboard('${img.seed}', 'Seed copied!')">Copy</button>` : ''}
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>Generation Time:</td>
-                            <td>${timeInfo}</td>
-                        </tr>
-                        <tr>
-                            <td>Created:</td>
-                            <td>${createdDate}</td>
-                        </tr>
-                    </table>
+                    <div class="settings-grid">
+                        <div class="setting-item">
+                            <div class="setting-label">Model</div>
+                            <div class="setting-value" style="font-size: 0.75rem;">${escapeHtml(img.model)}</div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">Resolution</div>
+                            <div class="setting-value">${img.width}×${img.height}</div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">Steps</div>
+                            <div class="setting-value">${img.steps}</div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">Guidance</div>
+                            <div class="setting-value">${img.guidanceScale !== undefined ? img.guidanceScale : 'N/A'}</div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">Scheduler</div>
+                            <div class="setting-value" style="font-size: 0.75rem;">${img.scheduler || 'N/A'}</div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">Seed</div>
+                            <div class="setting-value" style="font-size: 0.75rem;">${img.seed !== undefined ? img.seed : 'N/A'}</div>
+                        </div>
+                    </div>
                 </div>
                 
-                ${loraSection}
-                
-                <div class="details-actions">
-                    <button class="btn btn-primary" onclick="regenerateImage('${img.id}')">
-                        Regenerate
+                <div class="action-buttons">
+                    <button class="btn btn-primary action-btn" onclick="regenerateImage('${img.id}')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Regenerate Image
                     </button>
-                    <button class="btn btn-secondary" onclick="downloadImage('${img.url}', '${img.id}')">
-                        Download
-                    </button>
-                    <button class="btn btn-secondary" onclick="closeDetailsModal(); openFullscreen('${img.id}')">
-                        View Fullscreen
+                    <button class="btn btn-secondary action-btn" onclick="downloadImage('${img.url}', '${img.id}')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Download Image
                     </button>
                     ${img.isOwner ? `
-                        <button class="btn btn-secondary" onclick="togglePrivacy('${img.id}', ${!img.isPublic}); closeDetailsModal()">
-                            ${img.isPublic ? 'Make Private' : 'Make Public'}
-                        </button>
-                        <button class="btn btn-danger" onclick="closeDetailsModal(); confirmDelete('${img.id}')">
-                            Delete Image
-                        </button>
+                    <button class="btn btn-secondary action-btn" onclick="togglePrivacy('${img.id}', ${!img.isPublic})">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        Make ${img.isPublic ? 'Private' : 'Public'}
+                    </button>
+                    <button class="btn btn-danger action-btn" onclick="confirmDelete('${img.id}')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Delete Image
+                    </button>
                     ` : ''}
                 </div>
             `;
             
-            modal.classList.add('active');
+            viewer.classList.add('active');
             document.body.style.overflow = 'hidden';
         }
         
-        function closeDetailsModal() {
-            const modal = document.getElementById('detailsModal');
-            modal.classList.remove('active');
+        // Close viewer
+        function closeViewer() {
+            document.getElementById('viewer').classList.remove('active');
             document.body.style.overflow = '';
+            currentViewerIndex = -1;
         }
         
-        function copyToClipboard(text, message = 'Copied to clipboard!') {
-            navigator.clipboard.writeText(text).then(() => {
-                window.SDAPI.Toast.success(message);
-            }).catch(err => {
-                console.error('Failed to copy:', err);
-                window.SDAPI.Toast.error('Failed to copy to clipboard');
-            });
+        // Navigate images
+        function navigateImage(direction) {
+            if (currentViewerIndex === -1) return;
+            
+            currentViewerIndex += direction;
+            if (currentViewerIndex < 0) currentViewerIndex = filteredImages.length - 1;
+            if (currentViewerIndex >= filteredImages.length) currentViewerIndex = 0;
+            
+            openViewer(currentViewerIndex);
         }
         
+        // Regenerate image
         function regenerateImage(imageId) {
             const img = currentImages.find(i => i.id === imageId);
             if (!img) return;
             
-            // Store settings in sessionStorage
             sessionStorage.setItem('regenerate_settings', JSON.stringify({
                 prompt: img.prompt,
                 negativePrompt: img.negativePrompt || '',
@@ -1025,12 +836,11 @@
                 loraScales: img.loraScales || [],
             }));
             
-            // Navigate to generate page
             window.location.href = '/web/generate.html';
         }
         
+        // Download image
         function downloadImage(url, imageId) {
-            // Create a temporary anchor element
             const a = document.createElement('a');
             a.href = url;
             a.download = `alice_${imageId}.png`;
@@ -1040,53 +850,84 @@
             window.SDAPI.Toast.success('Download started');
         }
         
+        // Toggle privacy
+        async function togglePrivacy(imageId, makePublic) {
+            try {
+                const { API, Toast } = window.SDAPI;
+                await API.fetch(`/v1/gallery/${imageId}/privacy`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                        privacy: makePublic ? 'public' : 'private',
+                        expirationHours: makePublic ? 168 : undefined
+                    })
+                });
+                
+                Toast.success(`Image is now ${makePublic ? 'public' : 'private'}`);
+                await loadGallery();
+                closeViewer();
+            } catch (error) {
+                window.SDAPI.Toast.error('Failed to update privacy: ' + error.message);
+            }
+        }
+        
+        // Delete image
+        async function confirmDelete(imageId) {
+            if (!confirm('Are you sure you want to delete this image? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const { API, Toast } = window.SDAPI;
+                await API.fetch(`/v1/gallery/${imageId}`, { method: 'DELETE' });
+                
+                Toast.success('Image deleted successfully');
+                closeViewer();
+                await loadGallery();
+            } catch (error) {
+                window.SDAPI.Toast.error('Failed to delete image: ' + error.message);
+            }
+        }
+        
+        // Copy to clipboard
+        function copyToClipboard(text, message = 'Copied!') {
+            navigator.clipboard.writeText(text).then(() => {
+                window.SDAPI.Toast.success(message);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                window.SDAPI.Toast.error('Failed to copy to clipboard');
+            });
+        }
+        
+        // Escape HTML
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
         
-        // Load gallery on page load
-        document.addEventListener('DOMContentLoaded', async () => {
-            if (typeof window.SDAPI === 'undefined') {
-                document.body.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--error);">Error: ALICE JavaScript failed to load. Please refresh the page.</div>';
-                return;
-            }
-            
-            // Check auth and update nav visibility
-            const { requireAuth } = window.SDAPI;
-            const authResult = await requireAuth();
-            
-            // Add admin class to body for CSS to show admin links
-            if (authResult.isAdmin) {
-                document.body.classList.add('is-admin');
-            }
-            
-            // Load gallery page size configuration
-            await loadGalleryPageSize();
-            
-            loadGallery();
-        });
+        // Filter listeners
+        document.getElementById('filter-model').addEventListener('change', applyFilters);
+        document.getElementById('filter-privacy').addEventListener('change', applyFilters);
+        document.getElementById('filter-sort').addEventListener('change', applyFilters);
+        document.getElementById('search-prompt').addEventListener('input', debounce(applyFilters, 300));
+        
+        // Debounce helper
+        function debounce(func, wait) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
         
         // Keyboard navigation
         document.addEventListener('keydown', (e) => {
-            const viewer = document.getElementById('fullscreenViewer');
-            const detailsModal = document.getElementById('detailsModal');
-            
-            // Details modal has priority
-            if (detailsModal.classList.contains('active')) {
-                if (e.key === 'Escape') {
-                    closeDetailsModal();
-                }
-                return;
-            }
-            
-            // Fullscreen viewer
+            const viewer = document.getElementById('viewer');
             if (!viewer.classList.contains('active')) return;
             
             switch (e.key) {
                 case 'Escape':
-                    closeFullscreen();
+                    closeViewer();
                     break;
                 case 'ArrowLeft':
                     navigateImage(-1);
@@ -1097,50 +938,22 @@
             }
         });
         
-        // Listen for fullscreen changes (user pressing F11 or ESC)
-        document.addEventListener('fullscreenchange', handleFullscreenChange);
-        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-        document.addEventListener('msfullscreenchange', handleFullscreenChange);
-        
-        function handleFullscreenChange() {
-            const viewer = document.getElementById('fullscreenViewer');
-            // If user exited fullscreen but viewer is still active, close it
-            if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
-                if (viewer.classList.contains('active')) {
-                    viewer.classList.remove('active');
-                    document.body.style.overflow = '';
-                    hideCloseOverlay();
-                }
+        // Load on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (typeof window.SDAPI === 'undefined') {
+                document.body.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--error);">Error: ALICE JavaScript failed to load. Please refresh the page.</div>';
+                return;
             }
-        }
-        
-        // Touch swipe support for mobile
-        let touchStartX = 0;
-        let touchEndX = 0;
-        
-        document.getElementById('fullscreenViewer').addEventListener('touchstart', (e) => {
-            touchStartX = e.changedTouches[0].screenX;
-        }, { passive: true });
-        
-        document.getElementById('fullscreenViewer').addEventListener('touchend', (e) => {
-            touchEndX = e.changedTouches[0].screenX;
-            handleSwipe();
-        }, { passive: true });
-        
-        function handleSwipe() {
-            const threshold = 50; // minimum swipe distance
-            const diff = touchStartX - touchEndX;
             
-            if (Math.abs(diff) > threshold) {
-                if (diff > 0) {
-                    // Swipe left - next image
-                    navigateImage(1);
-                } else {
-                    // Swipe right - previous image
-                    navigateImage(-1);
-                }
+            const { requireAuth } = window.SDAPI;
+            const authResult = await requireAuth();
+            
+            if (authResult.isAdmin) {
+                document.body.classList.add('is-admin');
             }
-        }
+            
+            await loadGallery();
+        });
     </script>
 </body>
 </html>
