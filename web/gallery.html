@@ -7,50 +7,52 @@
     <link rel="stylesheet" href="/web/fonts/inter.css">
     <link rel="stylesheet" href="/web/style.css">
     <style>
-        /* Modern Masonry Gallery Layout */
+        /* Masonry Gallery Layout */
         .gallery-container {
-            column-count: 4;
-            column-gap: 16px;
-            padding: 0;
-        }
-        
-        @media (max-width: 1400px) {
-            .gallery-container {
-                column-count: 3;
-            }
-        }
-        
-        @media (max-width: 1024px) {
-            .gallery-container {
-                column-count: 2;
-            }
-        }
-        
-        @media (max-width: 640px) {
-            .gallery-container {
-                column-count: 1;
-            }
+            margin: 0 auto;
         }
         
         .gallery-item {
-            break-inside: avoid;
             margin-bottom: 16px;
             position: relative;
             border-radius: 12px;
             overflow: hidden;
             background: var(--bg-secondary);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            transition: box-shadow 0.2s ease;
             cursor: pointer;
-            will-change: transform;
+            width: 250px;
+        }
+        
+        @media (max-width: 1400px) {
+            .gallery-item {
+                width: 220px;
+            }
+        }
+        
+        @media (max-width: 1024px) {
+            .gallery-item {
+                width: 200px;
+            }
+        }
+        
+        @media (max-width: 640px) {
+            .gallery-item {
+                width: 100%;
+            }
         }
         
         .gallery-item:hover {
-            transform: scale(1.02);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 
+                        inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+        
+        .gallery-item:hover img {
+            opacity: 0.95;
         }
         
         .gallery-item img {
             width: 100%;
+            height: auto;
             display: block;
             border-radius: 12px 12px 0 0;
         }
@@ -409,7 +411,7 @@
             text-align: center;
             padding: 4rem 2rem;
             color: var(--text-secondary);
-            column-span: all; /* Break out of masonry columns */
+            grid-column: 1 / -1;
             width: 100%;
         }
         
@@ -464,7 +466,56 @@
             color: var(--text-secondary);
             font-size: 0.875rem;
         }
+        
+        /* Sidebar Toggle */
+        .sidebar-toggle {
+            position: absolute;
+            top: 1rem;
+            right: 4rem;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            z-index: 9;
+        }
+        
+        .sidebar-toggle:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+        
+        .sidebar-toggle svg {
+            width: 24px;
+            height: 24px;
+        }
+        
+        /* Fullscreen image mode */
+        .viewer-container.fullscreen {
+            background: rgba(0, 0, 0, 1);
+        }
+        
+        .viewer-container.fullscreen .viewer-image-area {
+            padding: 2rem;
+        }
+        
+        .viewer-container.fullscreen .viewer-sidebar {
+            display: none;
+        }
+        
+        .viewer-container.fullscreen.sidebar-visible .viewer-sidebar {
+            display: block;
+        }
     </style>
+    <!-- Masonry Layout Library (MIT License) -->
+    <script src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js"></script>
 </head>
 <body>
     <nav>
@@ -563,6 +614,12 @@
                 </svg>
             </button>
             
+            <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle details sidebar">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h2m0-18v18m0-18h8a2 2 0 012 2v12a2 2 0 01-2 2h-8" />
+                </svg>
+            </button>
+            
             <button class="viewer-nav prev" onclick="navigateImage(-1)">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
@@ -588,6 +645,17 @@
         let currentImages = [];
         let filteredImages = [];
         let currentViewerIndex = -1;
+        let visualImageOrder = []; // Track visual order from gallery
+        
+        // Get visual order of images from gallery DOM
+        function updateVisualImageOrder() {
+            const gallery = document.getElementById('gallery');
+            const items = gallery.querySelectorAll('.gallery-item');
+            visualImageOrder = Array.from(items).map(item => {
+                const img = item.querySelector('img');
+                return filteredImages.find(fi => fi.url === img.src);
+            });
+        }
         
         // Load gallery
         async function loadGallery() {
@@ -676,7 +744,7 @@
             gallery.innerHTML = filteredImages.map((img, index) => {
                 const modelName = img.model.replace('sd/', '').substring(0, 20);
                 return `
-                    <div class="gallery-item" onclick="openViewer(${index})">
+                    <div class="gallery-item" data-image-id="${img.id}" onclick="openViewerByImageId('${img.id}')">
                         <img src="${img.url}" alt="${escapeHtml(img.prompt).substring(0, 100)}" loading="lazy">
                         <div class="gallery-overlay">
                             <div class="overlay-top">
@@ -708,15 +776,126 @@
                     </div>
                 `;
             }).join('');
+            
+            // Initialize Masonry layout after rendering
+            if (window.Masonry) {
+                // Wait for images to load before laying out
+                let imagesLoaded = 0;
+                const images = gallery.querySelectorAll('img');
+                const totalImages = images.length;
+                
+                if (totalImages === 0) {
+                    // Initialize if no images
+                    initMasonry(gallery);
+                    return;
+                }
+                
+                function checkAllImagesLoaded() {
+                    if (imagesLoaded === totalImages) {
+                        // Give browser time to calculate dimensions
+                        requestAnimationFrame(() => {
+                            initMasonry(gallery);
+                        });
+                    }
+                }
+                
+                images.forEach(img => {
+                    // If image is already loaded (cached), count it immediately
+                    if (img.complete) {
+                        imagesLoaded++;
+                    } else {
+                        // Listen for load
+                        img.addEventListener('load', () => {
+                            imagesLoaded++;
+                            checkAllImagesLoaded();
+                        }, { once: true });
+                        
+                        // Listen for error
+                        img.addEventListener('error', () => {
+                            imagesLoaded++;
+                            checkAllImagesLoaded();
+                        }, { once: true });
+                    }
+                });
+                
+                // Check if all were cached (complete)
+                checkAllImagesLoaded();
+                
+                // Safety timeout in case load events don't fire
+                setTimeout(() => {
+                    if (imagesLoaded < totalImages) {
+                        imagesLoaded = totalImages;
+                        initMasonry(gallery);
+                    }
+                }, 3000);
+            }
+        }
+        
+        // Initialize Masonry layout with responsive column width
+        function initMasonry(container) {
+            // Calculate column width based on viewport
+            let columnWidth = 250;
+            if (window.innerWidth < 1400) columnWidth = 220;
+            if (window.innerWidth < 1024) columnWidth = 200;
+            if (window.innerWidth < 640) columnWidth = window.innerWidth - 40; // Full width minus padding
+            
+            const msnry = new Masonry(container, {
+                itemSelector: '.gallery-item',
+                columnWidth: columnWidth,
+                gutter: 16,
+                fitWidth: true,
+                transitionDuration: '0.3s'
+            });
+            
+            // Store instance for window resize and update visual order
+            window.galleryMasonry = msnry;
+            updateVisualImageOrder();
+            
+            // Re-layout after a short delay to catch images that loaded after initial layout
+            setTimeout(() => {
+                msnry.reloadItems();
+                msnry.layout();
+                updateVisualImageOrder();
+            }, 500);
+        }
+        
+        // Re-layout Masonry on window resize
+        window.addEventListener('resize', () => {
+            if (window.galleryMasonry) {
+                let columnWidth = 250;
+                if (window.innerWidth < 1400) columnWidth = 220;
+                if (window.innerWidth < 1024) columnWidth = 200;
+                if (window.innerWidth < 640) columnWidth = window.innerWidth - 40;
+                
+                window.galleryMasonry.options.columnWidth = columnWidth;
+                window.galleryMasonry.layout();
+            }
+        });
+        
+        // Open viewer by image ID (finds visual position in gallery)
+        function openViewerByImageId(imageId) {
+            const visualIndex = visualImageOrder.findIndex(img => img && img.id === imageId);
+            if (visualIndex !== -1) {
+                currentViewerIndex = visualIndex;
+                openViewer(visualIndex);
+            }
         }
         
         // Open viewer
-        function openViewer(index) {
+        function openViewer(index, preserveState = false) {
             currentViewerIndex = index;
-            const img = filteredImages[index];
+            
+            // Use visual order if available, otherwise fall back to filteredImages
+            const img = visualImageOrder[index] || filteredImages[index];
+            if (!img) return;
+            
             const viewer = document.getElementById('viewer');
             const viewerImage = document.getElementById('viewer-image');
             const sidebar = document.getElementById('viewer-sidebar');
+            
+            // Preserve fullscreen/sidebar state when navigating between images
+            const wasFullscreen = viewer.classList.contains('fullscreen');
+            const hadSidebar = viewer.classList.contains('sidebar-visible');
             
             viewerImage.src = img.url;
             
@@ -810,26 +989,47 @@
                 </div>
             `;
             
-            viewer.classList.add('active');
+            // If opening from gallery, set fullscreen mode. If navigating, preserve existing state.
+            if (!preserveState && !wasFullscreen) {
+                viewer.classList.add('active', 'fullscreen', 'sidebar-visible');
+            } else if (preserveState || wasFullscreen) {
+                viewer.classList.add('active');
+                if (wasFullscreen) viewer.classList.add('fullscreen');
+                if (hadSidebar) viewer.classList.add('sidebar-visible');
+            } else {
+                viewer.classList.add('active', 'fullscreen', 'sidebar-visible');
+            }
+            
             document.body.style.overflow = 'hidden';
         }
         
         // Close viewer
         function closeViewer() {
-            document.getElementById('viewer').classList.remove('active');
+            document.getElementById('viewer').classList.remove('active', 'fullscreen', 'sidebar-visible');
             document.body.style.overflow = '';
             currentViewerIndex = -1;
         }
         
-        // Navigate images
+        // Toggle sidebar visibility in fullscreen mode
+        function toggleSidebar() {
+            const viewer = document.getElementById('viewer');
+            viewer.classList.add('fullscreen');
+            viewer.classList.toggle('sidebar-visible');
+        }
+        
+        // Navigate images - use visual order from gallery
         function navigateImage(direction) {
-            if (currentViewerIndex === -1) return;
+            if (currentViewerIndex === -1 || visualImageOrder.length === 0) return;
             
             currentViewerIndex += direction;
-            if (currentViewerIndex < 0) currentViewerIndex = filteredImages.length - 1;
-            if (currentViewerIndex >= filteredImages.length) currentViewerIndex = 0;
+            if (currentViewerIndex < 0) currentViewerIndex = visualImageOrder.length - 1;
+            if (currentViewerIndex >= visualImageOrder.length) currentViewerIndex = 0;
             
-            openViewer(currentViewerIndex);
+            // Get the image at this visual position
+            const img = visualImageOrder[currentViewerIndex];
+            if (img) {
+                openViewer(currentViewerIndex, true);
+            }
         }
         
         // Regenerate image
