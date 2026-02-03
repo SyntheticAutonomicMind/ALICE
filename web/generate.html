@@ -9,15 +9,31 @@
     <style>
         .gen-container {
             display: grid;
+            grid-template-columns: 600px 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        
+        .form-columns {
+            display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 1.5rem;
         }
         
-        @media (max-width: 1024px) {
+        .form-column-full {
+            grid-column: 1 / -1;
+        }
+        
+        @media (max-width: 1200px) {
             .gen-container {
                 grid-template-columns: 1fr;
             }
-            
+            .form-columns {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 1024px) {
             .preview-area {
                 position: static !important;
             }
@@ -80,10 +96,38 @@
             color: var(--text-secondary);
         }
         
-        /* Orientation toggle button - inline with size presets */
+        /* Size preset dropdown styling */
+        .size-control-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-end;
+        }
+        
+        .size-control-row > div:first-child {
+            flex: 1;
+        }
+        
+        #orientation-toggle {
+            padding: 0.65rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            white-space: nowrap;
+        }
+        
+        #orientation-toggle:hover:not(:disabled) {
+            background: var(--bg-tertiary);
+            border-color: var(--primary);
+        }
+        
         #orientation-toggle:disabled {
             opacity: 0.5;
-            cursor: not-allowed !important;
+            cursor: not-allowed;
         }
     </style>
 </head>
@@ -119,181 +163,204 @@
         
         <div class="gen-container">
             <!-- Generation Form -->
-            <div>
-                <div class="card">
-                    <div class="card-header">
-                        <span class="card-title">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                            </svg>
-                            Generation Settings
-                        </span>
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                        </svg>
+                        Generation Settings
+                    </span>
+                </div>
+                
+                <form id="gen-form" class="gen-form">
+                    <!-- Model Selection - Full Width -->
+                    <div class="form-group form-column-full">
+                        <label for="model">Model</label>
+                        <select id="model" required>
+                            <option value="" disabled selected>Loading models...</option>
+                        </select>
                     </div>
                     
-                    <form id="gen-form" class="gen-form">
-                        <!-- Model Selection -->
-                        <div class="form-group">
-                            <label for="model">Model</label>
-                            <select id="model" required>
-                                <option value="" disabled selected>Loading models...</option>
-                            </select>
-                        </div>
-                        
-                        <!-- Prompt -->
-                        <div class="form-group">
-                            <label for="prompt">Prompt</label>
-                            <textarea id="prompt" rows="4" placeholder="A serene mountain landscape at sunset, detailed, photorealistic, 8k" required></textarea>
-                        </div>
-                        
-                        <!-- Negative Prompt -->
-                        <div class="form-group">
-                            <label for="negative-prompt">Negative Prompt</label>
-                            <textarea id="negative-prompt" rows="2" placeholder="blurry, low quality, distorted, ugly"></textarea>
-                        </div>
-                        
-                        <!-- LoRA Section (will be populated dynamically) -->
-                        <div class="form-group" id="lora-section" style="display: none;">
-                            <label>LoRA Models</label>
-                            <div id="lora-list" class="lora-list"></div>
-                        </div>
-                        
-                        <!-- Size Presets -->
-                        <div class="form-group">
-                            <label>Size (auto-rounded to multiples of 8)</label>
-                            <div class="size-presets">
-                                <button type="button" id="orientation-toggle" class="size-preset" title="Switch between landscape and portrait" style="display: flex; align-items: center; gap: 0.4rem;">
+                    <!-- Prompt - Full Width -->
+                    <div class="form-group form-column-full">
+                        <label for="prompt">Prompt</label>
+                        <textarea id="prompt" rows="4" placeholder="A serene mountain landscape at sunset, detailed, photorealistic, 8k" required></textarea>
+                    </div>
+                    
+                    <!-- Negative Prompt - Full Width -->
+                    <div class="form-group form-column-full">
+                        <label for="negative-prompt">Negative Prompt</label>
+                        <textarea id="negative-prompt" rows="2" placeholder="blurry, low quality, distorted, ugly"></textarea>
+                    </div>
+                    
+                    <!-- LoRA Section - Full Width -->
+                    <div class="form-group form-column-full" id="lora-section" style="display: none;">
+                        <label>LoRA Models</label>
+                        <div id="lora-list" class="lora-list"></div>
+                    </div>
+                    
+                    <!-- Two Column Layout for Basic/Advanced Settings -->
+                    <div class="form-columns">
+                        <!-- LEFT COLUMN: Basic Settings -->
+                        <div>
+                            <h3 style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-bottom: 1rem; text-transform: uppercase; letter-spacing: 0.05em;">Basic Settings</h3>
+                            
+                            <!-- Size Presets Dropdown -->
+                            <div class="form-group">
+                                <label for="size-preset">Resolution</label>
+                                <select id="size-preset" class="form-select">
+                                    <optgroup label="SD 1.5">
+                                        <option value="512x512">512×512 (Square)</option>
+                                        <option value="768x512" selected>768×512 (Landscape 3:2)</option>
+                                        <option value="768x768">768×768 (Large Square)</option>
+                                    </optgroup>
+                                    <optgroup label="SDXL Portrait">
+                                        <option value="832x1248">832×1248 (2:3)</option>
+                                        <option value="880x1176">880×1176 (3:4)</option>
+                                        <option value="912x1144">912×1144 (4:5)</option>
+                                    </optgroup>
+                                    <optgroup label="SDXL Square">
+                                        <option value="1024x1024">1024×1024 (Square)</option>
+                                    </optgroup>
+                                    <optgroup label="SDXL Landscape">
+                                        <option value="1176x880">1176×880 (SD TV 4:3)</option>
+                                        <option value="1224x856">1224×856 (IMAX 1.43:1)</option>
+                                        <option value="1296x800">1296×800 (Golden Ratio)</option>
+                                        <option value="1312x792">1312×792 (European Wide)</option>
+                                    </optgroup>
+                                    <optgroup label="SDXL Widescreen">
+                                        <option value="1360x768">1360×768 (16:9 HD)</option>
+                                        <option value="1392x752">1392×752 (1.85:1)</option>
+                                        <option value="1568x664">1568×664 (Cinemascope)</option>
+                                        <option value="1576x656">1576×656 (Anamorphic)</option>
+                                    </optgroup>
+                                    <optgroup label="HD">
+                                        <option value="1920x1080">1920×1080 (Full HD)</option>
+                                    </optgroup>
+                                    <optgroup label="Custom">
+                                        <option value="custom">Custom Size</option>
+                                    </optgroup>
+                                </select>
+                                <button type="button" id="orientation-toggle" title="Switch between landscape and portrait" style="margin-top: 0.5rem; width: 100%;">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
                                     </svg>
                                     <span id="orientation-label">Landscape</span>
                                 </button>
-                                <!-- SD 1.5 presets -->
-                                <button type="button" class="size-preset" data-width="512" data-height="512" title="SD 1.5 Square (1:1)">512</button>
-                                <button type="button" class="size-preset" data-width="768" data-height="512" title="SD 1.5 Landscape (3:2)">768×512</button>
-                                <button type="button" class="size-preset" data-width="768" data-height="768" title="SD 1.5 Large Square (1:1)">768</button>
-                                <!-- SDXL Portrait -->
-                                <button type="button" class="size-preset" data-width="832" data-height="1248" title="SDXL Portrait (2:3)">832×1248</button>
-                                <button type="button" class="size-preset" data-width="880" data-height="1176" title="SDXL Standard Portrait (3:4)">880×1176</button>
-                                <button type="button" class="size-preset" data-width="912" data-height="1144" title="SDXL Large Format (4:5)">912×1144</button>
-                                <!-- SDXL Square -->
-                                <button type="button" class="size-preset" data-width="1024" data-height="1024" title="SDXL Square (1:1)">1024</button>
-                                <!-- SDXL Landscape -->
-                                <button type="button" class="size-preset" data-width="1176" data-height="880" title="SDXL SD TV (4:3)">1176×880</button>
-                                <button type="button" class="size-preset" data-width="1224" data-height="856" title="SDXL IMAX (1.43:1)">1224×856</button>
-                                <button type="button" class="size-preset" data-width="1296" data-height="800" title="SDXL Golden Ratio (1.618:1)">1296×800</button>
-                                <button type="button" class="size-preset" data-width="1312" data-height="792" title="SDXL European Wide (1.66:1)">1312×792</button>
-                                <!-- SDXL Widescreen -->
-                                <button type="button" class="size-preset" data-width="1360" data-height="768" title="SDXL Widescreen HD (16:9)">1360×768</button>
-                                <button type="button" class="size-preset" data-width="1392" data-height="752" title="SDXL Standard Wide (1.85:1)">1392×752</button>
-                                <button type="button" class="size-preset" data-width="1568" data-height="664" title="SDXL Cinemascope (2.35:1)">1568×664</button>
-                                <button type="button" class="size-preset" data-width="1576" data-height="656" title="SDXL Anamorphic (2.39:1)">1576×656</button>
-                                <!-- HD preset -->
-                                <button type="button" class="size-preset" data-width="1920" data-height="1080" title="Full HD (16:9)">1920×1080</button>
+                                <small style="color: var(--text-secondary); font-size: 0.8rem; display: block; margin-top: 0.25rem;">Auto-rounded to multiples of 8</small>
                             </div>
-                            <!-- Custom dimensions inputs -->
-                            <div class="form-row" style="margin-top: 1rem;">
-                                <div class="form-group">
-                                    <label for="custom-width">Custom Width</label>
-                                    <input type="number" id="custom-width" placeholder="512" min="256" max="2048" step="8">
-                                    <small style="color: var(--text-secondary); font-size: 0.8rem;">Multiples of 8</small>
-                                </div>
-                                <div class="form-group">
-                                    <label for="custom-height">Custom Height</label>
-                                    <input type="number" id="custom-height" placeholder="512" min="256" max="2048" step="8">
-                                    <small style="color: var(--text-secondary); font-size: 0.8rem;">Multiples of 8</small>
+                            
+                            <!-- Custom Size Inputs (shown when custom selected) -->
+                            <div id="custom-size-inputs" style="display: none;">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="custom-width">Width</label>
+                                        <input type="number" id="custom-width" placeholder="768" min="256" max="2048" step="8">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="custom-height">Height</label>
+                                        <input type="number" id="custom-height" placeholder="512" min="256" max="2048" step="8">
+                                    </div>
                                 </div>
                             </div>
+                            
                             <!-- Hidden inputs to store selected dimensions -->
                             <input type="hidden" id="width" value="768">
                             <input type="hidden" id="height" value="512">
-                        </div>
-                        
-                        <!-- Steps & Guidance -->
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="steps">Steps</label>
-                                <input type="number" id="steps" min="1" max="150" placeholder="Steps">
-                            </div>
-                            <div class="form-group">
-                                <label for="guidance">Guidance Scale</label>
-                                <input type="number" id="guidance" min="0" max="20" step="0.1" placeholder="Guidance">
-                            </div>
-                        </div>
-                        
-                        <!-- Seed & Num Images -->
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="seed">Seed (leave empty for random)</label>
-                                <input type="number" id="seed" placeholder="Random">
-                            </div>
+                            
+                            <!-- Number of Images -->
                             <div class="form-group">
                                 <label for="num-images">Number of Images</label>
                                 <input type="number" id="num-images" min="1" max="100" value="1">
                             </div>
                         </div>
                         
-                        <!-- Scheduler -->
-                        <div class="form-group">
-                            <label>Scheduler</label>
-                            <div class="scheduler-grid">
-                                <button type="button" class="scheduler-option" data-value="ddim">DDIM</button>
-                                <button type="button" class="scheduler-option" data-value="euler">Euler</button>
-                                <button type="button" class="scheduler-option" data-value="euler_a">Euler A</button>
-                                <button type="button" class="scheduler-option" data-value="dpm++_sde_karras">DPM++ SDE</button>
-                                <button type="button" class="scheduler-option" data-value="dpm++_karras">DPM++</button>
-                                <button type="button" class="scheduler-option" data-value="lms">LMS</button>
+                        <!-- RIGHT COLUMN: Advanced Settings -->
+                        <div>
+                            <h3 style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-bottom: 1rem; text-transform: uppercase; letter-spacing: 0.05em;">Advanced Settings</h3>
+                            
+                            <!-- Steps & Guidance -->
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="steps">Steps</label>
+                                    <input type="number" id="steps" min="1" max="150" placeholder="25">
+                                </div>
+                                <div class="form-group">
+                                    <label for="guidance">Guidance</label>
+                                    <input type="number" id="guidance" min="0" max="20" step="0.1" placeholder="7.5">
+                                </div>
                             </div>
-                            <input type="hidden" id="scheduler" value="">
+                            
+                            <!-- Seed -->
+                            <div class="form-group">
+                                <label for="seed">Seed (leave empty for random)</label>
+                                <input type="number" id="seed" placeholder="Random">
+                            </div>
+                            
+                            <!-- Scheduler -->
+                            <div class="form-group">
+                                <label>Scheduler</label>
+                                <div class="scheduler-grid">
+                                    <button type="button" class="scheduler-option" data-value="ddim">DDIM</button>
+                                    <button type="button" class="scheduler-option" data-value="euler">Euler</button>
+                                    <button type="button" class="scheduler-option" data-value="euler_a">Euler A</button>
+                                    <button type="button" class="scheduler-option" data-value="dpm++_sde_karras">DPM++ SDE</button>
+                                    <button type="button" class="scheduler-option" data-value="dpm++_karras">DPM++</button>
+                                    <button type="button" class="scheduler-option" data-value="lms">LMS</button>
+                                </div>
+                                <input type="hidden" id="scheduler" value="">
+                            </div>
+                            
+                            <!-- Privacy Settings -->
+                            <div class="form-group">
+                                <label>Privacy</label>
+                                <div class="privacy-toggle">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="make-public">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <span id="privacy-label">Private (only you can see)</span>
+                                </div>
+                                <div id="expiration-options" style="display: none; margin-top: 0.75rem;">
+                                    <label for="expiration" style="font-size: 0.85rem; color: var(--text-secondary);">Expires in</label>
+                                    <select id="expiration" style="margin-top: 0.25rem;">
+                                        <option value="24">24 hours</option>
+                                        <option value="48">48 hours</option>
+                                        <option value="72">3 days</option>
+                                        <option value="168" selected>7 days (default)</option>
+                                    </select>
+                                </div>
+                            </div>
                         </div>
-                        
-                        <!-- Privacy Settings -->
-                        <div class="form-group">
-                            <label>Privacy</label>
-                            <div class="privacy-toggle">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="make-public">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                                <span id="privacy-label">Private (only you can see)</span>
-                            </div>
-                            <div id="expiration-options" style="display: none; margin-top: 0.75rem;">
-                                <label for="expiration" style="font-size: 0.85rem; color: var(--text-secondary);">Expires in</label>
-                                <select id="expiration" style="margin-top: 0.25rem;">
-                                    <option value="24">24 hours</option>
-                                    <option value="48">48 hours</option>
-                                    <option value="72">3 days</option>
-                                    <option value="168" selected>7 days (default)</option>
-                                </select>
-                            </div>
-                        </div>
-                        
-                        <!-- Generate Button -->
-                        <button type="submit" class="btn btn-primary btn-block btn-lg" id="generate-btn">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                            </svg>
-                            Generate Image
-                        </button>
-                        
-                        <!-- Progress indicator -->
-                        <div id="progress-container" class="progress-container" style="display: none;">
-                            <div class="progress-bar" style="height: 8px;">
-                                <div class="progress-fill animated" id="progress-bar" style="width: 0%"></div>
-                            </div>
-                            <div class="progress-info">
-                                <span id="progress-status">Initializing...</span>
-                                <span id="progress-time">0s</span>
-                            </div>
-                        </div>
-                    </form>
+                    </div>
                     
-                    <!-- Generation Log -->
-                    <div id="generation-log" class="generation-log" style="display: none;"></div>
+                    <!-- Generate Button - Full Width -->
+                    <button type="submit" class="btn btn-primary btn-block btn-lg form-column-full" id="generate-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Generate Image
+                    </button>
+                </form>
+                
+                <!-- Progress Bar -->
+                <div id="progress-container" style="display: none; margin-top: 1.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <span id="progress-status" style="font-size: 0.9rem; color: var(--text-secondary);">Generating...</span>
+                        <span id="progress-time" style="font-size: 0.85rem; color: var(--text-muted);"></span>
+                    </div>
+                    <div style="width: 100%; height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden;">
+                        <div id="progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.3s;"></div>
+                    </div>
                 </div>
+                
+                <!-- Generation Log -->
+                <div id="generation-log" style="display: none; margin-top: 1.5rem; padding: 1rem; background: var(--bg-secondary); border-radius: 8px; max-height: 200px; overflow-y: auto; font-size: 0.85rem; font-family: 'Courier New', monospace;"></div>
             </div>
             
             <!-- Preview Area -->
-            <div class="preview-area">
+            <div>
                 <div class="card">
                     <div class="card-header">
                         <span class="card-title">
@@ -405,21 +472,19 @@
                     // Apply defaults to form
                     document.getElementById('steps').value = defaults.steps || 25;
                     document.getElementById('guidance').value = defaults.guidance_scale || 7.5;
-                    document.getElementById('width').value = defaults.width || 512;
+                    document.getElementById('width').value = defaults.width || 768;
                     document.getElementById('height').value = defaults.height || 512;
                     
-                    // Update size preset selection
-                    const w = defaults.width || 512;
+                    // Update size preset dropdown selection
+                    const w = defaults.width || 768;
                     const h = defaults.height || 512;
-                    document.querySelectorAll('.size-preset').forEach(btn => {
-                        const bw = parseInt(btn.dataset.width);
-                        const bh = parseInt(btn.dataset.height);
-                        if (bw === w && bh === h) {
-                            btn.classList.add('selected');
-                        } else {
-                            btn.classList.remove('selected');
-                        }
-                    });
+                    const presetValue = `${w}x${h}`;
+                    const presetSelect = document.getElementById('size-preset');
+                    const option = Array.from(presetSelect.options).find(opt => opt.value === presetValue);
+                    if (option) {
+                        presetSelect.value = presetValue;
+                    }
+                    updateOrientationLabel();
                     
                     // Update scheduler selection
                     const scheduler = defaults.scheduler || 'ddim';
@@ -453,99 +518,59 @@
             
             // Smart resolution picker - adapt presets based on model type
             async function updateResolutionPresets(modelId) {
-                if (!modelId) return;
-                
-                try {
-                    const modelInfo = await API.fetch(`/v1/models/${modelId}/info`);
-                    const presets = modelInfo.recommended_resolutions || [];
-                    
-                    // Update the size presets container
-                    const presetsContainer = document.querySelector('.size-presets');
-                    const orientationToggle = document.getElementById('orientation-toggle');
-                    
-                    // Clear existing presets (except orientation toggle)
-                    presetsContainer.querySelectorAll('.size-preset:not(#orientation-toggle)').forEach(btn => btn.remove());
-                    
-                    // Add new presets based on model type
-                    presets.forEach(preset => {
-                        const btn = document.createElement('button');
-                        btn.type = 'button';
-                        btn.className = 'size-preset';
-                        btn.dataset.width = preset.width;
-                        btn.dataset.height = preset.height;
-                        btn.title = preset.label;
-                        
-                        // Display format: show WxH if different dimensions, otherwise just one number
-                        if (preset.width === preset.height) {
-                            btn.textContent = preset.width.toString();
-                        } else {
-                            btn.textContent = `${preset.width}×${preset.height}`;
-                        }
-                        
-                        // Add click handler
-                        btn.addEventListener('click', () => {
-                            document.querySelectorAll('.size-preset').forEach(b => b.classList.remove('selected'));
-                            btn.classList.add('selected');
-                            
-                            const baseWidth = parseInt(btn.dataset.width);
-                            const baseHeight = parseInt(btn.dataset.height);
-                            
-                            document.getElementById('width').value = baseWidth;
-                            document.getElementById('height').value = baseHeight;
-                            document.getElementById('custom-width').value = baseWidth;
-                            document.getElementById('custom-height').value = baseHeight;
-                            
-                            updateOrientationLabel();
-                        });
-                        
-                        presetsContainer.appendChild(btn);
-                    });
-                    
-                    // Select first preset by default
-                    const firstPreset = presetsContainer.querySelector('.size-preset:not(#orientation-toggle)');
-                    if (firstPreset && !document.querySelector('.size-preset.selected')) {
-                        firstPreset.click();
-                    }
-                    
-                    // Log model type for debugging
-                    console.log(`Model ${modelId} is ${modelInfo.model_type} (native: ${modelInfo.native_resolution})`);
-                    
-                } catch (error) {
-                    console.error('Failed to load model info:', error);
-                    // Fallback to default SD 1.5 presets if API call fails
-                    // (presets are already in HTML, so just log the error)
-                }
+                // This is a placeholder for future enhancement
+                // Could highlight recommended resolutions based on model type
             }
             
-            // Listen for model changes
+            // Monitor model changes
             document.getElementById('model').addEventListener('change', (e) => {
                 updateResolutionPresets(e.target.value);
             });
             
-            // Load LoRAs (placeholder for now)
+            // Load LoRA models if available
             async function loadLoras() {
                 try {
-                    const response = await API.fetch('/v1/loras');
-                    if (response.data && response.data.length > 0) {
-                        document.getElementById('lora-section').style.display = 'block';
+                    const response = await API.fetch('/v1/models/loras');
+                    if (response && response.loras && response.loras.length > 0) {
+                        const loraSection = document.getElementById('lora-section');
                         const loraList = document.getElementById('lora-list');
-                        loraList.innerHTML = response.data.map(lora => `
-                            <div class="lora-item" data-lora="${lora.id}">
-                                <input type="checkbox" id="lora-${lora.id}">
-                                <div class="lora-info">
-                                    <div class="lora-name">${lora.name || lora.id}</div>
-                                </div>
-                                <div class="lora-weight">
-                                    <input type="range" min="0" max="1" step="0.1" value="0.8">
-                                    <span class="lora-weight-value">0.8</span>
-                                </div>
-                            </div>
-                        `).join('');
                         
-                        // Update weight display on slider change
-                        loraList.querySelectorAll('input[type="range"]').forEach(slider => {
+                        loraSection.style.display = 'block';
+                        loraList.innerHTML = '';
+                        
+                        response.loras.forEach(lora => {
+                            const loraItem = document.createElement('div');
+                            loraItem.className = 'lora-item';
+                            loraItem.innerHTML = `
+                                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                    <input type="checkbox" class="lora-checkbox" data-name="${lora.name}" style="width: 18px; height: 18px;">
+                                    <span style="flex: 1; font-weight: 500;">${lora.name}</span>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
+                                    <label style="font-size: 0.85rem; color: var(--text-secondary);">Weight:</label>
+                                    <input type="range" class="lora-weight" min="0" max="2" step="0.1" value="1" disabled style="flex: 1;">
+                                    <span class="lora-weight-value" style="font-size: 0.85rem; min-width: 2rem;">1.0</span>
+                                </div>
+                            `;
+                            loraList.appendChild(loraItem);
+                        });
+                        
+                        // Enable weight slider when checkbox is checked
+                        loraList.querySelectorAll('.lora-checkbox').forEach(checkbox => {
+                            checkbox.addEventListener('change', (e) => {
+                                const item = e.target.closest('.lora-item');
+                                const weightSlider = item.querySelector('.lora-weight');
+                                weightSlider.disabled = !e.target.checked;
+                                item.classList.toggle('selected', e.target.checked);
+                            });
+                        });
+                        
+                        // Update weight value display
+                        loraList.querySelectorAll('.lora-weight').forEach(slider => {
                             slider.addEventListener('input', (e) => {
-                                e.target.nextElementSibling.textContent = e.target.value;
+                                const item = e.target.closest('.lora-item');
+                                const valueDisplay = item.querySelector('.lora-weight-value');
+                                valueDisplay.textContent = parseFloat(e.target.value).toFixed(1);
                             });
                         });
                         
@@ -566,56 +591,24 @@
             }
             loadLoras();
             
-            // Size preset handlers
-            document.querySelectorAll('.size-preset:not(#orientation-toggle)').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.size-preset').forEach(b => b.classList.remove('selected'));
-                    btn.classList.add('selected');
-                    
-                    const baseWidth = parseInt(btn.dataset.width);
-                    const baseHeight = parseInt(btn.dataset.height);
-                    const currentOrientation = document.getElementById('orientation-label').textContent;
-                    
-                    // If it's a square, just use the dimensions as-is
-                    if (baseWidth === baseHeight) {
-                        document.getElementById('width').value = baseWidth;
-                        document.getElementById('height').value = baseHeight;
-                    } else {
-                        // For non-square, apply current orientation
-                        if (currentOrientation === 'Portrait') {
-                            // Swap to portrait if base is landscape
-                            if (baseWidth > baseHeight) {
-                                document.getElementById('width').value = baseHeight;
-                                document.getElementById('height').value = baseWidth;
-                            } else {
-                                document.getElementById('width').value = baseWidth;
-                                document.getElementById('height').value = baseHeight;
-                            }
-                        } else {
-                            // Use landscape orientation
-                            if (baseWidth > baseHeight) {
-                                document.getElementById('width').value = baseWidth;
-                                document.getElementById('height').value = baseHeight;
-                            } else {
-                                document.getElementById('width').value = baseHeight;
-                                document.getElementById('height').value = baseWidth;
-                            }
-                        }
-                    }
-                    
-                    // Update custom input fields to match preset
+            // Size preset dropdown handler
+            document.getElementById('size-preset').addEventListener('change', (e) => {
+                const value = e.target.value;
+                const customInputs = document.getElementById('custom-size-inputs');
+                
+                if (value === 'custom') {
+                    customInputs.style.display = 'block';
+                    // Set custom inputs to current hidden values
                     document.getElementById('custom-width').value = document.getElementById('width').value;
                     document.getElementById('custom-height').value = document.getElementById('height').value;
-                    
+                } else {
+                    customInputs.style.display = 'none';
+                    const [width, height] = value.split('x').map(Number);
+                    document.getElementById('width').value = width;
+                    document.getElementById('height').value = height;
                     updateOrientationLabel();
-                });
+                }
             });
-            
-            // Select first non-toggle preset by default
-            const firstPreset = document.querySelector('.size-preset:not(#orientation-toggle)');
-            if (firstPreset) {
-                firstPreset.click();
-            }
             
             // Orientation toggle (landscape/portrait)
             function updateOrientationLabel() {
@@ -626,19 +619,16 @@
                 
                 if (width > height) {
                     label.textContent = 'Landscape';
-                    btn.style.opacity = '1';
-                    btn.style.cursor = 'pointer';
                     btn.disabled = false;
+                    btn.style.opacity = '1';
                 } else if (height > width) {
                     label.textContent = 'Portrait';
-                    btn.style.opacity = '1';
-                    btn.style.cursor = 'pointer';
                     btn.disabled = false;
+                    btn.style.opacity = '1';
                 } else {
                     label.textContent = 'Square';
-                    btn.style.opacity = '0.5';
-                    btn.style.cursor = 'not-allowed';
                     btn.disabled = true;
+                    btn.style.opacity = '0.5';
                 }
             }
             
@@ -659,9 +649,22 @@
                 widthInput.value = heightInput.value;
                 heightInput.value = temp;
                 
-                // Update custom inputs to match
-                document.getElementById('custom-width').value = widthInput.value;
-                document.getElementById('custom-height').value = heightInput.value;
+                // Update custom inputs if visible
+                if (document.getElementById('custom-size-inputs').style.display !== 'none') {
+                    document.getElementById('custom-width').value = widthInput.value;
+                    document.getElementById('custom-height').value = heightInput.value;
+                }
+                
+                // Update dropdown selection to match new orientation
+                const newPresetValue = `${widthInput.value}x${heightInput.value}`;
+                const presetSelect = document.getElementById('size-preset');
+                const option = Array.from(presetSelect.options).find(opt => opt.value === newPresetValue);
+                if (option) {
+                    presetSelect.value = newPresetValue;
+                } else {
+                    presetSelect.value = 'custom';
+                    document.getElementById('custom-size-inputs').style.display = 'block';
+                }
                 
                 updateOrientationLabel();
             });
@@ -677,8 +680,6 @@
                     value = roundToMultipleOf8(value);
                     value = Math.max(256, Math.min(2048, value)); // Clamp to range
                     document.getElementById('width').value = value;
-                    // Clear preset selection
-                    document.querySelectorAll('.size-preset').forEach(b => b.classList.remove('selected'));
                     updateOrientationLabel();
                 }
             });
@@ -689,8 +690,6 @@
                     value = roundToMultipleOf8(value);
                     value = Math.max(256, Math.min(2048, value)); // Clamp to range
                     document.getElementById('height').value = value;
-                    // Clear preset selection
-                    document.querySelectorAll('.size-preset').forEach(b => b.classList.remove('selected'));
                     updateOrientationLabel();
                 }
             });
@@ -761,18 +760,15 @@
                 ];
                 
                 progressInterval = setInterval(() => {
-                    const elapsed = (Date.now() - progressStartTime) / 1000;
-                    time.textContent = `${Math.floor(elapsed)}s`;
+                    const elapsed = Math.floor((Date.now() - progressStartTime) / 1000);
+                    time.textContent = `${elapsed}s`;
                     
-                    for (let i = phases.length - 1; i >= 0; i--) {
-                        if (elapsed >= phases[i].at && phase <= i) {
-                            phase = i + 1;
-                            status.textContent = phases[i].status;
-                            bar.style.width = phases[i].progress + '%';
-                            break;
-                        }
+                    if (phase < phases.length && elapsed >= phases[phase].at) {
+                        status.textContent = phases[phase].status;
+                        bar.style.width = phases[phase].progress + '%';
+                        phase++;
                     }
-                }, 500);
+                }, 100);
             }
             
             function hideProgress() {
@@ -781,255 +777,141 @@
                     progressInterval = null;
                 }
                 document.getElementById('progress-container').style.display = 'none';
-                document.getElementById('progress-bar').style.width = '0%';
             }
             
             // Form submission
             document.getElementById('gen-form').addEventListener('submit', async (e) => {
                 e.preventDefault();
                 
-                const model = document.getElementById('model').value;
-                const prompt = document.getElementById('prompt').value;
-                const negativePrompt = document.getElementById('negative-prompt').value;
-                const width = parseInt(document.getElementById('width').value);
-                const height = parseInt(document.getElementById('height').value);
-                const steps = parseInt(document.getElementById('steps').value);
-                const guidance = parseFloat(document.getElementById('guidance').value);
-                const seed = document.getElementById('seed').value ? parseInt(document.getElementById('seed').value) : null;
-                const scheduler = document.getElementById('scheduler').value;
-                const numImages = parseInt(document.getElementById('num-images').value) || 1;
-                
-                // Collect selected LoRAs
-                const loraPaths = [];
-                const loraScales = [];
-                document.querySelectorAll('.lora-item').forEach(item => {
-                    const checkbox = item.querySelector('input[type="checkbox"]');
-                    if (checkbox && checkbox.checked) {
-                        loraPaths.push(item.dataset.lora);
-                        const slider = item.querySelector('input[type="range"]');
-                        loraScales.push(parseFloat(slider?.value || 0.8));
-                    }
-                });
-                
-                if (!model) {
-                    Toast.error('Please select a model');
-                    return;
-                }
-                
-                const btn = document.getElementById('generate-btn');
-                btn.disabled = true;
-                btn.innerHTML = '<div class="spinner" style="width: 20px; height: 20px; border-width: 2px;"></div> Generating...';
-                
-                // Add cancel button
-                let cancelBtn = document.getElementById('cancel-btn');
-                if (!cancelBtn) {
-                    cancelBtn = document.createElement('button');
-                    cancelBtn.id = 'cancel-btn';
-                    cancelBtn.className = 'btn btn-secondary';
-                    cancelBtn.style.marginLeft = '0.5rem';
-                    cancelBtn.innerHTML = 'Cancel';
-                    btn.parentNode.insertBefore(cancelBtn, btn.nextSibling);
-                }
-                cancelBtn.style.display = 'inline-flex';
-                
-                let cancelled = false;
-                cancelBtn.onclick = () => {
-                    cancelled = true;
-                    log('Generation cancelled by user', 'warning');
-                    Toast.warning('Generation cancelled');
-                };
+                const generateBtn = document.getElementById('generate-btn');
+                const originalBtnText = generateBtn.innerHTML;
+                generateBtn.disabled = true;
+                generateBtn.innerHTML = '<svg class="spinner" width="20" height="20" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="5" stroke-dasharray="31.4 31.4" transform="rotate(-90 25 25)"><animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite"/></circle></svg> Generating...';
                 
                 showProgress();
                 
-                // Clear log
-                document.getElementById('generation-log').innerHTML = '';
-                log('Starting generation...', 'info');
-                log(`Model: ${model}`);
-                log(`Size: ${width}x${height}, Steps: ${steps}, Guidance: ${guidance}`);
-                if (numImages > 1) {
-                    log(`Generating ${numImages} images sequentially...`);
-                }
-                if (loraPaths.length > 0) {
-                    log(`LoRAs: ${loraPaths.join(', ')}`);
-                }
+                // Clear previous preview
+                const previewContainer = document.getElementById('preview-container');
+                previewContainer.innerHTML = '<div class="preview-placeholder"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><p>Generating...</p></div>';
+                document.getElementById('metadata').style.display = 'none';
+                document.getElementById('download-btn').style.display = 'none';
                 
                 try {
-                    const startTime = Date.now();
-                    const allImageUrls = [];
-                    let lastMetadata = null;
+                    // Gather form data
+                    const formData = {
+                        model: document.getElementById('model').value,
+                        prompt: document.getElementById('prompt').value,
+                        negative_prompt: document.getElementById('negative-prompt').value || undefined,
+                        width: parseInt(document.getElementById('width').value),
+                        height: parseInt(document.getElementById('height').value),
+                        steps: parseInt(document.getElementById('steps').value) || undefined,
+                        guidance_scale: parseFloat(document.getElementById('guidance').value) || undefined,
+                        scheduler: document.getElementById('scheduler').value || undefined,
+                        seed: document.getElementById('seed').value ? parseInt(document.getElementById('seed').value) : undefined,
+                        num_images: parseInt(document.getElementById('num-images').value) || 1,
+                    };
                     
-                    // Generate images one at a time
-                    for (let i = 0; i < numImages; i++) {
-                        if (cancelled) break;
-                        
-                        if (numImages > 1) {
-                            log(`Generating image ${i + 1} of ${numImages}...`, 'info');
-                        }
-                        
-                        const response = await API.generate(model, prompt, {
-                            negativePrompt,
-                            width,
-                            height,
-                            steps,
-                            guidanceScale: guidance,
-                            seed: i === 0 ? seed : null,  // Use seed only for first image, random for rest
-                            scheduler,
-                            numImages: 1,
-                            loraPaths: loraPaths.length > 0 ? loraPaths : null,
-                            loraScales: loraScales.length > 0 ? loraScales : null
+                    // Add LoRAs if any selected
+                    const selectedLoras = [];
+                    document.querySelectorAll('.lora-checkbox:checked').forEach(checkbox => {
+                        const item = checkbox.closest('.lora-item');
+                        const weight = parseFloat(item.querySelector('.lora-weight').value);
+                        selectedLoras.push({
+                            name: checkbox.dataset.name,
+                            weight: weight
                         });
-                        
-                        if (response.choices && response.choices[0]) {
-                            const message = response.choices[0].message;
-                            const imageUrls = message.image_urls || [];
-                            allImageUrls.push(...imageUrls);
-                            lastMetadata = message.metadata;
-                            
-                            if (numImages > 1) {
-                                log(`Image ${i + 1} completed`, 'success');
-                            }
-                        }
+                    });
+                    if (selectedLoras.length > 0) {
+                        formData.loras = selectedLoras;
                     }
                     
-                    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-                    if (cancelled) {
-                        log(`Cancelled after ${allImageUrls.length} of ${numImages} images (${elapsed}s)`, 'warning');
+                    // Add privacy settings
+                    const isPublic = document.getElementById('make-public').checked;
+                    if (isPublic) {
+                        formData.privacy = 'public';
+                        formData.expiration_hours = parseInt(document.getElementById('expiration').value);
                     } else {
-                        log(`All ${allImageUrls.length} images completed in ${elapsed}s`, 'success');
+                        formData.privacy = 'private';
                     }
                     
-                    const imageUrls = allImageUrls;
-                    const metadata = lastMetadata;
+                    log(`Starting generation with ${formData.model}...`);
+                    log(`Resolution: ${formData.width}x${formData.height}, Steps: ${formData.steps || 'default'}, Scheduler: ${formData.scheduler || 'default'}`);
                     
-                    if (imageUrls.length > 0) {
-                            // Show preview - display all images
-                            const container = document.getElementById('preview-container');
-                            container.classList.add('has-image');
-                            
-                            if (imageUrls.length === 1) {
-                                // Single image - show large
-                                container.innerHTML = `<img src="${imageUrls[0]}" alt="Generated image" onclick="openLightbox('${imageUrls[0]}')">`;
-                            } else {
-                                // Multiple images - show grid
-                                container.innerHTML = `
-                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem;">
-                                        ${imageUrls.map(url => `<img src="${url}" alt="Generated image" onclick="openLightbox('${url}')" style="width: 100%; cursor: pointer;">`).join('')}
-                                    </div>
-                                `;
-                            }
-                            
-                            // Show download button for first image
-                            const downloadBtn = document.getElementById('download-btn');
-                            downloadBtn.href = imageUrls[0];
-                            downloadBtn.style.display = 'inline-flex';
-                            
-                            // Update privacy if user selected public
-                            const makePublic = document.getElementById('make-public').checked;
-                            if (makePublic) {
-                                const expirationHours = parseInt(document.getElementById('expiration').value);
-                                // Set privacy for all generated images
-                                for (const imageUrl of imageUrls) {
-                                    const imageId = imageUrl.split('/').pop().replace(/\.[^.]+$/, '');
-                                    try {
-                                        await API.fetch(`/v1/gallery/${imageId}/privacy`, {
-                                            method: 'PATCH',
-                                            body: JSON.stringify({ 
-                                                isPublic: true, 
-                                                expiresInHours: expirationHours 
-                                            })
-                                        });
-                                    } catch (privacyError) {
-                                        log(`Warning: Could not set privacy for ${imageId}: ${privacyError.message}`, 'warning');
-                                    }
-                                }
-                                log(`${imageUrls.length} image(s) set to public (expires in ${expirationHours}h)`, 'info');
-                            }
-                            
-                            // Show metadata
-                            if (metadata) {
-                                document.getElementById('metadata').style.display = 'block';
-                                document.getElementById('metadata-content').innerHTML = `
-                                    <div><strong>Seed:</strong> ${metadata.seed || 'N/A'}</div>
-                                    <div><strong>Scheduler:</strong> ${metadata.scheduler}</div>
-                                    <div><strong>Steps:</strong> ${metadata.steps}</div>
-                                    <div><strong>Guidance:</strong> ${metadata.guidance_scale}</div>
-                                    <div><strong>Size:</strong> ${metadata.width}x${metadata.height}</div>
-                                    <div><strong>Time:</strong> ${elapsed}s</div>
-                                `;
-                                
-                                // Update seed field if it was random
-                                if (!document.getElementById('seed').value && metadata.seed) {
-                                    document.getElementById('seed').value = metadata.seed;
-                                }
-                            }
-                            
-                            Toast.success(`${imageUrls.length} image(s) generated!`);
-                        }
-                } catch (error) {
-                    log(`Error: ${error.message}`, 'error');
-                    Toast.error(`Generation failed: ${error.message}`);
-                } finally {
+                    const startTime = Date.now();
+                    const response = await API.generateImage(formData);
+                    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                    
                     hideProgress();
-                    btn.disabled = false;
-                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg> Generate Image`;
-                    const cancelBtn = document.getElementById('cancel-btn');
-                    if (cancelBtn) cancelBtn.style.display = 'none';
+                    
+                    if (response && response.url) {
+                        log(` Generation complete in ${elapsed}s`, 'success');
+                        
+                        // Display image
+                        previewContainer.innerHTML = `
+                            <img src="${response.url}" alt="Generated image" onclick="openLightbox('${response.url}')" style="cursor: pointer; width: 100%; height: auto; border-radius: 8px;">
+                        `;
+                        
+                        // Setup download button
+                        const downloadBtn = document.getElementById('download-btn');
+                        downloadBtn.href = response.url;
+                        downloadBtn.download = `alice-${Date.now()}.png`;
+                        downloadBtn.style.display = 'flex';
+                        
+                        // Display metadata
+                        if (response.metadata) {
+                            const metadataEl = document.getElementById('metadata-content');
+                            metadataEl.innerHTML = `
+                                <div><strong>Seed:</strong> ${response.metadata.seed || 'N/A'}</div>
+                                <div><strong>Steps:</strong> ${response.metadata.steps || formData.steps || 'N/A'}</div>
+                                <div><strong>Guidance:</strong> ${response.metadata.guidance_scale || formData.guidance_scale || 'N/A'}</div>
+                                <div><strong>Scheduler:</strong> ${response.metadata.scheduler || formData.scheduler || 'N/A'}</div>
+                                <div><strong>Size:</strong> ${formData.width}×${formData.height}</div>
+                                <div><strong>Time:</strong> ${elapsed}s</div>
+                            `;
+                            document.getElementById('metadata').style.display = 'block';
+                        }
+                        
+                        Toast.success(`Image generated successfully in ${elapsed}s`);
+                    } else {
+                        throw new Error('Invalid response from server');
+                    }
+                } catch (error) {
+                    hideProgress();
+                    log(` Error: ${error.message}`, 'error');
+                    Toast.error('Generation failed: ' + error.message);
+                    previewContainer.innerHTML = '<div class="preview-placeholder" style="color: var(--error);"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg><p>Generation failed</p><p style="font-size: 0.85rem; margin-top: 0.5rem;">' + error.message + '</p></div>';
+                } finally {
+                    generateBtn.disabled = false;
+                    generateBtn.innerHTML = originalBtnText;
                 }
             });
             
-            // Function to apply regenerate settings from gallery
+            // Apply regenerate settings (from gallery)
             function applyRegenerateSettings(settings) {
-                // Set prompt fields
-                if (settings.prompt) {
-                    document.getElementById('prompt').value = settings.prompt;
-                }
-                if (settings.negativePrompt) {
-                    document.getElementById('negative-prompt').value = settings.negativePrompt;
-                }
-                
-                // Set model
-                if (settings.model) {
-                    const modelSelect = document.getElementById('model');
-                    modelSelect.value = settings.model;
-                }
-                
-                // Set dimensions
+                if (settings.model) document.getElementById('model').value = settings.model;
+                if (settings.prompt) document.getElementById('prompt').value = settings.prompt;
+                if (settings.negative_prompt) document.getElementById('negative-prompt').value = settings.negative_prompt;
                 if (settings.width && settings.height) {
                     document.getElementById('width').value = settings.width;
                     document.getElementById('height').value = settings.height;
                     
-                    // Update custom inputs if present
-                    const customWidth = document.getElementById('custom-width');
-                    const customHeight = document.getElementById('custom-height');
-                    if (customWidth) customWidth.value = settings.width;
-                    if (customHeight) customHeight.value = settings.height;
-                    
-                    // Update size preset selection
-                    document.querySelectorAll('.size-preset').forEach(btn => {
-                        const bw = parseInt(btn.dataset.width);
-                        const bh = parseInt(btn.dataset.height);
-                        if (bw === settings.width && bh === settings.height) {
-                            btn.classList.add('selected');
-                        } else {
-                            btn.classList.remove('selected');
-                        }
-                    });
+                    // Try to match preset
+                    const presetValue = `${settings.width}x${settings.height}`;
+                    const presetSelect = document.getElementById('size-preset');
+                    const option = Array.from(presetSelect.options).find(opt => opt.value === presetValue);
+                    if (option) {
+                        presetSelect.value = presetValue;
+                    } else {
+                        presetSelect.value = 'custom';
+                        document.getElementById('custom-size-inputs').style.display = 'block';
+                        document.getElementById('custom-width').value = settings.width;
+                        document.getElementById('custom-height').value = settings.height;
+                    }
+                    updateOrientationLabel();
                 }
-                
-                // Set generation parameters
-                if (settings.steps !== undefined) {
-                    document.getElementById('steps').value = settings.steps;
-                }
-                if (settings.guidanceScale !== undefined) {
-                    document.getElementById('guidance').value = settings.guidanceScale;
-                }
-                if (settings.seed !== undefined) {
-                    document.getElementById('seed').value = settings.seed;
-                }
-                
-                // Set scheduler
+                if (settings.steps) document.getElementById('steps').value = settings.steps;
+                if (settings.guidance_scale) document.getElementById('guidance').value = settings.guidance_scale;
+                if (settings.seed) document.getElementById('seed').value = settings.seed;
                 if (settings.scheduler) {
                     document.getElementById('scheduler').value = settings.scheduler;
                     document.querySelectorAll('.scheduler-option').forEach(btn => {
@@ -1040,15 +922,8 @@
                         }
                     });
                 }
-                
-                // LoRAs would go here if implemented
-                // For now, just log if they exist
-                if (settings.loras && settings.loras.length > 0) {
-                    console.log('LoRAs from regenerate:', settings.loras, settings.loraScales);
-                    // TODO: Apply LoRAs when LoRA UI is fully implemented
-                }
             }
-        }); // End DOMContentLoaded
+        });
     </script>
 </body>
 </html>
