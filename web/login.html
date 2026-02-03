@@ -187,6 +187,10 @@
     
     <script src="/web/app.js"></script>
     <script>
+        // Initialize theme immediately (before DOMContentLoaded to prevent flash)
+        if (typeof initTheme === 'function') initTheme();
+    </script>
+    <script>
         document.addEventListener('DOMContentLoaded', async () => {
             const { API, Toast } = window.SDAPI;
             

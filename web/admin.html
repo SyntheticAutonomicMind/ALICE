@@ -691,6 +691,10 @@
     
     <script src="/web/app.js"></script>
     <script>
+        // Initialize theme immediately (before DOMContentLoaded to prevent flash)
+        if (typeof initTheme === 'function') initTheme();
+    </script>
+    <script>
         document.addEventListener('DOMContentLoaded', async () => {
             if (typeof window.SDAPI === 'undefined') {
                 document.body.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--error);">Error: ALICE JavaScript failed to load. Please refresh the page.</div>';

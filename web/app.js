@@ -724,8 +724,62 @@ const SessionManager = {
     }
 };
 
+/**
+ * Theme Management
+ * Handles light/dark mode toggle with localStorage persistence
+ */
+const ThemeManager = {
+    /**
+     * Toggle between light and dark themes
+     */
+    toggle() {
+        const html = document.documentElement;
+        const currentTheme = html.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        
+        html.setAttribute('data-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+        
+        // Update icon if it exists
+        const icon = document.getElementById('theme-icon');
+        if (icon) {
+            if (newTheme === 'dark') {
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />';
+            } else {
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />';
+            }
+        }
+    },
+    
+    /**
+     * Initialize theme from localStorage
+     */
+    init() {
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        
+        // Update icon if it exists
+        const icon = document.getElementById('theme-icon');
+        if (icon && savedTheme === 'dark') {
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />';
+        }
+    }
+};
+
+/**
+ * Global theme functions for HTML onclick handlers
+ */
+function toggleTheme() {
+    ThemeManager.toggle();
+}
+
+function initTheme() {
+    ThemeManager.init();
+}
+
+
 // Export for use in other scripts
-window.SDAPI = { API, UI, Toast, StatusPoller, ModelSelector, ImageGallery, requireAuth, logout, SessionManager, setSessionCookie, clearSessionCookie, updateNavVisibility };
+window.SDAPI = { API, UI, Toast, StatusPoller, ModelSelector, ImageGallery, requireAuth, logout, SessionManager, setSessionCookie, clearSessionCookie, updateNavVisibility, ThemeManager };
 
 // Initialize Toast and SessionManager when page loads
 document.addEventListener('DOMContentLoaded', () => {
