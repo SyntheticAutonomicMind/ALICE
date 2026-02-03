@@ -41,10 +41,11 @@
             background: var(--bg-secondary);
             transition: transform 0.2s ease, box-shadow 0.2s ease;
             cursor: pointer;
+            will-change: transform;
         }
         
         .gallery-item:hover {
-            transform: translateY(-2px);
+            transform: scale(1.02);
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
         }
         
@@ -583,11 +584,11 @@
                 const { API, Toast } = window.SDAPI;
                 const response = await API.fetch('/v1/gallery');
                 
-                if (!response || !response.images) {
+                if (!response || !response.data) {
                     throw new Error('Invalid response from server');
                 }
                 
-                currentImages = response.images;
+                currentImages = response.data;
                 applyFilters();
                 
                 // Populate model filter
@@ -629,9 +630,9 @@
             
             // Sort
             if (sortFilter === 'newest') {
-                filteredImages.sort((a, b) => new Date(b.created) - new Date(a.created));
+                filteredImages.sort((a, b) => new Date(b.createdAt * 1000) - new Date(a.createdAt * 1000));
             } else {
-                filteredImages.sort((a, b) => new Date(a.created) - new Date(b.created));
+                filteredImages.sort((a, b) => new Date(a.createdAt * 1000) - new Date(b.createdAt * 1000));
             }
             
             renderGallery();
@@ -712,7 +713,7 @@
                         ${img.isPublic ? 'Public' : 'Private'}
                     </div>
                     <div style="font-size: 0.75rem; color: var(--text-muted);">
-                        ${new Date(img.created).toLocaleString()}
+                        ${new Date(img.createdAt * 1000).toLocaleString()}
                     </div>
                 </div>
                 
@@ -857,8 +858,8 @@
                 await API.fetch(`/v1/gallery/${imageId}/privacy`, {
                     method: 'PATCH',
                     body: JSON.stringify({
-                        privacy: makePublic ? 'public' : 'private',
-                        expirationHours: makePublic ? 168 : undefined
+                        isPublic: makePublic,
+                        expiresInHours: makePublic ? 168 : undefined
                     })
                 });
                 
