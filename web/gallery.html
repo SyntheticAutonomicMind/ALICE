@@ -13,25 +13,25 @@
         }
         
         .gallery-item {
-            margin-bottom: 16px;
+            margin-bottom: 20px;
             position: relative;
             border-radius: 12px;
             overflow: hidden;
             background: var(--bg-secondary);
             transition: box-shadow 0.2s ease;
             cursor: pointer;
-            width: 250px;
+            width: 312px;
         }
         
         @media (max-width: 1400px) {
             .gallery-item {
-                width: 220px;
+                width: 275px;
             }
         }
         
         @media (max-width: 1024px) {
             .gallery-item {
-                width: 200px;
+                width: 250px;
             }
         }
         
@@ -70,7 +70,7 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            padding: 12px;
+            padding: 15px;
             border-radius: 12px;
         }
         
@@ -86,7 +86,7 @@
         }
         
         .privacy-badge {
-            padding: 4px 10px;
+            padding: 5px 12px;
             border-radius: 6px;
             font-size: 0.7rem;
             font-weight: 600;
@@ -105,7 +105,7 @@
         }
         
         .model-badge {
-            padding: 4px 10px;
+            padding: 5px 12px;
             border-radius: 6px;
             font-size: 0.7rem;
             background: rgba(14, 165, 233, 0.9);
@@ -125,7 +125,7 @@
         
         .overlay-btn {
             flex: 1;
-            padding: 8px;
+            padding: 10px;
             background: rgba(255, 255, 255, 0.95);
             border: none;
             border-radius: 8px;
@@ -835,15 +835,15 @@
         // Initialize Masonry layout with responsive column width
         function initMasonry(container) {
             // Calculate column width based on viewport
-            let columnWidth = 250;
-            if (window.innerWidth < 1400) columnWidth = 220;
-            if (window.innerWidth < 1024) columnWidth = 200;
+            let columnWidth = 312;
+            if (window.innerWidth < 1400) columnWidth = 275;
+            if (window.innerWidth < 1024) columnWidth = 250;
             if (window.innerWidth < 640) columnWidth = window.innerWidth - 40; // Full width minus padding
             
             const msnry = new Masonry(container, {
                 itemSelector: '.gallery-item',
                 columnWidth: columnWidth,
-                gutter: 16,
+                gutter: 20,
                 fitWidth: true,
                 transitionDuration: '0.3s'
             });
@@ -863,9 +863,9 @@
         // Re-layout Masonry on window resize
         window.addEventListener('resize', () => {
             if (window.galleryMasonry) {
-                let columnWidth = 250;
-                if (window.innerWidth < 1400) columnWidth = 220;
-                if (window.innerWidth < 1024) columnWidth = 200;
+                let columnWidth = 312;
+                if (window.innerWidth < 1400) columnWidth = 275;
+                if (window.innerWidth < 1024) columnWidth = 250;
                 if (window.innerWidth < 640) columnWidth = window.innerWidth - 40;
                 
                 window.galleryMasonry.options.columnWidth = columnWidth;
