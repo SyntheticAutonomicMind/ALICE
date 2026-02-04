@@ -37,6 +37,7 @@ from .downloader import DownloadManager
 from .model_cache import ModelCacheService
 from .auth import AuthManager, SESSION_TIMEOUT_SECONDS, SESSION_INACTIVITY_TIMEOUT_SECONDS, set_session_timeout
 from .gallery import GalleryManager, ImageRecord
+from .cancellation import get_cancellation_registry, CancellationError
 from .schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -1108,6 +1109,8 @@ async def chat_completions(
     The prompt is extracted from the last user message.
     Generation parameters come from sam_config.
     
+    Supports graceful cancellation when client disconnects.
+    
     Returns:
         ChatCompletionResponse with image URL in message content
     """
@@ -1117,127 +1120,147 @@ async def chat_completions(
     request_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     logger.info("Processing chat completion request: %s (user=%s)", request_id, current_user.id)
     
-    # Extract prompt from messages
-    user_messages = [msg for msg in request.messages if msg.role == "user"]
-    if not user_messages:
-        raise HTTPException(
-            status_code=400,
-            detail="No user message found in request"
-        )
+    # Create cancellation token for this request
+    cancellation_registry = get_cancellation_registry()
+    cancellation_token = cancellation_registry.create_token(request_id)
     
-    prompt = user_messages[-1].content
-    if not prompt:
-        raise HTTPException(
-            status_code=400,
-            detail="Empty prompt in user message"
-        )
+    # Start background task to monitor client connection
+    async def monitor_client_disconnect():
+        """Monitor for client disconnect and trigger cancellation."""
+        try:
+            while True:
+                if await http_request.is_disconnected():
+                    logger.info("Client disconnected, cancelling request: %s", request_id)
+                    cancellation_token.cancel()
+                    break
+                await asyncio.sleep(0.5)  # Check every 500ms
+        except Exception as e:
+            logger.debug("Disconnect monitor error (expected on completion): %s", e)
     
-    # Check for NSFW content if blocking is enabled
-    if config.server.block_nsfw and check_nsfw_content(prompt):
-        raise HTTPException(
-            status_code=400,
-            detail="NSFW content detected and blocked. This server has NSFW generation disabled."
-        )
-    
-    # Parse A1111-style LoRA syntax from prompt: <lora:name:scale>
-    import re
-    lora_pattern = r'<lora:([^:>]+):?([0-9.]*)?>'
-    prompt_loras = []
-    prompt_lora_scales = []
-    for match in re.finditer(lora_pattern, prompt, re.IGNORECASE):
-        lora_name = match.group(1)
-        lora_scale = float(match.group(2)) if match.group(2) else 1.0
-        prompt_loras.append(lora_name)
-        prompt_lora_scales.append(lora_scale)
-        logger.debug("Parsed LoRA from prompt: %s (scale=%.2f)", lora_name, lora_scale)
-    
-    # Remove LoRA tags from prompt (they shouldn't be sent to the model)
-    clean_prompt = re.sub(lora_pattern, '', prompt, flags=re.IGNORECASE).strip()
-    # Clean up extra commas/spaces left behind
-    clean_prompt = re.sub(r',\s*,', ',', clean_prompt)
-    clean_prompt = re.sub(r'\s+', ' ', clean_prompt).strip(' ,')
-    if clean_prompt != prompt:
-        logger.info("Cleaned prompt (removed LoRA tags): '%s...'", clean_prompt[:50])
-        prompt = clean_prompt
-    
-    # Get model info
-    model_info = model_registry.get_model(request.model)
-    if not model_info:
-        # Try to find by name without prefix
-        model_name = request.model.split("/")[-1] if "/" in request.model else request.model
-        for model in model_registry.list_models():
-            if model.name == model_name:
-                model_info = model
-                break
-    
-    if not model_info:
-        available_models = [m.id for m in model_registry.list_models()]
-        raise HTTPException(
-            status_code=404,
-            detail=f"Model not found: {request.model}. Available: {available_models}"
-        )
-    
-    # Extract generation parameters from sam_config
-    sam_config = request.sam_config
-    
-    # Resolve LoRA paths - combine sam_config LoRAs with prompt-parsed LoRAs
-    lora_paths = []
-    lora_scales = []
-    
-    # First add LoRAs from sam_config (UI-selected)
-    lora_ids = sam_config.lora_paths if sam_config else None
-    if lora_ids and len(lora_ids) > 0:
-        for lora_id in lora_ids:
-            lora_path = model_registry.get_lora_path(lora_id)
-            if lora_path:
-                lora_paths.append(lora_path)
-            else:
-                logger.warning("LoRA not found: %s (skipping)", lora_id)
-        
-        config_lora_scales = sam_config.lora_scales if sam_config else None
-        if config_lora_scales:
-            lora_scales.extend(config_lora_scales)
-        else:
-            lora_scales.extend([1.0] * len(lora_paths))
-    
-    # Then add LoRAs parsed from prompt
-    if prompt_loras:
-        for i, lora_name in enumerate(prompt_loras):
-            # Try to find LoRA by name
-            lora_path = model_registry.get_lora_path(lora_name)
-            if lora_path:
-                lora_paths.append(lora_path)
-                lora_scales.append(prompt_lora_scales[i])
-                logger.info("Resolved LoRA from prompt: %s -> %s (scale=%.2f)", 
-                           lora_name, lora_path, prompt_lora_scales[i])
-            else:
-                logger.warning("LoRA from prompt not found: %s (skipping)", lora_name)
-    
-    # Convert to None if empty for generator
-    if not lora_paths:
-        lora_paths = None
-        lora_scales = None
-    
-    # Debug: Log generation parameters
-    gen_scheduler = sam_config.scheduler if sam_config else None
-    gen_steps = sam_config.steps if sam_config else None
-    gen_width = sam_config.width if sam_config else None
-    gen_height = sam_config.height if sam_config else None
-    gen_guidance_scale = sam_config.guidance_scale if sam_config else None
-    gen_negative_prompt = sam_config.negative_prompt if sam_config else None
-    gen_seed = sam_config.seed if sam_config else None
-    gen_num_images = sam_config.num_images if sam_config else None
-    logger.info("Generation params from sam_config: scheduler=%s, steps=%s, guidance=%.1f, size=%sx%s", 
-                gen_scheduler, gen_steps, gen_guidance_scale if gen_guidance_scale is not None else -1, gen_width, gen_height)
-    
-    # Check negative_prompt for NSFW content if blocking is enabled
-    if config.server.block_nsfw and gen_negative_prompt and check_nsfw_content(gen_negative_prompt):
-        raise HTTPException(
-            status_code=400,
-            detail="NSFW content detected in negative_prompt and blocked. This server has NSFW generation disabled."
-        )
+    # Start monitor task (will be cancelled when request completes)
+    monitor_task = asyncio.create_task(monitor_client_disconnect())
     
     try:
+        # Extract prompt from messages
+        user_messages = [msg for msg in request.messages if msg.role == "user"]
+        if not user_messages:
+            raise HTTPException(
+                status_code=400,
+                detail="No user message found in request"
+            )
+        
+        prompt = user_messages[-1].content
+        if not prompt:
+            raise HTTPException(
+                status_code=400,
+                detail="Empty prompt in user message"
+            )
+        
+        # Check for NSFW content if blocking is enabled
+        if config.server.block_nsfw and check_nsfw_content(prompt):
+            raise HTTPException(
+                status_code=400,
+                detail="NSFW content detected and blocked. This server has NSFW generation disabled."
+            )
+        
+        # Parse A1111-style LoRA syntax from prompt: <lora:name:scale>
+        import re
+        lora_pattern = r'<lora:([^:>]+):?([0-9.]*)?>'
+        prompt_loras = []
+        prompt_lora_scales = []
+        for match in re.finditer(lora_pattern, prompt, re.IGNORECASE):
+            lora_name = match.group(1)
+            lora_scale = float(match.group(2)) if match.group(2) else 1.0
+            prompt_loras.append(lora_name)
+            prompt_lora_scales.append(lora_scale)
+            logger.debug("Parsed LoRA from prompt: %s (scale=%.2f)", lora_name, lora_scale)
+        
+        # Remove LoRA tags from prompt (they shouldn't be sent to the model)
+        clean_prompt = re.sub(lora_pattern, '', prompt, flags=re.IGNORECASE).strip()
+        # Clean up extra commas/spaces left behind
+        clean_prompt = re.sub(r',\s*,', ',', clean_prompt)
+        clean_prompt = re.sub(r'\s+', ' ', clean_prompt).strip(' ,')
+        if clean_prompt != prompt:
+            logger.info("Cleaned prompt (removed LoRA tags): '%s...'", clean_prompt[:50])
+            prompt = clean_prompt
+        
+        # Get model info
+        model_info = model_registry.get_model(request.model)
+        if not model_info:
+            # Try to find by name without prefix
+            model_name = request.model.split("/")[-1] if "/" in request.model else request.model
+            for model in model_registry.list_models():
+                if model.name == model_name:
+                    model_info = model
+                    break
+        
+        if not model_info:
+            available_models = [m.id for m in model_registry.list_models()]
+            raise HTTPException(
+                status_code=404,
+                detail=f"Model not found: {request.model}. Available: {available_models}"
+            )
+        
+        # Extract generation parameters from sam_config
+        sam_config = request.sam_config
+        
+        # Resolve LoRA paths - combine sam_config LoRAs with prompt-parsed LoRAs
+        lora_paths = []
+        lora_scales = []
+        
+        # First add LoRAs from sam_config (UI-selected)
+        lora_ids = sam_config.lora_paths if sam_config else None
+        if lora_ids and len(lora_ids) > 0:
+            for lora_id in lora_ids:
+                lora_path = model_registry.get_lora_path(lora_id)
+                if lora_path:
+                    lora_paths.append(lora_path)
+                else:
+                    logger.warning("LoRA not found: %s (skipping)", lora_id)
+            
+            config_lora_scales = sam_config.lora_scales if sam_config else None
+            if config_lora_scales:
+                lora_scales.extend(config_lora_scales)
+            else:
+                lora_scales.extend([1.0] * len(lora_paths))
+        
+        # Then add LoRAs parsed from prompt
+        if prompt_loras:
+            for i, lora_name in enumerate(prompt_loras):
+                # Try to find LoRA by name
+                lora_path = model_registry.get_lora_path(lora_name)
+                if lora_path:
+                    lora_paths.append(lora_path)
+                    lora_scales.append(prompt_lora_scales[i])
+                    logger.info("Resolved LoRA from prompt: %s -> %s (scale=%.2f)", 
+                               lora_name, lora_path, prompt_lora_scales[i])
+                else:
+                    logger.warning("LoRA from prompt not found: %s (skipping)", lora_name)
+        
+        # Convert to None if empty for generator
+        if not lora_paths:
+            lora_paths = None
+            lora_scales = None
+        
+        # Debug: Log generation parameters
+        gen_scheduler = sam_config.scheduler if sam_config else None
+        gen_steps = sam_config.steps if sam_config else None
+        gen_width = sam_config.width if sam_config else None
+        gen_height = sam_config.height if sam_config else None
+        gen_guidance_scale = sam_config.guidance_scale if sam_config else None
+        gen_negative_prompt = sam_config.negative_prompt if sam_config else None
+        gen_seed = sam_config.seed if sam_config else None
+        gen_num_images = sam_config.num_images if sam_config else None
+        logger.info("Generation params from sam_config: scheduler=%s, steps=%s, guidance=%.1f, size=%sx%s", 
+                    gen_scheduler, gen_steps, gen_guidance_scale if gen_guidance_scale is not None else -1, gen_width, gen_height)
+        
+        # Check negative_prompt for NSFW content if blocking is enabled
+        if config.server.block_nsfw and gen_negative_prompt and check_nsfw_content(gen_negative_prompt):
+            raise HTTPException(
+                status_code=400,
+                detail="NSFW content detected in negative_prompt and blocked. This server has NSFW generation disabled."
+            )
+        
         # Generate image(s)
         image_paths, metadata = await generator.generate(
             model_path=Path(model_info.path),
@@ -1252,6 +1275,7 @@ async def chat_completions(
             num_images=gen_num_images or 1,
             lora_paths=lora_paths if lora_paths else None,
             lora_scales=lora_scales,
+            cancellation_token=cancellation_token,
         )
         
         # Build image URLs and record in gallery
@@ -1328,12 +1352,29 @@ async def chat_completions(
             )
         )
         
+    except CancellationError as e:
+        # Request was cancelled - return 499 (Client Closed Request)
+        logger.info("Request cancelled: %s", request_id)
+        raise HTTPException(
+            status_code=499,
+            detail="Request cancelled by client"
+        )
     except Exception as e:
         logger.exception("Generation failed: %s", e)
         raise HTTPException(
             status_code=500,
             detail=f"Image generation failed: {str(e)}"
         )
+    finally:
+        # Always cleanup: cancel monitor task and unregister token
+        if not monitor_task.done():
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
+        cancellation_registry.unregister(request_id)
+        logger.debug("Request cleanup complete: %s", request_id)
 
 
 @app.get("/metrics", response_model=MetricsResponse)

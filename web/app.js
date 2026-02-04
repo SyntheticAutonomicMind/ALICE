@@ -201,6 +201,63 @@ const API = {
         });
     },
     
+    // Generate image with formData object (used by generate.html)
+    async generateImage(formData) {
+        // Build sam_config from formData
+        const sam_config = {};
+        
+        // Map formData fields to sam_config fields
+        if (formData.negative_prompt !== undefined && formData.negative_prompt !== '') {
+            sam_config.negative_prompt = formData.negative_prompt;
+        }
+        if (formData.steps !== undefined && !isNaN(formData.steps)) {
+            sam_config.steps = formData.steps;
+        }
+        if (formData.guidance_scale !== undefined && !isNaN(formData.guidance_scale)) {
+            sam_config.guidance_scale = formData.guidance_scale;
+        }
+        if (formData.width !== undefined && !isNaN(formData.width)) {
+            sam_config.width = formData.width;
+        }
+        if (formData.height !== undefined && !isNaN(formData.height)) {
+            sam_config.height = formData.height;
+        }
+        if (formData.seed !== undefined && formData.seed !== null && !isNaN(formData.seed)) {
+            sam_config.seed = formData.seed;
+        }
+        if (formData.scheduler !== undefined && formData.scheduler !== '') {
+            sam_config.scheduler = formData.scheduler;
+        }
+        if (formData.num_images !== undefined && !isNaN(formData.num_images) && formData.num_images > 0) {
+            sam_config.num_images = formData.num_images;
+        }
+        
+        // Handle LoRAs array format from generate.html
+        if (formData.loras && formData.loras.length > 0) {
+            sam_config.lora_paths = formData.loras.map(lora => lora.name);
+            sam_config.lora_scales = formData.loras.map(lora => lora.weight);
+        }
+        
+        // Handle privacy settings
+        if (formData.privacy !== undefined) {
+            sam_config.privacy = formData.privacy;
+        }
+        if (formData.expiration_hours !== undefined) {
+            sam_config.expiration_hours = formData.expiration_hours;
+        }
+        
+        const request = {
+            model: formData.model,
+            messages: [{ role: 'user', content: formData.prompt }],
+            sam_config: sam_config
+        };
+        
+        return this.fetch('/v1/chat/completions', {
+            method: 'POST',
+            body: JSON.stringify(request)
+        });
+    },
+    
     // Authentication
     async getCurrentUser() {
         return this.fetch('/v1/auth/me');
