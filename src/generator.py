@@ -628,16 +628,17 @@ class GeneratorService:
         Load a model into memory.
         
         If a different model is already loaded, it will be unloaded first.
+        Model loading is done in a thread pool to avoid blocking the event loop.
         
         Args:
             model_path: Path to model file or directory
         """
-        # CRITICAL: Hold lock for ENTIRE load operation to prevent race conditions
-        # This prevents concurrent requests from seeing _pipeline=None during model switching
+        model_path = Path(model_path)
+        model_key = str(model_path)
+        
+        # CRITICAL: Hold lock ONLY for state checks and final assignment
+        # Release lock before running blocking I/O to avoid blocking other async operations
         async with self._model_lock:
-            model_path = Path(model_path)
-            model_key = str(model_path)
-            
             # Skip if same model already loaded
             if self._current_model == model_key and self._pipeline is not None:
                 logger.debug("Model already loaded: %s", model_key)
@@ -647,9 +648,19 @@ class GeneratorService:
             if self._pipeline is not None:
                 await self._unload_model_internal()
         
-            # Import diffusers if needed
-            _import_diffusers()
-            
+        logger.info("Loading model in background: %s", model_path)
+        
+        # Import diffusers if needed
+        _import_diffusers()
+        
+        # Run blocking model loading in thread pool to keep event loop responsive
+        loop = asyncio.get_event_loop()
+        
+        def _load_model_blocking() -> Tuple[Any, str, bool, bool]:
+            """
+            Blocking model load operation - runs in thread pool.
+            Returns: (pipeline, model_type, device_map_applied, is_single_file_sdxl_result)
+            """
             logger.info("Loading model: %s", model_path)
             
             # Detect pipeline class
@@ -694,26 +705,27 @@ class GeneratorService:
                         logger.info("Detected SDXL single-file model (%.1f GB)", file_size_gb)
                         from diffusers import StableDiffusionXLPipeline
                         pipeline_class = StableDiffusionXLPipeline
-                        self._is_single_file_sdxl = True  # Enable extra memory optimizations
+                        is_sdxl_result = True  # Enable extra memory optimizations
                     else:
                         logger.info("Detected SD 1.5 single-file model (%.1f GB)", file_size_gb)
                         from diffusers import StableDiffusionPipeline
                         pipeline_class = StableDiffusionPipeline
-                        self._is_single_file_sdxl = False
+                        is_sdxl_result = False
                     
                     load_kwargs["use_safetensors"] = True
                     if self.device_map:
                         load_kwargs["device_map"] = self.device_map
                         logger.info("Using device_map: %s (single-file mode)", self.device_map)
-                    self._pipeline = pipeline_class.from_single_file(
+                    pipeline = pipeline_class.from_single_file(
                         str(model_path),
                         **load_kwargs,
                     )
+                    is_single_file_sdxl_result = is_sdxl_result
                 else:
                     # Load from directory using AutoPipeline
                     # NOTE: device_map: sequential does NOT work with from_pretrained
                     # Only 'balanced' and 'cuda' are valid for from_pretrained
-                    self._is_single_file_sdxl = False  # Directory models are more memory efficient
+                    is_single_file_sdxl_result = False  # Directory models are more memory efficient
                     from diffusers import AutoPipelineForText2Image
                     if self.device_map and self.device_map in ('balanced', 'cuda'):
                         load_kwargs["device_map"] = self.device_map
@@ -724,7 +736,7 @@ class GeneratorService:
                             "Valid options: 'balanced', 'cuda'. Loading without device_map.",
                             self.device_map
                         )
-                    self._pipeline = AutoPipelineForText2Image.from_pretrained(
+                    pipeline = AutoPipelineForText2Image.from_pretrained(
                         str(model_path),
                         **load_kwargs,
                     )
@@ -734,40 +746,55 @@ class GeneratorService:
                 # - If using CPU offload, the pipeline handles device placement
                 # - Otherwise, explicitly move to the target device
                 device_map_applied = "device_map" in load_kwargs
-                self._device_map_active = device_map_applied
                 if not device_map_applied and not self.enable_model_cpu_offload and not self.enable_sequential_cpu_offload:
                     logger.info("Moving pipeline to device: %s", self._device)
-                    self._pipeline = self._pipeline.to(self._device)
+                    pipeline = pipeline.to(self._device)
                 
-                # Apply memory optimizations
-                self._apply_memory_optimizations()
-                
-                # Setup CompelForSDXL for SDXL models (enables long prompt support)
-                if hasattr(self._pipeline, 'text_encoder_2'):
-                    logger.info("Initializing CompelForSDXL for long prompt support")
-                    try:
-                        logger.debug("Creating CompelForSDXL instance...")
-                        self._compel = CompelForSDXL(self._pipeline)
-                        logger.info("CompelForSDXL initialized successfully - long prompts now supported")
-                    except Exception as e:
-                        logger.warning("Failed to initialize CompelForSDXL: %s. Falling back to standard tokenization.", e, exc_info=True)
-                        self._compel = None
-                else:
-                    # Not an SDXL model, no compel needed
-                    self._compel = None
-                
-                self._current_model = model_key
-                self._current_model_path = model_path
-                self._current_model_type = model_type  # Store for Qwen support
-                
-                logger.info("Model loaded successfully: %s (type=%s)", model_path.name, model_type)
+                logger.info("Model file loaded successfully: %s (type=%s)", model_path.name, model_type)
+                return pipeline, model_type, device_map_applied, is_single_file_sdxl_result
                 
             except Exception as e:
                 logger.error("Failed to load model: %s", e)
+                raise
+        
+        # Run the blocking load operation in thread pool
+        try:
+            pipeline, model_type, device_map_applied, is_single_file_sdxl_result = await loop.run_in_executor(None, _load_model_blocking)
+        except Exception as e:
+            logger.error("Model loading failed: %s", e)
+            async with self._model_lock:
                 self._pipeline = None
                 self._current_model = None
                 self._current_model_type = None
-                raise
+            raise
+        
+        # Back in async context - finalize setup with optimizations and metadata
+        async with self._model_lock:
+            self._pipeline = pipeline
+            self._device_map_active = device_map_applied
+            self._is_single_file_sdxl = is_single_file_sdxl_result
+            self._current_model = model_key
+            self._current_model_path = model_path
+            self._current_model_type = model_type
+            
+            # Apply memory optimizations
+            self._apply_memory_optimizations()
+            
+            # Setup CompelForSDXL for SDXL models (enables long prompt support)
+            if hasattr(self._pipeline, 'text_encoder_2'):
+                logger.info("Initializing CompelForSDXL for long prompt support")
+                try:
+                    logger.debug("Creating CompelForSDXL instance...")
+                    self._compel = CompelForSDXL(self._pipeline)
+                    logger.info("CompelForSDXL initialized successfully - long prompts now supported")
+                except Exception as e:
+                    logger.warning("Failed to initialize CompelForSDXL: %s. Falling back to standard tokenization.", e, exc_info=True)
+                    self._compel = None
+            else:
+                # Not an SDXL model, no compel needed
+                self._compel = None
+            
+            logger.info("Model load complete: %s (type=%s)", model_path.name, model_type)
     
     async def _unload_model_internal(self) -> None:
         """Unload current model without acquiring lock (for internal use when lock already held)."""
