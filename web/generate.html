@@ -897,7 +897,11 @@
             function applyRegenerateSettings(settings) {
                 if (settings.model) document.getElementById('model').value = settings.model;
                 if (settings.prompt) document.getElementById('prompt').value = settings.prompt;
-                if (settings.negative_prompt) document.getElementById('negative-prompt').value = settings.negative_prompt;
+                
+                // Handle both naming conventions: negativePrompt (camelCase) and negative_prompt (snake_case)
+                const negativePrompt = settings.negativePrompt || settings.negative_prompt;
+                if (negativePrompt) document.getElementById('negative-prompt').value = negativePrompt;
+                
                 if (settings.width && settings.height) {
                     document.getElementById('width').value = settings.width;
                     document.getElementById('height').value = settings.height;
@@ -917,7 +921,11 @@
                     updateOrientationLabel();
                 }
                 if (settings.steps) document.getElementById('steps').value = settings.steps;
-                if (settings.guidance_scale) document.getElementById('guidance').value = settings.guidance_scale;
+                
+                // Handle both naming conventions: guidanceScale (camelCase) and guidance_scale (snake_case)
+                const guidanceScale = settings.guidanceScale !== undefined ? settings.guidanceScale : settings.guidance_scale;
+                if (guidanceScale !== undefined) document.getElementById('guidance').value = guidanceScale;
+                
                 if (settings.seed) document.getElementById('seed').value = settings.seed;
                 if (settings.scheduler) {
                     document.getElementById('scheduler').value = settings.scheduler;
