@@ -252,10 +252,23 @@ const API = {
             sam_config: sam_config
         };
         
-        return this.fetch('/v1/chat/completions', {
+        // Get the raw OpenAI-compatible response
+        const openaiResponse = await this.fetch('/v1/chat/completions', {
             method: 'POST',
             body: JSON.stringify(request)
         });
+        
+        // Transform OpenAI response format to frontend expected format
+        // OpenAI response: { id, object, created, model, choices: [{ message: { image_urls, metadata } }] }
+        // Frontend expects: { url, metadata }
+        if (!openaiResponse?.choices?.[0]?.message?.image_urls?.[0]) {
+            throw new Error('No image generated or invalid response format');
+        }
+        
+        return {
+            url: openaiResponse.choices[0].message.image_urls[0],
+            metadata: openaiResponse.choices[0].message.metadata
+        };
     },
     
     // Authentication
