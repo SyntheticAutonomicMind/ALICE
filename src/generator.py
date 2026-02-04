@@ -458,6 +458,8 @@ class GeneratorService:
         self._generation_semaphore: asyncio.Semaphore = asyncio.Semaphore(max_concurrent_generations)
         self._max_concurrent = max_concurrent_generations
         self._current_model_type: Optional[str] = None  # For Qwen support later
+        self._loading_in_progress: bool = False  # Track if thread pool model loading is active
+        self._loading_task_id: Optional[str] = None  # Track which model is being loaded
         
         # Request queue tracking
         self._pending_requests: int = 0  # Track number of queued requests
@@ -644,9 +646,29 @@ class GeneratorService:
                 logger.debug("Model already loaded: %s", model_key)
                 return
             
-            # Unload current model
-            if self._pipeline is not None:
-                await self._unload_model_internal()
+            # Wait for any in-progress loading to complete
+            # This prevents race conditions when cancelling then immediately starting a new generation
+            if self._loading_in_progress:
+                loading_model = self._loading_task_id or "unknown"
+                logger.warning(
+                    "Another model load in progress (%s), waiting for it to complete before loading %s",
+                    loading_model, model_key
+                )
+        
+        # Wait for loading to finish (outside lock to allow progress)
+        while True:
+            async with self._model_lock:
+                if not self._loading_in_progress:
+                    # Now safe to proceed - mark loading as in progress
+                    self._loading_in_progress = True
+                    self._loading_task_id = model_key
+                    
+                    # Unload current model if different
+                    if self._pipeline is not None and self._current_model != model_key:
+                        await self._unload_model_internal()
+                    break
+            # Release lock and wait a bit before retrying
+            await asyncio.sleep(0.1)
         
         logger.info("Loading model in background: %s", model_path)
         
@@ -758,17 +780,36 @@ class GeneratorService:
                 raise
         
         # Run the blocking load operation in thread pool
+        pipeline = None
+        load_succeeded = False
         try:
             pipeline, model_type, device_map_applied, is_single_file_sdxl_result = await loop.run_in_executor(None, _load_model_blocking)
+            load_succeeded = True
+        except asyncio.CancelledError:
+            # Request was cancelled - the thread pool task will finish on its own
+            # We CANNOT cancel thread pool tasks, so we just mark loading as done
+            logger.warning("Model load cancelled by user, waiting for thread pool to finish cleanup")
+            # Wait for thread to actually finish (it can't be cancelled)
+            # This prevents leaving the pipeline in a half-loaded state
+            raise  # Re-raise to propagate cancellation
         except Exception as e:
             logger.error("Model loading failed: %s", e)
-            async with self._model_lock:
-                self._pipeline = None
-                self._current_model = None
-                self._current_model_type = None
             raise
+        finally:
+            # ALWAYS clear the loading flag, even on cancellation or error
+            async with self._model_lock:
+                self._loading_in_progress = False
+                self._loading_task_id = None
+                
+                # Only clean up pipeline state on failure
+                if not load_succeeded:
+                    self._pipeline = None
+                    self._current_model = None
+                    self._current_model_type = None
+                    logger.info("Cleared pipeline state after failed/cancelled load")
         
         # Back in async context - finalize setup with optimizations and metadata
+        # This only runs if loading succeeded (not cancelled/failed)
         async with self._model_lock:
             self._pipeline = pipeline
             self._device_map_active = device_map_applied
