@@ -528,30 +528,14 @@ class PyTorchBackend(BaseBackend):
         if self._device == "cuda":
             try:
                 props = torch.cuda.get_device_properties(0)
-                total = props.total_memory
-                
-                # Try to get memory usage via PyTorch API first
                 allocated = torch.cuda.memory_allocated(0)
-                
-                # For AMD GPUs (especially APUs with ROCm), PyTorch may report 0
-                # because memory management is different (VAE CPU offload, etc.)
-                # Fall back to sysfs reading for AMD GPUs
-                if allocated == 0 and self._is_amd_gpu():
-                    allocated = self._read_amd_memory_usage()
+                total = props.total_memory
                 
                 info["memory_used"] = f"{allocated / (1024**3):.1f} GB"
                 info["memory_total"] = f"{total / (1024**3):.1f} GB"
                 info["utilization"] = allocated / total if total > 0 else 0.0
                 info["gpu_name"] = props.name
                 info["stats_available"] = True
-                
-                # For AMD GPUs, also read GPU busy percentage from sysfs
-                if self._is_amd_gpu():
-                    gpu_busy = self._read_amd_gpu_busy()
-                    if gpu_busy >= 0:
-                        # gpu_busy is 0-100, convert to 0.0-1.0 for utilization
-                        info["utilization"] = gpu_busy / 100.0
-                        
             except Exception as e:
                 logger.warning("Failed to get CUDA info: %s", e)
         elif self._device == "mps":
@@ -562,56 +546,6 @@ class PyTorchBackend(BaseBackend):
             logger.debug("MPS device detected - detailed stats not available")
         
         return info
-    
-    def _is_amd_gpu(self) -> bool:
-        """Check if current GPU is AMD/ATI."""
-        try:
-            # Check if amdgpu driver is loaded and card0 exists
-            return Path("/sys/class/drm/card0/device/vendor").exists()
-        except Exception:
-            return False
-    
-    def _read_amd_memory_usage(self) -> int:
-        """
-        Read AMD GPU memory usage from sysfs.
-        
-        For AMD APUs (Cezanne, Renoir, Phoenix, etc.), the shared system memory
-        is tracked via GTT (Graphics Translation Table), not VRAM.
-        
-        Returns:
-            Memory usage in bytes, or 0 if reading fails
-        """
-        try:
-            # Try GTT (Graphics Translation Table) first - this is used by APUs
-            gtt_used_path = Path("/sys/class/drm/card0/device/mem_info_gtt_used")
-            if gtt_used_path.exists():
-                return int(gtt_used_path.read_text().strip())
-            
-            # Fall back to VRAM for discrete GPUs
-            vram_used_path = Path("/sys/class/drm/card0/device/mem_info_vram_used")
-            if vram_used_path.exists():
-                return int(vram_used_path.read_text().strip())
-                
-        except Exception as e:
-            logger.debug("Failed to read AMD memory usage from sysfs: %s", e)
-        
-        return 0
-    
-    def _read_amd_gpu_busy(self) -> int:
-        """
-        Read AMD GPU busy percentage from sysfs.
-        
-        Returns:
-            GPU busy percentage (0-100), or -1 if reading fails
-        """
-        try:
-            busy_path = Path("/sys/class/drm/card0/device/gpu_busy_percent")
-            if busy_path.exists():
-                return int(busy_path.read_text().strip())
-        except Exception as e:
-            logger.debug("Failed to read AMD GPU busy from sysfs: %s", e)
-        
-        return -1
     
     def _apply_memory_optimizations(self) -> None:
         """Apply memory optimization settings to the loaded pipeline."""
@@ -861,28 +795,6 @@ class PyTorchBackend(BaseBackend):
             if not device_map_applied and not self.enable_model_cpu_offload and not self.enable_sequential_cpu_offload:
                 logger.info("Moving pipeline to device: %s", self._device)
                 pipeline = pipeline.to(self._device)
-            elif device_map_applied and self.device_map == "sequential" and self._device == "cuda":
-                # WORKAROUND for ROCm/AMD GPUs (especially gfx90c Cezanne/Renoir APUs):
-                # device_map="sequential" is required to prevent kernel panics, BUT it places
-                # the model on CPU instead of GPU with ROCm. Explicitly move components to CUDA.
-                logger.info("WORKAROUND: Moving pipeline components to CUDA (device_map=sequential doesn't auto-place on ROCm)")
-                try:
-                    # Move individual components to CUDA for proper GPU execution
-                    if hasattr(pipeline, 'unet') and pipeline.unet is not None:
-                        pipeline.unet = pipeline.unet.to(self._device)
-                        logger.debug("Moved UNet to %s", self._device)
-                    if hasattr(pipeline, 'vae') and pipeline.vae is not None:
-                        pipeline.vae = pipeline.vae.to(self._device)
-                        logger.debug("Moved VAE to %s", self._device)
-                    if hasattr(pipeline, 'text_encoder') and pipeline.text_encoder is not None:
-                        pipeline.text_encoder = pipeline.text_encoder.to(self._device)
-                        logger.debug("Moved text_encoder to %s", self._device)
-                    if hasattr(pipeline, 'text_encoder_2') and pipeline.text_encoder_2 is not None:
-                        pipeline.text_encoder_2 = pipeline.text_encoder_2.to(self._device)
-                        logger.debug("Moved text_encoder_2 to %s", self._device)
-                    logger.info("All pipeline components moved to CUDA successfully")
-                except Exception as e:
-                    logger.warning("Failed to move some pipeline components to CUDA: %s", e)
             
             logger.info("Model file loaded successfully: %s (type=%s)", model_path.name, model_type)
             return pipeline, model_type, device_map_applied, is_single_file_sdxl_result
