@@ -61,9 +61,6 @@ class SDCppBackend(BaseBackend):
         default_height: int = 512,
         sdcpp_binary: Optional[Path] = None,
         sdcpp_threads: int = 8,
-        enable_vae_tiling: bool = False,
-        enable_vae_slicing: bool = False,
-        vae_decode_cpu: bool = False,
         **kwargs
     ):
         """
@@ -78,9 +75,6 @@ class SDCppBackend(BaseBackend):
             default_height: Default image height
             sdcpp_binary: Path to sd-cli binary (auto-detected if None)
             sdcpp_threads: CPU threads for Vulkan operations
-            enable_vae_tiling: Enable VAE tiling for memory optimization
-            enable_vae_slicing: Enable VAE slicing (Note: sd.cpp uses tiling instead)
-            vae_decode_cpu: Keep VAE on CPU (for low VRAM systems)
         """
         self.images_dir = Path(images_dir)
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -91,11 +85,6 @@ class SDCppBackend(BaseBackend):
         self.default_width = default_width
         self.default_height = default_height
         self.sdcpp_threads = sdcpp_threads
-        
-        # VAE optimizations
-        self.enable_vae_tiling = enable_vae_tiling
-        self.enable_vae_slicing = enable_vae_slicing  # sd.cpp uses tiling, map to --vae-tiling
-        self.vae_decode_cpu = vae_decode_cpu
         
         # Auto-detect or validate binary
         if sdcpp_binary is None:
@@ -219,54 +208,9 @@ class SDCppBackend(BaseBackend):
         """
         start_time = time.time()
         
-        # Validate and resolve model path
+        # Validate model
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found: {model_path}")
-        
-        # Handle different model formats
-        is_diffusers_dir = False
-        diffusers_components = {}
-        
-        if model_path.is_dir():
-            # Check for single-file format (model.safetensors in root)
-            safetensors_path = model_path / "model.safetensors"
-            if safetensors_path.exists():
-                logger.debug(f"Using model.safetensors from directory: {model_path}")
-                model_path = safetensors_path
-            else:
-                # Check for diffusers format (separate component directories)
-                is_diffusers_dir = True
-                logger.debug(f"Detected diffusers directory format: {model_path}")
-                
-                # Map diffusers components to sd.cpp paths
-                unet_path = model_path / "unet" / "diffusion_pytorch_model.safetensors"
-                vae_path = model_path / "vae" / "diffusion_pytorch_model.safetensors"
-                
-                if not unet_path.exists():
-                    raise FileNotFoundError(
-                        f"Diffusers directory missing required unet model: {unet_path}"
-                    )
-                
-                if not vae_path.exists():
-                    raise FileNotFoundError(
-                        f"Diffusers directory missing required VAE model: {vae_path}"
-                    )
-                
-                diffusers_components["diffusion_model"] = unet_path
-                diffusers_components["vae"] = vae_path
-                
-                # Check for text encoders (SDXL has clip_l and clip_g, SD1.5 has just one)
-                text_encoder_path = model_path / "text_encoder" / "model.safetensors"
-                text_encoder_2_path = model_path / "text_encoder_2" / "model.safetensors"
-                
-                if text_encoder_path.exists():
-                    diffusers_components["clip_l"] = text_encoder_path
-                
-                if text_encoder_2_path.exists():
-                    diffusers_components["clip_g"] = text_encoder_2_path
-                    logger.debug("Detected SDXL model (dual text encoders)")
-                else:
-                    logger.debug("Detected SD1.5 model (single text encoder)")
         
         # Apply defaults
         steps = steps or self.default_steps
@@ -284,30 +228,10 @@ class SDCppBackend(BaseBackend):
         image_id = uuid.uuid4().hex[:12]
         output_path = self.images_dir / f"{image_id}.png"
         
-        # Build command based on model format
-        cmd = [str(self.sdcpp_binary)]
-        
-        if is_diffusers_dir:
-            # For diffusers format, we need BOTH -m (directory) and component paths
-            # The -m tells sd.cpp it's diffusers format, components override defaults
-            cmd.extend(["-m", str(model_path)])
-            cmd.extend(["--diffusion-model", str(diffusers_components["diffusion_model"])])
-            cmd.extend(["--vae", str(diffusers_components["vae"])])
-            
-            if "clip_l" in diffusers_components:
-                cmd.extend(["--clip_l", str(diffusers_components["clip_l"])])
-            
-            if "clip_g" in diffusers_components:
-                cmd.extend(["--clip_g", str(diffusers_components["clip_g"])])
-            
-            logger.info(f"Loading diffusers model from: {model_path.name}")
-        else:
-            # Use single model file
-            cmd.extend(["-m", str(model_path)])
-            logger.info(f"Loading single-file model: {model_path.name}")
-        
-        # Add generation parameters
-        cmd.extend([
+        # Build command
+        cmd = [
+            str(self.sdcpp_binary),
+            "-m", str(model_path),
             "-p", prompt,
             "-n", negative_prompt or "",
             "--steps", str(steps),
@@ -317,16 +241,7 @@ class SDCppBackend(BaseBackend):
             "--sampling-method", sdcpp_scheduler,
             "-o", str(output_path),
             "-t", str(self.sdcpp_threads),
-        ])
-        
-        # VAE optimizations
-        if self.enable_vae_tiling or self.enable_vae_slicing:
-            cmd.append("--vae-tiling")
-            logger.debug("Enabled VAE tiling for memory optimization")
-        
-        if self.vae_decode_cpu:
-            cmd.append("--vae-on-cpu")
-            logger.debug("VAE will run on CPU (for low VRAM)")
+        ]
         
         if seed is not None:
             cmd.extend(["--seed", str(seed)])
@@ -343,90 +258,46 @@ class SDCppBackend(BaseBackend):
         logger.info(f"Executing sd-cli: steps={steps}, scheduler={sdcpp_scheduler}, size={width}x{height}")
         logger.debug(f"Full command: {' '.join(cmd)}")
         
-        # Execute subprocess with cancellation support
+        # Execute subprocess in thread pool (don't block event loop)
         loop = asyncio.get_event_loop()
-        process = None
         
-        async def _run_subprocess_with_cancellation():
-            """Run sd-cli with periodic cancellation checks."""
-            nonlocal process
-            
-            # Start subprocess - redirect stderr to avoid buffer filling (sd.cpp is very verbose)
-            # We keep stdout for progress info but let stderr go to console/logs
-            process = subprocess.Popen(
+        def _run_subprocess():
+            """Run sd-cli and capture output."""
+            return subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=None,  # Let stderr go to console - avoids deadlock from buffer filling
+                stderr=subprocess.PIPE,
+                timeout=30 * 60,  # 30 minute timeout
+                check=False  # Don't raise on non-zero exit
             )
-            
-            # Poll process while checking for cancellation
-            try:
-                while True:
-                    # Check if process finished
-                    returncode = process.poll()
-                    if returncode is not None:
-                        # Process completed - read stdout
-                        stdout, _ = process.communicate()
-                        return subprocess.CompletedProcess(
-                            args=cmd,
-                            returncode=returncode,
-                            stdout=stdout,
-                            stderr=b"",  # stderr was not captured
-                        )
-                    
-                    # Check cancellation token
-                    if cancellation_token and cancellation_token.is_cancelled():
-                        logger.info("Cancellation requested, terminating sd-cli process")
-                        process.terminate()
-                        
-                        # Wait up to 5 seconds for graceful termination
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            logger.warning("sd-cli did not terminate gracefully, killing process")
-                            process.kill()
-                            process.wait()
-                        
-                        # Clean up output file if created
-                        if output_path.exists():
-                            output_path.unlink()
-                        raise CancellationError("Generation cancelled")
-                    
-                    # Sleep briefly before next check (non-blocking)
-                    await asyncio.sleep(0.5)
-            
-            except Exception as e:
-                # Ensure process is cleaned up on any error
-                if process and process.poll() is None:
-                    process.kill()
-                    process.wait()
-                raise
         
         try:
-            # Run with timeout
-            result = await asyncio.wait_for(
-                _run_subprocess_with_cancellation(),
-                timeout=30 * 60  # 30 minute timeout
-            )
+            # Run in executor
+            result = await loop.run_in_executor(None, _run_subprocess)
+            
+            # Check cancellation
+            if cancellation_token and cancellation_token.is_cancelled():
+                # Clean up output file if created
+                if output_path.exists():
+                    output_path.unlink()
+                raise CancellationError("Generation cancelled")
             
             # Check exit code
             if result.returncode != 0:
-                stdout_msg = result.stdout.decode('utf-8', errors='replace') if result.stdout else ""
-                logger.error(f"sd-cli failed with code {result.returncode}")
-                logger.error(f"sd-cli stdout: {stdout_msg[:500]}")  # First 500 chars
-                raise RuntimeError(f"Image generation failed (exit code {result.returncode}). Check logs for details.")
+                error_msg = result.stderr.decode('utf-8', errors='replace')
+                logger.error(f"sd-cli failed with code {result.returncode}: {error_msg}")
+                raise RuntimeError(f"Image generation failed: {error_msg}")
             
             # Verify output file exists
             if not output_path.exists():
-                stdout_msg = result.stdout.decode('utf-8', errors='replace') if result.stdout else ""
                 logger.error(f"sd-cli succeeded but output file not found: {output_path}")
-                logger.error(f"sd-cli stdout: {stdout_msg[:1000]}")
-                raise RuntimeError(f"Image generation completed but output file not created. Check logs for details.")
+                raise RuntimeError("Image generation completed but output file not created")
             
             elapsed = time.time() - start_time
             
             # Parse stdout for any useful info
-            stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ""
+            stdout = result.stdout.decode('utf-8', errors='replace')
+            stderr = result.stderr.decode('utf-8', errors='replace')
             
             # Build metadata
             metadata = {
@@ -454,23 +325,12 @@ class SDCppBackend(BaseBackend):
             
             return ([output_path], metadata)
         
-        except asyncio.TimeoutError:
+        except subprocess.TimeoutExpired:
             logger.error(f"sd-cli timed out after 30 minutes")
-            # Ensure process is killed
-            if process and process.poll() is None:
-                process.kill()
-                process.wait()
-            # Clean up partial output
-            if output_path.exists():
-                output_path.unlink()
             raise RuntimeError("Image generation timed out (30 minutes)")
         
         except Exception as e:
             logger.error(f"sd-cli execution failed: {e}")
-            # Ensure process is killed
-            if process and process.poll() is None:
-                process.kill()
-                process.wait()
             # Clean up partial output
             if output_path.exists():
                 output_path.unlink()
@@ -483,19 +343,6 @@ class SDCppBackend(BaseBackend):
         Returns:
             Dict with GPU details (name, type, driver, VRAM if available, gpu_available)
         """
-        # Default response
-        info = {
-            "type": "vulkan",
-            "name": "Unknown Vulkan Device",
-            "driver": "Vulkan",
-            "backend": "stable-diffusion.cpp",
-            "gpu_available": True,
-            "stats_available": False,
-            "utilization": 0.0,
-            "memory_used": "N/A",
-            "memory_total": "N/A",
-        }
-        
         try:
             # Try to get Vulkan device info via vulkaninfo
             result = subprocess.run(
@@ -510,113 +357,35 @@ class SDCppBackend(BaseBackend):
                 output = result.stdout.decode('utf-8', errors='replace')
                 
                 # Parse device name (basic parsing)
+                device_name = "Unknown Vulkan Device"
                 for line in output.split('\n'):
                     if 'deviceName' in line or 'GPU' in line:
                         parts = line.split('=')
                         if len(parts) > 1:
-                            info["name"] = parts[1].strip()
+                            device_name = parts[1].strip()
                             break
+                
+                return {
+                    "type": "vulkan",
+                    "name": device_name,
+                    "driver": "Vulkan",
+                    "backend": "stable-diffusion.cpp",
+                    "gpu_available": True,
+                    "stats_available": False,
+                }
             
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+            logger.debug("vulkaninfo not available, using generic Vulkan info")
         
-        # For AMD GPUs, read actual GPU stats from sysfs
-        # This works regardless of backend (Vulkan, PyTorch, etc.)
-        if self._is_amd_gpu():
-            try:
-                # Read memory usage
-                allocated = self._read_amd_memory_usage()
-                if allocated > 0:
-                    info["memory_used"] = f"{allocated / (1024**3):.1f} GB"
-                    info["stats_available"] = True
-                
-                # Read total memory from sysfs
-                total = self._read_amd_memory_total()
-                if total > 0:
-                    info["memory_total"] = f"{total / (1024**3):.1f} GB"
-                
-                # Read GPU utilization
-                gpu_busy = self._read_amd_gpu_busy()
-                if gpu_busy >= 0:
-                    info["utilization"] = gpu_busy / 100.0
-                    info["stats_available"] = True
-                    
-            except Exception as e:
-                logger.debug("Failed to read AMD GPU stats from sysfs: %s", e)
-        
-        return info
-    
-    def _is_amd_gpu(self) -> bool:
-        """Check if current GPU is AMD/ATI."""
-        try:
-            return Path("/sys/class/drm/card0/device/vendor").exists()
-        except Exception:
-            return False
-    
-    def _read_amd_memory_usage(self) -> int:
-        """
-        Read AMD GPU memory usage from sysfs.
-        
-        For AMD APUs, shared system memory is tracked via GTT.
-        For discrete GPUs, use VRAM.
-        
-        Returns:
-            Memory usage in bytes, or 0 if reading fails
-        """
-        try:
-            # Try GTT (Graphics Translation Table) first - used by APUs
-            gtt_used_path = Path("/sys/class/drm/card0/device/mem_info_gtt_used")
-            if gtt_used_path.exists():
-                return int(gtt_used_path.read_text().strip())
-            
-            # Fall back to VRAM for discrete GPUs
-            vram_used_path = Path("/sys/class/drm/card0/device/mem_info_vram_used")
-            if vram_used_path.exists():
-                return int(vram_used_path.read_text().strip())
-                
-        except Exception as e:
-            logger.debug("Failed to read AMD memory usage from sysfs: %s", e)
-        
-        return 0
-    
-    def _read_amd_memory_total(self) -> int:
-        """
-        Read AMD GPU total memory from sysfs.
-        
-        Returns:
-            Total memory in bytes, or 0 if reading fails
-        """
-        try:
-            # Try GTT total first (for APUs)
-            gtt_total_path = Path("/sys/class/drm/card0/device/mem_info_gtt_total")
-            if gtt_total_path.exists():
-                return int(gtt_total_path.read_text().strip())
-            
-            # Fall back to VRAM total for discrete GPUs
-            vram_total_path = Path("/sys/class/drm/card0/device/mem_info_vram_total")
-            if vram_total_path.exists():
-                return int(vram_total_path.read_text().strip())
-                
-        except Exception as e:
-            logger.debug("Failed to read AMD total memory from sysfs: %s", e)
-        
-        return 0
-    
-    def _read_amd_gpu_busy(self) -> int:
-        """
-        Read AMD GPU busy percentage from sysfs.
-        
-        Returns:
-            GPU busy percentage (0-100), or -1 if reading fails
-        """
-        try:
-            busy_path = Path("/sys/class/drm/card0/device/gpu_busy_percent")
-            if busy_path.exists():
-                return int(busy_path.read_text().strip())
-        except Exception as e:
-            logger.debug("Failed to read AMD GPU busy from sysfs: %s", e)
-        
-        return -1
+        # Fallback
+        return {
+            "type": "vulkan",
+            "name": "Vulkan Device",
+            "driver": "Vulkan",
+            "backend": "stable-diffusion.cpp",
+            "gpu_available": True,
+            "stats_available": False,
+        }
     
     @property
     def current_model(self) -> Optional[str]:
