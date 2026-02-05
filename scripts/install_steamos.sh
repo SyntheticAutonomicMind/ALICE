@@ -129,6 +129,21 @@ install_alice() {
         python-multipart==0.0.6 \
         huggingface-hub==0.36.0
     
+    # CRITICAL WORKAROUND: Fix torchvision::nms operator bug in TheRock gfx110X builds
+    # The gfx110X-all nightly builds have a broken torchvision package where the
+    # torchvision::nms operator is not properly registered, causing import failures.
+    # This patches the _meta_registrations.py file to comment out the broken decorators.
+    if [[ "$gfx_arch" == "gfx1103" ]]; then
+        log_info "Applying torchvision::nms workaround for gfx110X builds..."
+        local torchvision_meta="${ALICE_DIR}/venv/lib/python*/site-packages/torchvision/_meta_registrations.py"
+        if [[ -f $(echo $torchvision_meta) ]]; then
+            sed -i '163,175s/^/#/' $(echo $torchvision_meta)
+            log_info "Torchvision patch applied successfully"
+        else
+            log_warn "Could not find torchvision _meta_registrations.py - patch skipped"
+        fi
+    fi
+    
     # Create config file if it doesn't exist
     if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
         log_info "Creating configuration file..."
