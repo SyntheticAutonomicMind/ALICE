@@ -8,7 +8,6 @@ Backward-compatible wrapper around the pluggable backend system.
 Uses backend factory to create PyTorch, Vulkan, or other backends.
 """
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
@@ -104,13 +103,7 @@ class GeneratorService:
             max_concurrent_generations=max_concurrent_generations,
         )
         
-        # Create semaphore for concurrent generation limiting
-        self._generation_semaphore = asyncio.Semaphore(max_concurrent_generations)
-        self._queue_depth = 0  # Pending requests (waiting for semaphore)
-        self._active_generations = 0  # Currently executing generations
-        
         logger.info("Generator initialized with backend: %s", self._backend.get_backend_name())
-        logger.info("Max concurrent generations: %d", max_concurrent_generations)
     
     async def load_model(self, model_path: Path) -> None:
         """Load a model into memory."""
@@ -142,51 +135,26 @@ class GeneratorService:
         Returns:
             Tuple of (list_of_image_paths, metadata_dict)
         """
-        # Track queue depth
-        async with asyncio.Lock():
-            self._queue_depth += 1
+        result = await self._backend.generate_image(
+            model_path=model_path,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            steps=steps,
+            guidance_scale=guidance_scale,
+            width=width,
+            height=height,
+            seed=seed,
+            scheduler=scheduler,
+            num_images=num_images,
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+            cancellation_token=cancellation_token,
+        )
         
-        try:
-            # ACQUIRE SEMAPHORE - serializes concurrent generation requests
-            # This ensures only N generations happen at a time (N = max_concurrent_generations)
-            async with self._generation_semaphore:
-                logger.debug("Acquired generation semaphore, proceeding with generation")
-                
-                # Move from queue to active
-                async with asyncio.Lock():
-                    self._queue_depth -= 1
-                    self._active_generations += 1
-                
-                try:
-                    result = await self._backend.generate_image(
-                        model_path=model_path,
-                        prompt=prompt,
-                        negative_prompt=negative_prompt,
-                        steps=steps,
-                        guidance_scale=guidance_scale,
-                        width=width,
-                        height=height,
-                        seed=seed,
-                        scheduler=scheduler,
-                        num_images=num_images,
-                        lora_paths=lora_paths,
-                        lora_scales=lora_scales,
-                        cancellation_token=cancellation_token,
-                    )
-                    
-                    # Update statistics
-                    self.total_generations += 1
-                    
-                    return result
-                finally:
-                    # Decrement active generations count
-                    async with asyncio.Lock():
-                        self._active_generations -= 1
-        finally:
-            # Ensure queue depth is decremented even on error
-            async with asyncio.Lock():
-                if self._queue_depth > 0:
-                    self._queue_depth -= 1
+        # Update statistics
+        self.total_generations += 1
+        
+        return result
     
     # Alias for backward compatibility with main.py
     async def generate(self, *args, **kwargs) -> Tuple[List[Path], Dict[str, Any]]:
@@ -208,12 +176,15 @@ class GeneratorService:
         return self._backend.is_model_loaded
     
     def get_queue_depth(self) -> int:
-        """Get current queue depth (number of pending requests)."""
-        return self._queue_depth
-    
-    def get_active_generations(self) -> int:
-        """Get number of currently executing generations."""
-        return self._active_generations
+        """
+        Get current queue depth.
+        
+        Note: Not all backends support queue tracking.
+        Returns 0 if backend doesn't implement this.
+        """
+        if hasattr(self._backend, 'get_queue_depth'):
+            return self._backend.get_queue_depth()
+        return 0
     
     def get_average_generation_time(self) -> float:
         """
