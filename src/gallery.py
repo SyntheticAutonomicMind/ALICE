@@ -42,6 +42,7 @@ class ImageRecord:
     generation_time: Optional[float] = None  # Total generation time in seconds
     loras: Optional[List[str]] = None
     lora_scales: Optional[List[float]] = None
+    tags: Optional[List[str]] = None  # User-defined tags for organization
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON storage."""
@@ -179,6 +180,28 @@ class GalleryManager:
                        image_id, is_public, expires_at)
             return True
     
+    def update_tags(self, image_id: str, tags: List[str]) -> bool:
+        """
+        Update image tags.
+        
+        Args:
+            image_id: Image ID
+            tags: List of tags (replaces existing tags)
+        
+        Returns:
+            True if updated successfully, False if image not found
+        """
+        with self._lock:
+            image = self._images.get(image_id)
+            if not image:
+                return False
+            
+            image.tags = tags if tags else None
+            self._save()
+            
+            logger.info("Updated image tags: %s (tags=%s)", image_id, tags)
+            return True
+    
     def delete_image(self, image_id: str) -> bool:
         """
         Delete an image from the gallery.
@@ -203,6 +226,8 @@ class GalleryManager:
         is_admin: bool = False,
         include_public: bool = True,
         include_private: bool = True,
+        tags: Optional[List[str]] = None,
+        search: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[ImageRecord]:
@@ -214,6 +239,8 @@ class GalleryManager:
             is_admin: Whether requester is an admin
             include_public: Include public images
             include_private: Include private images (only owner's)
+            tags: Filter by tags (images must have ALL specified tags)
+            search: Search prompt text (case-insensitive)
             limit: Maximum number of images to return
             offset: Offset for pagination
         
@@ -241,6 +268,18 @@ class GalleryManager:
                 
                 if not image.is_public and not include_private:
                     continue
+                
+                # Filter by tags (must have ALL specified tags)
+                if tags:
+                    image_tags = set(image.tags or [])
+                    if not all(tag in image_tags for tag in tags):
+                        continue
+                
+                # Filter by search query (case-insensitive prompt search)
+                if search:
+                    search_lower = search.lower()
+                    if search_lower not in image.prompt.lower():
+                        continue
                 
                 accessible.append(image)
             

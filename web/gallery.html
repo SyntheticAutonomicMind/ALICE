@@ -513,6 +513,66 @@
         .viewer-container.fullscreen.sidebar-visible .viewer-sidebar {
             display: block;
         }
+
+        /* Tags Styling */
+        .tags-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            min-height: 2rem;
+        }
+        
+        .tag {
+            background: var(--accent);
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        
+        .tag-remove {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            padding: 0;
+            font-size: 1rem;
+            line-height: 1;
+            opacity: 0.7;
+        }
+        
+        .tag-remove:hover {
+            opacity: 1;
+        }
+        
+        .no-tags {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+        
+        .tag-input {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .tag-input input {
+            flex: 1;
+            padding: 0.375rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
     </style>
     <!-- Masonry Layout Library (MIT License) -->
     <script src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js"></script>
@@ -583,6 +643,10 @@
             
             <div class="filter-group search-box">
                 <input type="text" id="search-prompt" placeholder="Search by prompt...">
+            </div>
+            
+            <div class="filter-group search-box">
+                <input type="text" id="filter-tags" placeholder="Filter by tags (comma separated)...">
             </div>
         </div>
         
@@ -701,6 +765,8 @@
             const privacyFilter = document.getElementById('filter-privacy').value;
             const sortFilter = document.getElementById('filter-sort').value;
             const searchQuery = document.getElementById('search-prompt').value.toLowerCase();
+            const tagsInput = document.getElementById('filter-tags').value.toLowerCase();
+            const tagFilters = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
             
             // Filter
             filteredImages = currentImages.filter(img => {
@@ -708,6 +774,11 @@
                 if (privacyFilter === 'private' && img.isPublic) return false;
                 if (privacyFilter === 'public' && !img.isPublic) return false;
                 if (searchQuery && !img.prompt.toLowerCase().includes(searchQuery)) return false;
+                // Tag filtering: image must have ALL specified tags
+                if (tagFilters.length > 0) {
+                    const imageTags = (img.tags || []).map(t => t.toLowerCase());
+                    if (!tagFilters.every(t => imageTags.includes(t))) return false;
+                }
                 return true;
             });
             
@@ -960,8 +1031,27 @@
                             <div class="setting-label">Time</div>
                             <div class="setting-value">${img.generationTime !== undefined && img.generationTime !== null ? img.generationTime.toFixed(1) + 's' : 'N/A'}</div>
                         </div>
+                   </div>
+                </div>
+                
+                ${img.isOwner ? `
+                <div class="sidebar-section">
+                    <h3>Tags</h3>
+                    <div class="tags-container">
+                        <div class="tag-list" id="image-tags-${img.id}">
+                            ${((img.tags || []).map(t => `
+                                <span class="tag">${escapeHtml(t)}
+                                    <button class="tag-remove" onclick="removeTag('${img.id}', '${t}')">&times;</button>
+                                </span>
+                            `).join('')) || '<em class="no-tags">No tags</em>'}
+                        </div>
+                        <div class="tag-input">
+                            <input type="text" id="new-tag-${img.id}" placeholder="Add tag..." onkeypress="if(event.key==='Enter') addTag('${img.id}')">
+                            <button class="btn btn-sm" onclick="addTag('${img.id}')">Add</button>
+                        </div>
                     </div>
                 </div>
+                ` : ''}
                 
                 <div class="action-buttons">
                     <button class="btn btn-primary action-btn" onclick="regenerateImage('${img.id}')">
@@ -1108,6 +1198,70 @@
             }
         }
         
+        // Add tag to image
+        async function addTag(imageId) {
+            const input = document.getElementById(`new-tag-${imageId}`);
+            const tag = input.value.trim().toLowerCase();
+            
+            if (!tag) return;
+            
+            try {
+                const { API, Toast } = window.SDAPI;
+                
+                // Get current tags from the image in our local data
+                const img = allImages.find(i => i.id === imageId);
+                const currentTags = img?.tags || [];
+                
+                // Add new tag if not already present
+                if (!currentTags.includes(tag)) {
+                    const newTags = [...currentTags, tag];
+                    
+                    await API.fetch(`/v1/gallery/${imageId}/tags`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ tags: newTags })
+                    });
+                    
+                    input.value = '';
+                    Toast.success('Tag added');
+                    await loadGallery();
+                    
+                    // Reopen the same image
+                    const updatedImg = allImages.find(i => i.id === imageId);
+                    if (updatedImg) openViewer(updatedImg);
+                } else {
+                    Toast.warning('Tag already exists');
+                }
+            } catch (error) {
+                window.SDAPI.Toast.error('Failed to add tag: ' + error.message);
+            }
+        }
+        
+        // Remove tag from image
+        async function removeTag(imageId, tagToRemove) {
+            try {
+                const { API, Toast } = window.SDAPI;
+                
+                // Get current tags
+                const img = allImages.find(i => i.id === imageId);
+                const currentTags = img?.tags || [];
+                const newTags = currentTags.filter(t => t !== tagToRemove);
+                
+                await API.fetch(`/v1/gallery/${imageId}/tags`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ tags: newTags })
+                });
+                
+                Toast.success('Tag removed');
+                await loadGallery();
+                
+                // Reopen the same image
+                const updatedImg = allImages.find(i => i.id === imageId);
+                if (updatedImg) openViewer(updatedImg);
+            } catch (error) {
+                window.SDAPI.Toast.error('Failed to remove tag: ' + error.message);
+            }
+        }
+        
         // Copy to clipboard
         function copyToClipboard(text, message = 'Copied!') {
             navigator.clipboard.writeText(text).then(() => {
@@ -1130,6 +1284,7 @@
         document.getElementById('filter-privacy').addEventListener('change', applyFilters);
         document.getElementById('filter-sort').addEventListener('change', applyFilters);
         document.getElementById('search-prompt').addEventListener('input', debounce(applyFilters, 300));
+        document.getElementById('filter-tags').addEventListener('input', debounce(applyFilters, 300));
         
         // Debounce helper
         function debounce(func, wait) {

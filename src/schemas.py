@@ -399,6 +399,7 @@ class GalleryImageInfo(BaseModel):
     generation_time: Optional[float] = Field(default=None, alias="generationTime")
     loras: Optional[List[str]] = Field(default=None)
     lora_scales: Optional[List[float]] = Field(default=None, alias="loraScales")
+    tags: Optional[List[str]] = Field(default=None, description="User-defined tags")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -416,6 +417,13 @@ class UpdateImagePrivacyRequest(BaseModel):
     """Request to update image privacy settings."""
     is_public: bool = Field(..., alias="isPublic", description="Public visibility")
     expires_in_hours: Optional[int] = Field(default=None, alias="expiresInHours", ge=1, le=168, description="Hours until expiration (1-168, only for public images)")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UpdateImageTagsRequest(BaseModel):
+    """Request to update image tags."""
+    tags: List[str] = Field(..., description="List of tags (replaces existing tags)")
 
     model_config = ConfigDict(populate_by_name=True)
 

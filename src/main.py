@@ -72,6 +72,7 @@ from .schemas import (
     GalleryImageInfo,
     GalleryListResponse,
     UpdateImagePrivacyRequest,
+    UpdateImageTagsRequest,
     GalleryStatsResponse,
 )
 
@@ -1465,6 +1466,8 @@ async def list_gallery_images(
     offset: int = 0,
     include_public: bool = True,
     include_private: bool = True,
+    tags: Optional[str] = None,
+    search: Optional[str] = None,
     current_user: Any = Depends(get_current_user_optional)
 ):
     """
@@ -1472,6 +1475,10 @@ async def list_gallery_images(
     
     Returns user's own images (public and private) plus other users' public images.
     Anonymous users only see public images.
+    
+    Args:
+        tags: Comma-separated list of tags to filter by (images must have ALL tags)
+        search: Search query for prompt text
     """
     if gallery_manager is None:
         raise HTTPException(status_code=503, detail="Service not ready")
@@ -1482,12 +1489,19 @@ async def list_gallery_images(
     
     logger.debug("Gallery list request: api_key_id=%s, is_admin=%s", api_key_id, is_admin)
     
+    # Parse tag filter
+    tag_filter = None
+    if tags:
+        tag_filter = [t.strip().lower() for t in tags.split(",") if t.strip()]
+    
     # List accessible images
     images = gallery_manager.list_images(
         api_key_id=api_key_id,
         is_admin=is_admin,
         include_public=include_public,
         include_private=include_private,
+        tags=tag_filter,
+        search=search,
         limit=limit,
         offset=offset
     )
@@ -1523,6 +1537,7 @@ async def list_gallery_images(
             generation_time=img.generation_time,
             loras=img.loras,
             lora_scales=img.lora_scales,
+            tags=img.tags,
         ))
     
     return GalleryListResponse(
@@ -1581,6 +1596,80 @@ async def update_image_privacy(
         raise HTTPException(status_code=500, detail="Failed to update privacy")
     
     return {"success": True, "is_public": request.is_public, "expires_at": expires_at}
+
+
+@app.patch("/v1/gallery/{image_id}/tags")
+async def update_image_tags(
+    image_id: str,
+    request: UpdateImageTagsRequest,
+    current_user: Any = Depends(get_current_user)
+):
+    """
+    Update image tags.
+    
+    Only the owner can update tags on their images.
+    Tags are normalized to lowercase and duplicates are removed.
+    """
+    if gallery_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    
+    # Get image
+    image = gallery_manager.get_image(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    # Check ownership (only owner can tag, not even admins)
+    is_owner = image.owner_api_key_id == current_user.id
+    
+    if not is_owner:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the image owner can manage tags"
+        )
+    
+    # Normalize tags: lowercase, strip whitespace, remove duplicates, limit length
+    normalized_tags = list(set(
+        tag.lower().strip()[:50]  # Max 50 chars per tag
+        for tag in request.tags
+        if tag.strip()  # Skip empty tags
+    ))[:20]  # Max 20 tags per image
+    
+    # Update tags
+    success = gallery_manager.update_tags(image_id, normalized_tags)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update tags")
+    
+    return {"success": True, "tags": normalized_tags}
+
+
+@app.get("/v1/gallery/tags")
+async def list_gallery_tags(
+    current_user: Any = Depends(get_current_user)
+):
+    """
+    List all unique tags used by the current user.
+    
+    Returns tags sorted by usage count (most used first).
+    """
+    if gallery_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    
+    # Get all user's images and collect tags
+    tag_counts: Dict[str, int] = {}
+    for image in gallery_manager.list_images():
+        # Only count tags from user's own images
+        if image.owner_api_key_id == current_user.id and image.tags:
+            for tag in image.tags:
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    
+    # Sort by count (descending)
+    sorted_tags = sorted(tag_counts.items(), key=lambda x: (-x[1], x[0]))
+    
+    return {
+        "tags": [{"name": name, "count": count} for name, count in sorted_tags],
+        "total": len(sorted_tags)
+    }
 
 
 @app.delete("/v1/gallery/{image_id}")
