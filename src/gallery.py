@@ -64,14 +64,10 @@ class ImageRecord:
         
         Rules:
         - Owner can always access their own images
-        - Admins can access all images
         - Public non-expired images are accessible to everyone
-        - Private images are only accessible to owner/admin
+        - Private images are ONLY accessible to owner
+        - Admins do NOT get special access to private images
         """
-        # Admins can access everything
-        if is_admin:
-            return True
-        
         # Owner can always access their own images
         if api_key_id and self.owner_api_key_id == api_key_id:
             return True

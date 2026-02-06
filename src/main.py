@@ -79,16 +79,9 @@ from .schemas import (
 setup_logging(config.logging)
 logger = logging.getLogger(__name__)
 
-# Configure PyTorch threading for optimal CPU usage
-try:
-    import torch
-    # Set intra-op parallelism (operations within a single op)
-    torch.set_num_threads(num_cpus)
-    # Set inter-op parallelism (parallelism between independent ops)
-    torch.set_num_interop_threads(num_cpus)
-    logger.info("Configured PyTorch to use %d threads (detected %d CPUs)", num_cpus, num_cpus)
-except Exception as e:
-    logger.warning("Failed to configure PyTorch threading: %s", e)
+# NOTE: PyTorch threading configuration removed - moved to PyTorchBackend
+# Importing torch at module level causes hangs on some AMD GPUs (gfx90c)
+# The PyTorch backend handles this configuration internally now.
 
 # =============================================================================
 # SERVICE INITIALIZATION
@@ -116,6 +109,9 @@ async def lifespan(app: FastAPI):
     model_registry = ModelRegistry(config.models.directory)
     generator = GeneratorService(
         images_dir=config.storage.images_directory,
+        backend_name=config.generation.backend,
+        sdcpp_binary=config.generation.sdcpp_binary,
+        sdcpp_threads=config.generation.sdcpp_threads,
         default_steps=config.generation.default_steps,
         default_guidance_scale=config.generation.default_guidance_scale,
         default_scheduler=config.generation.default_scheduler,
@@ -2518,6 +2514,9 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
             "default_height": config.generation.default_height,
             "max_concurrent": config.generation.max_concurrent,
             "request_timeout": config.generation.request_timeout,
+            "backend": config.generation.backend,
+            "sdcpp_binary": str(config.generation.sdcpp_binary) if config.generation.sdcpp_binary else None,
+            "sdcpp_threads": config.generation.sdcpp_threads,
             "force_cpu": config.generation.force_cpu,
             "force_float32": config.generation.force_float32,
             "force_bfloat16": config.generation.force_bfloat16,

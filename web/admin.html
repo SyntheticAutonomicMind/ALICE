@@ -546,6 +546,36 @@
                             </svg>
                             Generation Defaults
                         </h3>
+                        
+                        <!-- Backend Selection -->
+                        <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1.5rem;">
+                            <h4 style="font-size: 0.9rem; color: var(--text-primary); margin-bottom: 0.75rem; font-weight: 600;">Backend Configuration</h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="setting-gen-backend">Backend</label>
+                                    <select id="setting-gen-backend" data-key="generation.backend">
+                                        <option value="auto">Auto (Detect Best)</option>
+                                        <option value="pytorch">PyTorch (GPU/CPU)</option>
+                                        <option value="vulkan">Vulkan (stable-diffusion.cpp)</option>
+                                    </select>
+                                    <small style="color: var(--warning); font-size: 0.75rem;">⚠️ Requires service restart to take effect</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-sdcpp-threads">Vulkan Threads (sd.cpp)</label>
+                                    <input type="number" id="setting-gen-sdcpp-threads" data-key="generation.sdcpp_threads" min="1" max="64" value="8">
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">CPU threads for Vulkan backend</small>
+                                </div>
+                            </div>
+                            <div style="margin-top: 0.75rem; padding: 0.75rem; background: rgba(59, 130, 246, 0.1); border-left: 3px solid var(--primary); border-radius: var(--radius-sm);">
+                                <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0;">
+                                    <strong>Backend Guide:</strong><br>
+                                    • <strong>Auto:</strong> Selects best backend (Vulkan for AMD, PyTorch for NVIDIA)<br>
+                                    • <strong>PyTorch:</strong> GPU acceleration via CUDA/ROCm (may not work on all AMD GPUs)<br>
+                                    • <strong>Vulkan:</strong> Universal GPU support via stable-diffusion.cpp (works on ALL GPUs)
+                                </p>
+                            </div>
+                        </div>
+                        
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
                             <div class="form-group">
                                 <label for="setting-gen-steps">Default Steps</label>
@@ -1235,6 +1265,8 @@
                     document.getElementById('setting-models-hf-token').placeholder = config.models.huggingface_token === '***' ? '(configured)' : 'Not set';
                     
                     // Generation settings
+                    document.getElementById('setting-gen-backend').value = config.generation.backend || 'auto';
+                    document.getElementById('setting-gen-sdcpp-threads').value = config.generation.sdcpp_threads || 8;
                     document.getElementById('setting-gen-steps').value = config.generation.default_steps || 25;
                     document.getElementById('setting-gen-guidance').value = config.generation.default_guidance_scale || 7.5;
                     document.getElementById('setting-gen-scheduler').value = config.generation.default_scheduler || 'ddim';

@@ -65,15 +65,39 @@ install_alice() {
     "${ALICE_DIR}/venv/bin/pip" install --upgrade pip
     
     if [[ "$USE_GPU" == "true" ]]; then
-        # Install PyTorch with TheRock gfx110X-all ROCm support
-        # TheRock builds include proper gfx1103 (Phoenix APU) kernels
-        # The official PyTorch ROCm packages do NOT include gfx1103 and cause segfaults
-        # See: https://github.com/ROCm/TheRock/blob/main/RELEASES.md
-        log_info "Installing PyTorch with TheRock ROCm support (gfx110X family)..."
-        log_info "This includes native gfx1103 (Phoenix/780M) support!"
-        "${ALICE_DIR}/venv/bin/pip" install \
-            --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ \
-            --pre torch torchaudio torchvision
+        # Determine PyTorch version based on GPU architecture
+        local gfx_arch=$(echo "$gpu_env" | grep PYTORCH_ROCM_ARCH | sed 's/export PYTORCH_ROCM_ARCH=//' | tr -d '"')
+        
+        if [[ "$gfx_arch" == "gfx1103" ]]; then
+            # Install PyTorch with TheRock gfx110X-all ROCm support
+            # TheRock builds include proper gfx1103 (Phoenix APU) kernels
+            # The official PyTorch ROCm packages do NOT include gfx1103 and cause segfaults
+            # See: https://github.com/ROCm/TheRock/blob/main/RELEASES.md
+            log_info "Installing PyTorch with TheRock ROCm support (gfx110X family)..."
+            log_info "This includes native gfx1103 (Phoenix/780M) support!"
+            "${ALICE_DIR}/venv/bin/pip" install \
+                --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ \
+                --pre torch torchaudio torchvision
+        elif [[ "$gfx_arch" == "gfx90c" ]]; then
+            # Cezanne/Renoir APUs - limited ROCm support
+            # Python 3.13 doesn't have ROCm wheels yet, check Python version
+            local python_version=$("${ALICE_DIR}/venv/bin/python" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+            if [[ "$python_version" == "3.13" ]]; then
+                log_warn "Python 3.13 detected - PyTorch ROCm not available yet"
+                log_warn "Installing CPU-only PyTorch. For GPU support:"
+                log_warn "  1. Create venv with Python 3.11: python3.11 -m venv venv"
+                log_warn "  2. Reinstall with ROCm 6.1: pip install torch --index-url https://download.pytorch.org/whl/rocm6.1"
+                "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+                USE_GPU=false  # Update flag to reflect CPU mode
+            else
+                log_info "Installing PyTorch with ROCm 6.1 support (gfx90c Cezanne/Renoir)..."
+                "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.1
+            fi
+        else
+            # Other AMD GPUs - use official ROCm 6.2
+            log_info "Installing PyTorch with ROCm 6.2 support ($gfx_arch)..."
+            "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+        fi
     else
         # Install CPU-only PyTorch
         log_info "Installing PyTorch 2.6.0 (CPU only)..."
@@ -122,13 +146,17 @@ server:
   port: ${port}
   require_auth: true
   session_timeout_seconds: 3600
+  registration_mode: disabled
+  block_nsfw: false
 
 storage:
-  models_directory: ${DATA_DIR}/models
-  loras_directory: ${DATA_DIR}/models/loras
   images_directory: ${DATA_DIR}/images
+  gallery_file: ${DATA_DIR}/data/gallery.json
   auth_directory: ${DATA_DIR}/auth
-  data_directory: ${DATA_DIR}/data
+  max_storage_gb: 100
+  retention_days: 7
+  public_image_expiration_hours: 168
+  gallery_page_size: 100
 
 models:
   directory: ${DATA_DIR}/models
@@ -144,20 +172,35 @@ generation:
   request_timeout: 600
   max_concurrent: 1
   force_cpu: $([ "$USE_GPU" == "true" ] && echo "false" || echo "true")
-  force_float32: $([ "$USE_GPU" == "true" ] && echo "true" || echo "false")
-  device_map: $([ "$USE_GPU" == "true" ] && echo '"sequential"' || echo 'null')
-  use_bfloat16: false
+  force_float32: $(if [[ "$gfx_arch" == "gfx1103" ]]; then echo "true"; else echo "false"; fi)
+  device_map: $(if [[ "$gfx_arch" == "gfx1103" ]]; then echo '"sequential"'; else echo 'null'; fi)
+  force_bfloat16: false
   
   # Memory optimizations for APU/GPU (3GB-8GB VRAM range)
-  attention_slicing: "auto"
-  vae_slicing: true
-  vae_tiling: false
-  model_cpu_offload: false
-  sequential_cpu_offload: false
+  enable_vae_slicing: true
+  enable_vae_tiling: false
+  enable_model_cpu_offload: false
+  enable_sequential_cpu_offload: false
+  attention_slice_size: "auto"
+  vae_decode_cpu: $(if [[ "$gfx_arch" == "gfx1103" ]]; then echo "true"; else echo "false"; fi)
+  
+  # Performance optimization settings (PyTorch 2.0+)
+  enable_torch_compile: false
+  torch_compile_mode: "reduce-overhead"
 
 logging:
   level: "INFO"
-  directory: ${DATA_DIR}/logs
+  file: ${DATA_DIR}/logs/alice.log
+  max_size_mb: 100
+  backup_count: 5
+
+model_cache:
+  enabled: true
+  database_path: ${DATA_DIR}/data/model_cache.db
+  sync_on_startup: false
+  sync_interval_hours: 24
+  civitai_page_limit: null
+  huggingface_limit: 10000
 EOF
 
         log_info "Configuration saved to: ${CONFIG_DIR}/config.yaml"

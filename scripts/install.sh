@@ -200,6 +200,26 @@ create_venv() {
     print_status "PyTorch installation complete (type: ${GPU_TYPE})"
 }
 
+# Build and install stable-diffusion.cpp (Vulkan backend)
+build_sdcpp() {
+    print_status "Building stable-diffusion.cpp with Vulkan support"
+    
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Run build script
+    if [[ -f "${SCRIPT_DIR}/build_sdcpp.sh" ]]; then
+        INSTALL_PREFIX="${INSTALL_DIR}" bash "${SCRIPT_DIR}/build_sdcpp.sh"
+        
+        # Make sd-cli available system-wide
+        if [[ -f "${INSTALL_DIR}/bin/sd-cli" ]]; then
+            ln -sf "${INSTALL_DIR}/bin/sd-cli" /usr/local/bin/sd-cli
+            print_status "sd-cli installed to /usr/local/bin/sd-cli"
+        fi
+    else
+        print_warning "build_sdcpp.sh not found, skipping Vulkan backend build"
+    fi
+}
+
 # Install systemd service (Linux)
 install_systemd_service() {
     print_status "Installing systemd service"
@@ -345,6 +365,7 @@ install() {
     create_directories
     install_files
     create_venv
+    build_sdcpp  # Build Vulkan backend
     
     if [[ "$OS" == "linux" ]]; then
         install_systemd_service
@@ -369,6 +390,10 @@ install() {
     echo ""
     echo "Web interface will be available at: http://localhost:8080/web/"
     echo "API documentation at: http://localhost:8080/docs"
+    echo ""
+    echo "Backends installed:"
+    echo "  - PyTorch (ROCm/CUDA/CPU)"
+    echo "  - stable-diffusion.cpp (Vulkan - universal AMD support)"
 }
 
 # Parse arguments

@@ -48,6 +48,11 @@ class GenerationConfig(BaseModel):
     request_timeout: int = Field(default=300, description="Request timeout in seconds")
     default_width: int = Field(default=512, ge=64, le=2048, description="Default image width")
     default_height: int = Field(default=512, ge=64, le=2048, description="Default image height")
+    # Backend selection
+    backend: str = Field(default="auto", description="Backend to use: 'auto', 'pytorch', 'vulkan'")
+    sdcpp_binary: Optional[Path] = Field(default=None, description="Path to sd-cli binary (auto-detected if None)")
+    sdcpp_threads: int = Field(default=8, ge=1, le=64, description="CPU threads for Vulkan backend")
+    # PyTorch device settings
     force_cpu: bool = Field(default=False, description="Force CPU mode even if GPU is available")
     device_map: Optional[str] = Field(default=None, description="Device map for model loading (e.g., 'balanced' for AMD APUs)")
     force_float32: bool = Field(default=False, description="Force float32 (required for some AMD GPUs)")
