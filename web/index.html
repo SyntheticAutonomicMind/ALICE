@@ -452,14 +452,19 @@
                 document.getElementById('gpu-util-bar').style.width = `${gpuUtil}%`;
                 document.getElementById('gpu-util-percent').textContent = `${gpuUtil}%`;
                 
-                // Queue
+                // Queue / Active status
                 const queueDepth = metrics.queueDepth || 0;
+                const activeGenerations = metrics.activeGenerations || 0;
+                const totalBusy = queueDepth + activeGenerations;
+                
                 document.getElementById('queue-text').textContent = 
-                    queueDepth === 0 ? 'Empty' : `${queueDepth} pending`;
+                    totalBusy === 0 ? 'Empty' : 
+                    activeGenerations > 0 ? `${activeGenerations} active` : `${queueDepth} pending`;
                 document.getElementById('queue-bar').style.width = 
-                    queueDepth === 0 ? '0%' : `${Math.min(100, queueDepth * 20)}%`;
+                    totalBusy === 0 ? '0%' : `${Math.min(100, totalBusy * 20)}%`;
                 document.getElementById('queue-label').textContent = 
-                    queueDepth === 0 ? 'Idle' : `${queueDepth} in queue`;
+                    totalBusy === 0 ? 'Idle' : 
+                    activeGenerations > 0 ? 'Generating' : `${queueDepth} in queue`;
                 
                 // Activity feed
                 updateActivityFeed(health, metrics);
@@ -473,8 +478,24 @@
             function updateActivityFeed(health, metrics) {
                 const feed = document.getElementById('activity-feed');
                 const queueDepth = metrics.queueDepth || 0;
+                const activeGenerations = metrics.activeGenerations || 0;
                 
-                if (queueDepth > 0) {
+                if (activeGenerations > 0) {
+                    // Currently generating
+                    feed.innerHTML = `
+                        <div class="activity-item">
+                            <div class="activity-icon generating">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                            </div>
+                            <div class="activity-info">
+                                <div class="activity-title">Generating...</div>
+                                <div class="activity-meta">${activeGenerations} active • ${queueDepth} pending</div>
+                            </div>
+                        </div>
+                    `;
+                } else if (queueDepth > 0) {
                     feed.innerHTML = `
                         <div class="activity-item">
                             <div class="activity-icon generating">

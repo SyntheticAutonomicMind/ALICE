@@ -106,7 +106,8 @@ class GeneratorService:
         
         # Create semaphore for concurrent generation limiting
         self._generation_semaphore = asyncio.Semaphore(max_concurrent_generations)
-        self._queue_depth = 0
+        self._queue_depth = 0  # Pending requests (waiting for semaphore)
+        self._active_generations = 0  # Currently executing generations
         
         logger.info("Generator initialized with backend: %s", self._backend.get_backend_name())
         logger.info("Max concurrent generations: %d", max_concurrent_generations)
@@ -151,30 +152,36 @@ class GeneratorService:
             async with self._generation_semaphore:
                 logger.debug("Acquired generation semaphore, proceeding with generation")
                 
-                # Decrement queue depth when starting generation
+                # Move from queue to active
                 async with asyncio.Lock():
                     self._queue_depth -= 1
+                    self._active_generations += 1
                 
-                result = await self._backend.generate_image(
-                    model_path=model_path,
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    steps=steps,
-                    guidance_scale=guidance_scale,
-                    width=width,
-                    height=height,
-                    seed=seed,
-                    scheduler=scheduler,
-                    num_images=num_images,
-                    lora_paths=lora_paths,
-                    lora_scales=lora_scales,
-                    cancellation_token=cancellation_token,
-                )
-                
-                # Update statistics
-                self.total_generations += 1
-                
-                return result
+                try:
+                    result = await self._backend.generate_image(
+                        model_path=model_path,
+                        prompt=prompt,
+                        negative_prompt=negative_prompt,
+                        steps=steps,
+                        guidance_scale=guidance_scale,
+                        width=width,
+                        height=height,
+                        seed=seed,
+                        scheduler=scheduler,
+                        num_images=num_images,
+                        lora_paths=lora_paths,
+                        lora_scales=lora_scales,
+                        cancellation_token=cancellation_token,
+                    )
+                    
+                    # Update statistics
+                    self.total_generations += 1
+                    
+                    return result
+                finally:
+                    # Decrement active generations count
+                    async with asyncio.Lock():
+                        self._active_generations -= 1
         finally:
             # Ensure queue depth is decremented even on error
             async with asyncio.Lock():
@@ -203,6 +210,10 @@ class GeneratorService:
     def get_queue_depth(self) -> int:
         """Get current queue depth (number of pending requests)."""
         return self._queue_depth
+    
+    def get_active_generations(self) -> int:
+        """Get number of currently executing generations."""
+        return self._active_generations
     
     def get_average_generation_time(self) -> float:
         """

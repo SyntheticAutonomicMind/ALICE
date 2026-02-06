@@ -79,7 +79,11 @@ install_alice() {
                 --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ \
                 --pre torch torchaudio torchvision
         elif [[ "$gfx_arch" == "gfx90c" ]]; then
-            # Cezanne/Renoir APUs - limited ROCm support
+            # Cezanne/Renoir APUs (Ryzen 5000/4000 series)
+            # These APUs need special handling similar to gfx1103:
+            # - force_float32 (no bf16 support)
+            # - device_map sequential (prevent memory fragmentation crashes)
+            # - vae_decode_cpu (prevent GPU hangs during VAE decode)
             # Python 3.13 doesn't have ROCm wheels yet, check Python version
             local python_version=$("${ALICE_DIR}/venv/bin/python" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
             if [[ "$python_version" == "3.13" ]]; then
@@ -91,6 +95,7 @@ install_alice() {
                 USE_GPU=false  # Update flag to reflect CPU mode
             else
                 log_info "Installing PyTorch with ROCm 6.1 support (gfx90c Cezanne/Renoir)..."
+                log_info "Note: gfx90c requires same crash-prevention settings as gfx1103"
                 "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.1
             fi
         else
@@ -172,8 +177,8 @@ generation:
   request_timeout: 600
   max_concurrent: 1
   force_cpu: $([ "$USE_GPU" == "true" ] && echo "false" || echo "true")
-  force_float32: $(if [[ "$gfx_arch" == "gfx1103" ]]; then echo "true"; else echo "false"; fi)
-  device_map: $(if [[ "$gfx_arch" == "gfx1103" ]]; then echo '"sequential"'; else echo 'null'; fi)
+  force_float32: $(if [[ "$gfx_arch" == "gfx1103" ]] || [[ "$gfx_arch" == "gfx90c" ]]; then echo "true"; else echo "false"; fi)
+  device_map: $(if [[ "$gfx_arch" == "gfx1103" ]] || [[ "$gfx_arch" == "gfx90c" ]]; then echo '"sequential"'; else echo 'null'; fi)
   force_bfloat16: false
   
   # Memory optimizations for APU/GPU (3GB-8GB VRAM range)
@@ -182,7 +187,7 @@ generation:
   enable_model_cpu_offload: false
   enable_sequential_cpu_offload: false
   attention_slice_size: "auto"
-  vae_decode_cpu: $(if [[ "$gfx_arch" == "gfx1103" ]]; then echo "true"; else echo "false"; fi)
+  vae_decode_cpu: $(if [[ "$gfx_arch" == "gfx1103" ]] || [[ "$gfx_arch" == "gfx90c" ]]; then echo "true"; else echo "false"; fi)
   
   # Performance optimization settings (PyTorch 2.0+)
   enable_torch_compile: false

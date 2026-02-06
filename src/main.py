@@ -1386,7 +1386,8 @@ async def get_metrics():
     gpu_info = generator.get_gpu_info()
     
     return MetricsResponse(
-        queue_depth=generator.get_queue_depth(),  # Real queue depth from generator
+        queue_depth=generator.get_queue_depth(),  # Pending requests waiting in queue
+        active_generations=generator.get_active_generations(),  # Currently executing
         gpu_utilization=gpu_info.get("utilization", 0.0),
         gpu_memory_used=gpu_info.get("memory_used", "0 GB"),
         gpu_memory_total=gpu_info.get("memory_total", "0 GB"),

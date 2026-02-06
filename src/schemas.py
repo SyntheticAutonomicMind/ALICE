@@ -185,6 +185,7 @@ class HealthResponse(BaseModel):
 class MetricsResponse(BaseModel):
     """Service metrics response."""
     queue_depth: int = Field(default=0, alias="queueDepth")
+    active_generations: int = Field(default=0, alias="activeGenerations")
     gpu_utilization: float = Field(default=0.0, alias="gpuUtilization")
     gpu_memory_used: str = Field(default="0 GB", alias="gpuMemoryUsed")
     gpu_memory_total: str = Field(default="0 GB", alias="gpuMemoryTotal")

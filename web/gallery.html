@@ -956,6 +956,10 @@
                             <div class="setting-label">Seed</div>
                             <div class="setting-value" style="font-size: 0.75rem;">${img.seed !== undefined ? img.seed : 'N/A'}</div>
                         </div>
+                        <div class="setting-item">
+                            <div class="setting-label">Time</div>
+                            <div class="setting-value">${img.generationTime !== undefined && img.generationTime !== null ? img.generationTime.toFixed(1) + 's' : 'N/A'}</div>
+                        </div>
                     </div>
                 </div>
                 

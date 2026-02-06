@@ -52,4 +52,4 @@ scratch/
 .clio/sessions/
 .clio/memory/
 .clio/*.json
-
+data/

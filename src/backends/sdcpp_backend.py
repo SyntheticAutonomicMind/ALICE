@@ -61,6 +61,9 @@ class SDCppBackend(BaseBackend):
         default_height: int = 512,
         sdcpp_binary: Optional[Path] = None,
         sdcpp_threads: int = 8,
+        enable_vae_tiling: bool = False,
+        enable_vae_slicing: bool = False,
+        vae_decode_cpu: bool = False,
         **kwargs
     ):
         """
@@ -75,6 +78,9 @@ class SDCppBackend(BaseBackend):
             default_height: Default image height
             sdcpp_binary: Path to sd-cli binary (auto-detected if None)
             sdcpp_threads: CPU threads for Vulkan operations
+            enable_vae_tiling: Enable VAE tiling for memory optimization
+            enable_vae_slicing: Enable VAE slicing (Note: sd.cpp uses tiling instead)
+            vae_decode_cpu: Keep VAE on CPU (for low VRAM systems)
         """
         self.images_dir = Path(images_dir)
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -85,6 +91,11 @@ class SDCppBackend(BaseBackend):
         self.default_width = default_width
         self.default_height = default_height
         self.sdcpp_threads = sdcpp_threads
+        
+        # VAE optimizations
+        self.enable_vae_tiling = enable_vae_tiling
+        self.enable_vae_slicing = enable_vae_slicing  # sd.cpp uses tiling, map to --vae-tiling
+        self.vae_decode_cpu = vae_decode_cpu
         
         # Auto-detect or validate binary
         if sdcpp_binary is None:
@@ -308,6 +319,15 @@ class SDCppBackend(BaseBackend):
             "-t", str(self.sdcpp_threads),
         ])
         
+        # VAE optimizations
+        if self.enable_vae_tiling or self.enable_vae_slicing:
+            cmd.append("--vae-tiling")
+            logger.debug("Enabled VAE tiling for memory optimization")
+        
+        if self.vae_decode_cpu:
+            cmd.append("--vae-on-cpu")
+            logger.debug("VAE will run on CPU (for low VRAM)")
+        
         if seed is not None:
             cmd.extend(["--seed", str(seed)])
         
@@ -463,6 +483,19 @@ class SDCppBackend(BaseBackend):
         Returns:
             Dict with GPU details (name, type, driver, VRAM if available, gpu_available)
         """
+        # Default response
+        info = {
+            "type": "vulkan",
+            "name": "Unknown Vulkan Device",
+            "driver": "Vulkan",
+            "backend": "stable-diffusion.cpp",
+            "gpu_available": True,
+            "stats_available": False,
+            "utilization": 0.0,
+            "memory_used": "N/A",
+            "memory_total": "N/A",
+        }
+        
         try:
             # Try to get Vulkan device info via vulkaninfo
             result = subprocess.run(
@@ -477,41 +510,113 @@ class SDCppBackend(BaseBackend):
                 output = result.stdout.decode('utf-8', errors='replace')
                 
                 # Parse device name (basic parsing)
-                device_name = "Unknown Vulkan Device"
                 for line in output.split('\n'):
                     if 'deviceName' in line or 'GPU' in line:
                         parts = line.split('=')
                         if len(parts) > 1:
-                            device_name = parts[1].strip()
+                            info["name"] = parts[1].strip()
                             break
-                
-                return {
-                    "type": "vulkan",
-                    "name": device_name,
-                    "driver": "Vulkan",
-                    "backend": "stable-diffusion.cpp",
-                    "gpu_available": True,
-                    "stats_available": False,
-                    "utilization": 0.0,
-                    "memory_used": "N/A",
-                    "memory_total": "N/A",
-                }
             
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            logger.debug("vulkaninfo not available, using generic Vulkan info")
+            pass
         
-        # Fallback
-        return {
-            "type": "vulkan",
-            "name": "Vulkan Device",
-            "driver": "Vulkan",
-            "backend": "stable-diffusion.cpp",
-            "gpu_available": True,
-            "stats_available": False,
-            "utilization": 0.0,
-            "memory_used": "N/A",
-            "memory_total": "N/A",
-        }
+        # For AMD GPUs, read actual GPU stats from sysfs
+        # This works regardless of backend (Vulkan, PyTorch, etc.)
+        if self._is_amd_gpu():
+            try:
+                # Read memory usage
+                allocated = self._read_amd_memory_usage()
+                if allocated > 0:
+                    info["memory_used"] = f"{allocated / (1024**3):.1f} GB"
+                    info["stats_available"] = True
+                
+                # Read total memory from sysfs
+                total = self._read_amd_memory_total()
+                if total > 0:
+                    info["memory_total"] = f"{total / (1024**3):.1f} GB"
+                
+                # Read GPU utilization
+                gpu_busy = self._read_amd_gpu_busy()
+                if gpu_busy >= 0:
+                    info["utilization"] = gpu_busy / 100.0
+                    info["stats_available"] = True
+                    
+            except Exception as e:
+                logger.debug("Failed to read AMD GPU stats from sysfs: %s", e)
+        
+        return info
+    
+    def _is_amd_gpu(self) -> bool:
+        """Check if current GPU is AMD/ATI."""
+        try:
+            return Path("/sys/class/drm/card0/device/vendor").exists()
+        except Exception:
+            return False
+    
+    def _read_amd_memory_usage(self) -> int:
+        """
+        Read AMD GPU memory usage from sysfs.
+        
+        For AMD APUs, shared system memory is tracked via GTT.
+        For discrete GPUs, use VRAM.
+        
+        Returns:
+            Memory usage in bytes, or 0 if reading fails
+        """
+        try:
+            # Try GTT (Graphics Translation Table) first - used by APUs
+            gtt_used_path = Path("/sys/class/drm/card0/device/mem_info_gtt_used")
+            if gtt_used_path.exists():
+                return int(gtt_used_path.read_text().strip())
+            
+            # Fall back to VRAM for discrete GPUs
+            vram_used_path = Path("/sys/class/drm/card0/device/mem_info_vram_used")
+            if vram_used_path.exists():
+                return int(vram_used_path.read_text().strip())
+                
+        except Exception as e:
+            logger.debug("Failed to read AMD memory usage from sysfs: %s", e)
+        
+        return 0
+    
+    def _read_amd_memory_total(self) -> int:
+        """
+        Read AMD GPU total memory from sysfs.
+        
+        Returns:
+            Total memory in bytes, or 0 if reading fails
+        """
+        try:
+            # Try GTT total first (for APUs)
+            gtt_total_path = Path("/sys/class/drm/card0/device/mem_info_gtt_total")
+            if gtt_total_path.exists():
+                return int(gtt_total_path.read_text().strip())
+            
+            # Fall back to VRAM total for discrete GPUs
+            vram_total_path = Path("/sys/class/drm/card0/device/mem_info_vram_total")
+            if vram_total_path.exists():
+                return int(vram_total_path.read_text().strip())
+                
+        except Exception as e:
+            logger.debug("Failed to read AMD total memory from sysfs: %s", e)
+        
+        return 0
+    
+    def _read_amd_gpu_busy(self) -> int:
+        """
+        Read AMD GPU busy percentage from sysfs.
+        
+        Returns:
+            GPU busy percentage (0-100), or -1 if reading fails
+        """
+        try:
+            busy_path = Path("/sys/class/drm/card0/device/gpu_busy_percent")
+            if busy_path.exists():
+                return int(busy_path.read_text().strip())
+        except Exception as e:
+            logger.debug("Failed to read AMD GPU busy from sysfs: %s", e)
+        
+        return -1
     
     @property
     def current_model(self) -> Optional[str]:
