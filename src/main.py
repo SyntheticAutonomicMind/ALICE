@@ -2581,60 +2581,97 @@ async def delete_pending_registration(
 @app.get("/v1/admin/config")
 async def get_config(admin: bool = Depends(verify_admin_key)):
     """
-    Get current configuration. Requires admin privileges.
+    Get current configuration from the saved config file. Requires admin privileges.
     
-    Returns the current config as a dictionary (passwords/keys redacted).
+    Returns the saved config as a dictionary (passwords/keys redacted).
+    This ensures changes are visible immediately after saving, even before restart.
     """
+    import yaml
+    
+    # Find config file path - check ALICE_CONFIG env var first, then known paths
+    env_config = os.environ.get("ALICE_CONFIG")
+    
+    config_paths = [
+        Path(env_config) if env_config else None,
+        Path.home() / ".config" / "alice" / "config.yaml",
+        Path.home() / ".config" / "ALICE" / "config.yaml",  # Legacy path
+        Path("/etc/alice/config.yaml"),
+        Path("config.yaml"),
+    ]
+    
+    config_file = None
+    for path in config_paths:
+        if path and path.exists():
+            config_file = path
+            break
+    
+    if not config_file:
+        raise HTTPException(status_code=500, detail="Config file not found")
+    
+    # Read saved config from file
+    try:
+        with open(config_file) as f:
+            saved_config = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read config: {str(e)}")
+    
+    # Return saved config with redacted secrets
+    server_cfg = saved_config.get("server", {})
+    models_cfg = saved_config.get("models", {})
+    generation_cfg = saved_config.get("generation", {})
+    storage_cfg = saved_config.get("storage", {})
+    logging_cfg = saved_config.get("logging", {})
+    
     return {
         "server": {
-            "host": config.server.host,
-            "port": config.server.port,
-            "api_key": "***" if config.server.api_key else None,
-            "require_auth": config.server.require_auth,
-            "registrationMode": config.server.registration_mode,
-            "session_timeout_seconds": config.server.session_timeout_seconds,
-            "block_nsfw": config.server.block_nsfw,
+            "host": server_cfg.get("host", "0.0.0.0"),
+            "port": server_cfg.get("port", 8080),
+            "api_key": "***" if server_cfg.get("api_key") else None,
+            "require_auth": server_cfg.get("require_auth", False),
+            "registrationMode": server_cfg.get("registration_mode", "disabled"),
+            "session_timeout_seconds": server_cfg.get("session_timeout_seconds", 900),
+            "block_nsfw": server_cfg.get("block_nsfw", True),
         },
         "models": {
-            "directory": str(config.models.directory),
-            "auto_unload_timeout": config.models.auto_unload_timeout,
-            "default_model": config.models.default_model,
-            "civitai_api_key": "***" if config.models.civitai_api_key else None,
-            "huggingface_token": "***" if config.models.huggingface_token else None,
+            "directory": str(models_cfg.get("directory", "./models")),
+            "auto_unload_timeout": models_cfg.get("auto_unload_timeout", 300),
+            "default_model": models_cfg.get("default_model"),
+            "civitai_api_key": "***" if models_cfg.get("civitai_api_key") else None,
+            "huggingface_token": "***" if models_cfg.get("huggingface_token") else None,
         },
         "generation": {
-            "default_steps": config.generation.default_steps,
-            "default_guidance_scale": config.generation.default_guidance_scale,
-            "default_scheduler": config.generation.default_scheduler,
-            "default_width": config.generation.default_width,
-            "default_height": config.generation.default_height,
-            "max_concurrent": config.generation.max_concurrent,
-            "request_timeout": config.generation.request_timeout,
-            "backend": config.generation.backend,
-            "sdcpp_binary": str(config.generation.sdcpp_binary) if config.generation.sdcpp_binary else None,
-            "sdcpp_threads": config.generation.sdcpp_threads,
-            "force_cpu": config.generation.force_cpu,
-            "force_float32": config.generation.force_float32,
-            "force_bfloat16": config.generation.force_bfloat16,
-            "device_map": config.generation.device_map or "",
-            "enable_vae_slicing": config.generation.enable_vae_slicing,
-            "enable_vae_tiling": config.generation.enable_vae_tiling,
-            "enable_model_cpu_offload": config.generation.enable_model_cpu_offload,
-            "enable_sequential_cpu_offload": config.generation.enable_sequential_cpu_offload,
-            "attention_slice_size": config.generation.attention_slice_size,
-            "vae_decode_cpu": config.generation.vae_decode_cpu,
+            "default_steps": generation_cfg.get("default_steps", 25),
+            "default_guidance_scale": generation_cfg.get("default_guidance_scale", 7.5),
+            "default_scheduler": generation_cfg.get("default_scheduler", "ddim"),
+            "default_width": generation_cfg.get("default_width", 512),
+            "default_height": generation_cfg.get("default_height", 512),
+            "max_concurrent": generation_cfg.get("max_concurrent", 1),
+            "request_timeout": generation_cfg.get("request_timeout", 600),
+            "backend": generation_cfg.get("backend", "auto"),
+            "sdcpp_binary": str(generation_cfg.get("sdcpp_binary")) if generation_cfg.get("sdcpp_binary") else None,
+            "sdcpp_threads": generation_cfg.get("sdcpp_threads", 8),
+            "force_cpu": generation_cfg.get("force_cpu", False),
+            "force_float32": generation_cfg.get("force_float32", False),
+            "force_bfloat16": generation_cfg.get("force_bfloat16", False),
+            "device_map": generation_cfg.get("device_map", ""),
+            "enable_vae_slicing": generation_cfg.get("enable_vae_slicing", True),
+            "enable_vae_tiling": generation_cfg.get("enable_vae_tiling", False),
+            "enable_model_cpu_offload": generation_cfg.get("enable_model_cpu_offload", False),
+            "enable_sequential_cpu_offload": generation_cfg.get("enable_sequential_cpu_offload", False),
+            "attention_slice_size": generation_cfg.get("attention_slice_size", "auto"),
+            "vae_decode_cpu": generation_cfg.get("vae_decode_cpu", False),
         },
         "storage": {
-            "images_directory": str(config.storage.images_directory),
-            "max_storage_gb": config.storage.max_storage_gb,
-            "retention_days": config.storage.retention_days,
-            "gallery_page_size": config.storage.gallery_page_size,
+            "images_directory": str(storage_cfg.get("images_directory", "./images")),
+            "max_storage_gb": storage_cfg.get("max_storage_gb", 100),
+            "retention_days": storage_cfg.get("retention_days", 7),
+            "gallery_page_size": storage_cfg.get("gallery_page_size", 100),
         },
         "logging": {
-            "level": config.logging.level,
-            "file": str(config.logging.file),
-            "max_size_mb": config.logging.max_size_mb,
-            "backup_count": config.logging.backup_count,
+            "level": logging_cfg.get("level", "WARNING"),
+            "file": str(logging_cfg.get("file", "")),
+            "max_size_mb": logging_cfg.get("max_size_mb", 100),
+            "backup_count": logging_cfg.get("backup_count", 5),
         },
     }
 

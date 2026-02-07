@@ -1544,9 +1544,8 @@
                     
                     Toast.success('Settings saved! Restart service for changes to take effect.');
                     
-                    // Note: Don't reload settings here - the server returns the in-memory config
-                    // which won't reflect saved changes until the service is restarted.
-                    // The form already shows what the user entered.
+                    // Reload settings to show saved values from config file
+                    setTimeout(() => loadSettings(), 500);
                     
                 } catch (error) {
                     console.error('Save settings error (raw):', error);
