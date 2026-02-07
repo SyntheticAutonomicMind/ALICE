@@ -61,6 +61,8 @@ class SDCppBackend(BaseBackend):
         default_height: int = 512,
         sdcpp_binary: Optional[Path] = None,
         sdcpp_threads: int = 8,
+        vae_on_cpu: bool = False,
+        vae_decode_cpu: bool = False,  # Alias for vae_on_cpu (from PyTorch config)
         **kwargs
     ):
         """
@@ -75,6 +77,8 @@ class SDCppBackend(BaseBackend):
             default_height: Default image height
             sdcpp_binary: Path to sd-cli binary (auto-detected if None)
             sdcpp_threads: CPU threads for Vulkan operations
+            vae_on_cpu: Keep VAE in CPU to reduce VRAM usage
+            vae_decode_cpu: Alias for vae_on_cpu (PyTorch config compatibility)
         """
         self.images_dir = Path(images_dir)
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -85,6 +89,10 @@ class SDCppBackend(BaseBackend):
         self.default_width = default_width
         self.default_height = default_height
         self.sdcpp_threads = sdcpp_threads
+        self.vae_on_cpu = vae_on_cpu or vae_decode_cpu  # Use either parameter
+        
+        # Log initialization parameters
+        logger.info(f"SDCppBackend init: vae_on_cpu={vae_on_cpu}, vae_decode_cpu={vae_decode_cpu}, final={self.vae_on_cpu}")
         
         # Auto-detect or validate binary
         if sdcpp_binary is None:
@@ -208,6 +216,9 @@ class SDCppBackend(BaseBackend):
         """
         start_time = time.time()
         
+        # Log received parameters
+        logger.info(f"generate_image called: width={width}, height={height}, steps={steps}, guidance={guidance_scale}")
+        
         # Validate model
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found: {model_path}")
@@ -245,6 +256,13 @@ class SDCppBackend(BaseBackend):
         
         if seed is not None:
             cmd.extend(["--seed", str(seed)])
+        
+        # VAE on CPU for low VRAM systems
+        if self.vae_on_cpu:
+            cmd.append("--vae-on-cpu")
+            logger.info("VAE on CPU enabled (vae_on_cpu=%s)", self.vae_on_cpu)
+        else:
+            logger.warning("VAE on CPU NOT enabled (vae_on_cpu=%s)", self.vae_on_cpu)
         
         # LoRA support check
         if lora_paths:

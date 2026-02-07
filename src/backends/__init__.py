@@ -137,11 +137,11 @@ def get_backend(
         try:
             from .sdcpp_backend import SDCppBackend
             backend_class = SDCppBackend
-            # Filter kwargs - remove pytorch-specific params
+            # Filter kwargs - remove pytorch-specific params (but keep vae_decode_cpu)
             pytorch_params = {
                 'force_cpu', 'device_map', 'force_float32', 'force_bfloat16',
                 'enable_vae_slicing', 'enable_vae_tiling', 'enable_model_cpu_offload',
-                'enable_sequential_cpu_offload', 'attention_slice_size', 'vae_decode_cpu',
+                'enable_sequential_cpu_offload', 'attention_slice_size',
                 'enable_torch_compile', 'torch_compile_mode', 'max_concurrent_generations'
             }
             filtered_kwargs = {k: v for k, v in kwargs.items() if k not in pytorch_params}
