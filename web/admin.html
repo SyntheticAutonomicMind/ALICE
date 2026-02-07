@@ -653,6 +653,97 @@
                             </div>
                         </div>
                         
+                        <!-- Shared Memory Optimization Settings -->
+                        <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: var(--radius);">
+                            <h4 style="font-size: 0.9rem; color: var(--primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+                                </svg>
+                                Memory Optimization
+                                <small style="color: var(--text-muted); font-weight: normal;">(Both backends)</small>
+                            </h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="setting-gen-enable-model-cpu-offload">Model CPU Offload</label>
+                                    <select id="setting-gen-enable-model-cpu-offload" data-key="generation.enable_model_cpu_offload">
+                                        <option value="false">Disabled (Faster)</option>
+                                        <option value="true">Enabled (Lower VRAM)</option>
+                                    </select>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">Slower but uses less VRAM</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-vae-tiling-shared">VAE Tiling</label>
+                                    <select id="setting-gen-vae-tiling-shared" data-key="generation.enable_vae_tiling">
+                                        <option value="false">Disabled (Recommended)</option>
+                                        <option value="true">Enabled</option>
+                                    </select>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">Only for >2048px images</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- PyTorch Backend Optimizations -->
+                        <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: var(--radius);">
+                            <h4 style="font-size: 0.9rem; color: var(--success); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                                </svg>
+                                PyTorch Backend Optimizations
+                                <small style="color: var(--text-muted); font-weight: normal;">(PyTorch only)</small>
+                            </h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="setting-gen-enable-torch-compile">torch.compile</label>
+                                    <select id="setting-gen-enable-torch-compile" data-key="generation.enable_torch_compile">
+                                        <option value="false">Disabled (Default)</option>
+                                        <option value="true">Enabled (30-50% faster)</option>
+                                    </select>
+                                    <small style="color: var(--success); font-size: 0.75rem;">[FAST] 30-50% speedup after warmup</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-torch-compile-mode">Compile Mode</label>
+                                    <select id="setting-gen-torch-compile-mode" data-key="generation.torch_compile_mode">
+                                        <option value="default">Default</option>
+                                        <option value="reduce-overhead">Reduce Overhead (Recommended)</option>
+                                        <option value="max-autotune">Max Autotune</option>
+                                    </select>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">Only if torch.compile enabled</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-enable-vae-slicing">VAE Slicing</label>
+                                    <select id="setting-gen-enable-vae-slicing" data-key="generation.enable_vae_slicing">
+                                        <option value="true">Enabled (Recommended)</option>
+                                        <option value="false">Disabled</option>
+                                    </select>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">Lower memory for VAE</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-enable-sequential-cpu-offload">Sequential CPU Offload</label>
+                                    <select id="setting-gen-enable-sequential-cpu-offload" data-key="generation.enable_sequential_cpu_offload">
+                                        <option value="false">Disabled</option>
+                                        <option value="true">Enabled (Minimum VRAM)</option>
+                                    </select>
+                                    <small style="color: var(--warning); font-size: 0.75rem;">Slowest but lowest VRAM</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-attention-slice-size">Attention Slice Size</label>
+                                    <select id="setting-gen-attention-slice-size" data-key="generation.attention_slice_size">
+                                        <option value="auto">Auto</option>
+                                        <option value="max">Max</option>
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="4">4</option>
+                                    </select>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">Lower = less memory</small>
+                                </div>
+                            </div>
+                            <div style="margin-top: 0.75rem; padding: 0.5rem; background: rgba(0, 0, 0, 0.2); border-radius: var(--radius-sm);">
+                                <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">
+                                    <strong>Optimal PyTorch config:</strong> torch.compile ON (reduce-overhead mode), VAE Slicing ON, Sequential Offload OFF (unless extremely low VRAM)
+                                </p>
+                            </div>
+                        </div>
+                        
                         <!-- Vulkan Backend Optimizations -->
                         <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: var(--radius);">
                             <h4 style="font-size: 0.9rem; color: var(--primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
@@ -694,11 +785,43 @@
                                         <option value="true">Yes (CPU decode)</option>
                                     </select>
                                     <small style="color: var(--warning); font-size: 0.75rem;">Fixes GPU hang on AMD gfx1103</small>
+                                <div class="form-group">
+                                    <label for="setting-gen-diffusion-conv-direct">Diffusion Conv Direct</label>
+                                    <select id="setting-gen-diffusion-conv-direct" data-key="generation.diffusion_conv_direct">
+                                        <option value="false">Disabled (Recommended)</option>
+                                        <option value="true">Enabled</option>
+                                    </select>
+                                    <small style="color: var(--warning); font-size: 0.75rem;">NOT recommended (slower)</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-enable-mmap">Memory Map Weights</label>
+                                    <select id="setting-gen-enable-mmap" data-key="generation.enable_mmap">
+                                        <option value="false">Disabled (Default)</option>
+                                        <option value="true">Enabled</option>
+                                    </select>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">Can reduce RAM usage</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-keep-clip-on-cpu">CLIP on CPU</label>
+                                    <select id="setting-gen-keep-clip-on-cpu" data-key="generation.keep_clip_on_cpu">
+                                        <option value="false">No (GPU)</option>
+                                        <option value="true">Yes (CPU)</option>
+                                    </select>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">For low VRAM systems</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-circular">Circular Padding</label>
+                                    <select id="setting-gen-circular" data-key="generation.circular">
+                                        <option value="false">Disabled (Default)</option>
+                                        <option value="true">Enabled</option>
+                                    </select>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">For seamless/tiling images</small>
+                                </div>
                                 </div>
                             </div>
                             <div style="margin-top: 0.75rem; padding: 0.5rem; background: rgba(0, 0, 0, 0.2); border-radius: var(--radius-sm);">
                                 <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">
-                                    <strong>Optimal Vulkan config:</strong> Flash Attention ON, VAE Conv Direct ON, VAE Tiling OFF (unless images >2048px)
+                                    <strong>Optimal Vulkan config:</strong> Flash Attention ON, VAE Conv Direct ON, Diffusion Conv Direct OFF
                                 </p>
                             </div>
                         </div>
@@ -1334,11 +1457,26 @@
                     document.getElementById('setting-gen-force-bfloat16').value = config.generation.force_bfloat16 ? 'true' : 'false';
                     document.getElementById('setting-gen-device-map').value = config.generation.device_map || '';
                     
+                    // Shared memory optimization settings
+                    document.getElementById('setting-gen-enable-model-cpu-offload').value = config.generation.enable_model_cpu_offload ? 'true' : 'false';
+                    document.getElementById('setting-gen-vae-tiling-shared').value = config.generation.enable_vae_tiling ? 'true' : 'false';
+                    
+                    // PyTorch optimization settings
+                    document.getElementById('setting-gen-enable-torch-compile').value = config.generation.enable_torch_compile ? 'true' : 'false';
+                    document.getElementById('setting-gen-torch-compile-mode').value = config.generation.torch_compile_mode || 'reduce-overhead';
+                    document.getElementById('setting-gen-enable-vae-slicing').value = config.generation.enable_vae_slicing !== false ? 'true' : 'false';
+                    document.getElementById('setting-gen-enable-sequential-cpu-offload').value = config.generation.enable_sequential_cpu_offload ? 'true' : 'false';
+                    document.getElementById('setting-gen-attention-slice-size').value = config.generation.attention_slice_size || 'auto';
+                    
                     // Vulkan optimization settings
                     document.getElementById('setting-gen-flash-attention').value = config.generation.enable_flash_attention !== false ? 'true' : 'false';
                     document.getElementById('setting-gen-vae-conv-direct').value = config.generation.vae_conv_direct !== false ? 'true' : 'false';
+                    document.getElementById('setting-gen-diffusion-conv-direct').value = config.generation.diffusion_conv_direct ? 'true' : 'false';
                     document.getElementById('setting-gen-vae-tiling').value = config.generation.enable_vae_tiling ? 'true' : 'false';
                     document.getElementById('setting-gen-vae-decode-cpu').value = config.generation.vae_decode_cpu ? 'true' : 'false';
+                    document.getElementById('setting-gen-enable-mmap').value = config.generation.enable_mmap ? 'true' : 'false';
+                    document.getElementById('setting-gen-keep-clip-on-cpu').value = config.generation.keep_clip_on_cpu ? 'true' : 'false';
+                    document.getElementById('setting-gen-circular').value = config.generation.circular ? 'true' : 'false';
                     
                     // Storage settings
                     document.getElementById('setting-storage-dir').value = config.storage.images_directory || '';
