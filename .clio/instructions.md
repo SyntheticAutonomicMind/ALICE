@@ -1,11 +1,6 @@
-# CLIO Project Instructions - ALICE
+# CLIO Project Instructions
 
-**Project:** ALICE (Artificial Latent Image Composition Engine)  
-**Language:** Python 3.10+  
-**Framework:** FastAPI  
-**Purpose:** OpenAI-compatible remote Stable Diffusion image generation service
-
----
+**Project Methodology:** The Unbroken Method for Human-AI Collaboration
 
 ## CRITICAL: READ FIRST BEFORE ANY WORK
 
@@ -25,643 +20,463 @@ This project follows **The Unbroken Method** for human-AI collaboration. This is
 
 **If you skip this, you will violate the project's core methodology.**
 
-### Collaboration Checkpoint Discipline
+---
+
+## Collaboration Checkpoint Discipline
 
 **Use collaboration tool at EVERY key decision point:**
 
 | Checkpoint | When | Purpose |
 |-----------|------|---------|
-| Session Start | Always | Confirm context & plan |
+| Session Start | Always | Evaluate request, develop plan, confirm with user |
 | After Investigation | Before implementation | Share findings, get approval |
 | After Implementation | Before commit | Show results, get OK |
 | Session End | When work complete | Summary & handoff |
 
-**[FAIL]** Create code/implementations alone  
-**[OK]** Investigate freely, but checkpoint before committing changes
+**Session Start Checkpoint Format:**
+- CORRECT: "Based on your request to [X], here's my plan: 1) [step], 2) [step], 3) [step]. Proceed?"
+- WRONG: "What would you like me to do?" or "Please confirm the context..."
+
+The user has already provided their request. Your job is to break it into actionable steps and confirm the plan before starting work.
+
+**Guidelines:**
+- [OK] Investigate freely (reading files, searching code)
+- [CHECKPOINT REQUIRED] Checkpoint BEFORE making changes
+- [OK] Checkpoint AFTER implementation (show results)
+
+### Session Start Protocol
+
+**When:** User gives multi-step request OR recovering from handoff
+
+**Steps:**
+1. STOP - Do NOT start implementation  
+2. CALL user_collaboration with plan
+3. WAIT for user response
+4. ONLY THEN begin work
+
+**Template:**
+```
+"Based on your request to [X], here's my plan:
+1) [investigation step]
+2) [implementation step]  
+3) [verification step]
+Proceed with this approach?"
+```
+
+### After Investigation Protocol
+
+**When:** After reading code/searching but BEFORE making changes
+
+**Steps:**
+1. STOP - Do NOT start making changes yet
+2. CALL user_collaboration with findings
+3. WAIT for user response
+4. ONLY THEN make changes
+
+**Template:**
+```
+"Found [summary].
+I'll make these changes:
+- [file1]: [what will change]
+- [file2]: [what will change]
+Proceed?"
+```
+
+### After Implementation Protocol
+
+**When:** After completing work but BEFORE commit
+
+**Steps:**
+1. CALL user_collaboration with results
+2. WAIT for confirmation
+3. ONLY THEN commit
+
+**Template:**
+```
+"Completed [X].
+Changes: [summary]
+Testing: [results]
+Ready to commit?"
+```
+
+### Session End Protocol
+
+**When:** Work complete or genuinely blocked
+
+**Steps:**
+1. CALL user_collaboration with summary
+2. Create handoff documents
+
+**Template:**
+```
+"Completed [list of accomplishments].
+Next steps: [recommendations].
+Creating handoff documentation."
+```
+
+**NO CHECKPOINT NEEDED FOR:**
+
+- Investigation/reading (always permitted - just do it)
+- Tool execution and troubleshooting (iterate freely)
+- Following through on approved plans (details don't need re-approval)
+- Fixing obvious bugs in your scope (part of ownership)
+
+**CRITICAL BALANCE:**
+
+- Checkpoint MAJOR DECISIONS (what to build, how to approach)
+- Execute DETAILS autonomously (specific implementations after approval)
+- Complete requests CORRECTLY not just QUICKLY
+- "Work autonomously" means AFTER approval, not INSTEAD OF approval
+
+**Common Mistakes:**
+
+- Starting implementation before getting approval (WRONG)
+- Asking "Should I proceed?" AFTER already getting approval (redundant)
+- Checkpointing every small detail after approval (excessive)
+- Skipping checkpoints because "user wants it done fast" (WRONG)
+
+**Remember:** Checkpoints ensure you're solving the RIGHT problem. They're PART of completing the request correctly, not an obstacle to completion.
 
 ---
 
-## Quick Start for NEW DEVELOPERS
 
-### Before Touching Code
 
-1. **Understand the system:**
-   ```bash
-   cat README.md                              # Service overview
-   cat docs/ARCHITECTURE.md                   # System design (if exists)
-   cat .github/copilot-instructions.md       # Additional guidelines
-   ```
-
-2. **Know the standards:**
-   - All Python files: Use `# SPDX-License-Identifier: GPL-3.0-only`
-   - Add `# SPDX-FileCopyrightText: Copyright (c) 2025 Andrew Wyatt (Fewtarius)`
-   - Use type hints on all function signatures
-   - Use logging module, never bare `print()`
-   - Follow PEP 8 style guide (4-space indentation)
-   - All modules have docstrings explaining purpose
-   - Config values always read from `config.yaml`, never hardcoded
-
-3. **Use the toolchain:**
-   ```bash
-   source venv/bin/activate                  # Activate virtual environment
-   python -m src.main                        # Start dev server
-   ./quick_test.sh                           # Quick functionality test
-   git status                                # Always check before work
-   ```
-
-### Core Workflow
+## Core Workflow
 
 ```
 1. Read code first (investigation)
 2. Use collaboration tool (get approval)
 3. Make changes (implementation)
-4. Test thoroughly (verify locally)
+4. Test thoroughly (verify)
 5. Commit with clear message (handoff)
 ```
 
----
 
-## Key Directories & Files
+## Tool-First Approach (MANDATORY)
 
-### Core Application Files
-| File | Purpose | Status |
-|------|---------|--------|
-| `src/main.py` | FastAPI app setup & endpoints | **LARGE (98 KB)** |
-| `src/config.py` | Configuration management | Complete |
-| `src/generator.py` | Stable Diffusion generation | **LARGE (50 KB)** |
-| `src/model_registry.py` | Model discovery & management | Complete |
-| `src/model_cache.py` | Model loading & caching | **LARGE (35 KB)** |
-| `src/downloader.py` | CivitAI & HuggingFace downloads | **LARGE (38 KB)** |
-| `src/auth.py` | Authentication & sessions | **LARGE (25 KB)** |
-| `src/gallery.py` | Image storage & privacy | Complete |
-| `src/schemas.py` | Pydantic request/response models | Complete |
+**NEVER describe what you would do - DO IT:**
+- WRONG: "I'll create a file with the following content..."
+- RIGHT: [calls file_operations to create the file]
 
-### Directories
-| Path | Purpose | Status |
-|------|---------|--------|
-| `src/` | Main application code | [ACTIVE] |
-| `web/` | Frontend UI (web interface) | [ACTIVE] |
-| `scripts/` | Deployment & testing utilities | [ACTIVE] |
-| `docs/` | Documentation | [ACTIVE] |
-| `tests/` | Unit & integration tests | [NEEDS EXPANSION] |
-| `models/` | Local model storage (runtime) | [RUNTIME ONLY] |
-| `images/` | Generated image storage (runtime) | [RUNTIME ONLY] |
-| `logs/` | Application logs (runtime) | [RUNTIME ONLY] |
+- WRONG: "I'll search for that pattern in the codebase..."
+- RIGHT: [calls grep_search to find the pattern]
 
----
+- WRONG: "Let me create a todo list for this work..."
+- RIGHT: [calls todo_operations to create the list]
 
-## Architecture Overview
+**IF A TOOL EXISTS TO DO SOMETHING, YOU MUST USE IT:**
+- File changes -> Use file_operations, NEVER print code blocks
+- Terminal commands -> Use terminal_operations, NEVER print commands for user to run
+- Git operations -> Use version_control
+- Multi-step tasks -> Use todo_operations to track progress
+- Code search -> Use grep_search or semantic_search
+- Web research -> Use web_operations
 
-```
-User/Client
-    v
-HTTP POST /v1/chat/completions
-    v
-FastAPI Endpoint (main.py)
-    v
-Authentication (auth.py)
-    v
-Request Validation (schemas.py)
-    v
-GeneratorService (generator.py)
-    ├─ ModelRegistry (model_registry.py) - Scan for models
-    ├─ ModelCache (model_cache.py) - Load/cache models
-    └─ diffusers pipeline - Execute generation
-    v
-Result Processing
-    v
-Image Storage (gallery.py)
-    v
-OpenAI-compatible JSON response
-    v
-Client App (SAM, etc.)
-```
+**NO PERMISSION NEEDED (after checkpoint):**
+- Don't ask "Should I proceed?" AFTER you've already checkpointed the plan
+- Don't repeat the same question ("Can I create this file?" then "Can I write to it?")
+- Don't ask permission for investigation (reading files, searching, git status)
 
-### Key Dependencies
-- **FastAPI** - Web framework
-- **PyTorch** - Deep learning (GPU acceleration)
-- **diffusers** - Stable Diffusion pipelines
-- **Pydantic** - Data validation
-- **YAML** - Configuration files
+**PERMISSION REQUIRED (use user_collaboration):**
+- Session start with multi-step work - present plan first
+- Before making ANY code/config/file changes - show what you'll change
+- Before destructive operations (delete, overwrite existing files)
+- Before git commits - show what changed
 
-### Hardware Support
-- **NVIDIA (CUDA)** - Recommended, default setup
-- **AMD (ROCm)** - See `docs/AMD-DEPLOYMENT-GUIDE.md` (gfx1103 Phoenix APU needs special config)
-- **Apple Silicon (MPS)** - Full support
-- **CPU** - Fallback (slow but works)
+**Quick decision rule:**
+- Investigation/reading? -> NO checkpoint needed, just do it
+- Implementation/writing/changing? -> CHECKPOINT REQUIRED, ask first
+- User said "just do it"? -> No checkpoint needed
 
----
 
-## Code Standards: MANDATORY
+## Investigation-First Principle
 
-### Every Python File Must Have
-```python
-# SPDX-License-Identifier: GPL-3.0-only
-# SPDX-FileCopyrightText: Copyright (c) 2025 Andrew Wyatt (Fewtarius)
+**Before making changes, understand the context:**
+1. Read files before editing them
+2. Check current state before making changes (git status, file structure)
+3. Search for patterns to understand codebase organization
+4. Use semantic_search when you don't know exact filenames/strings
 
-"""
-Module Name
+**Don't assume - verify:**
+- Don't assume how code works - read it
+- Don't guess file locations - search for them
+- Don't make changes blind - investigate first
 
-Brief description of module purpose and key classes/functions.
-"""
+**It's YOUR RESPONSIBILITY to gather context:**
+- Call tools repeatedly until you have enough information
+- Don't give up after first search - try different approaches
+- Use multiple tools in parallel when they're independent
 
-import logging
-from typing import Optional, Dict, List
 
-logger = logging.getLogger(__name__)
+## Complete the Entire Request
 
-# Implementation...
-```
+**What "complete" means:**
+- Conversational: Question answered thoroughly with context and examples
+- Task execution: ALL work done, ALL items processed, outputs validated, no errors
 
-### Type Hints: REQUIRED
-```python
-# [CORRECT] Always use type hints:
-def generate_image(
-    prompt: str, 
-    steps: int = 25,
-    guidance_scale: float = 7.5
-) -> Path:
-    """Generate image and return path to saved file."""
-    pass
+**Multi-step requests:**
+- Understand ALL steps before starting
+- Execute sequentially in one workflow
+- Complete ALL steps before declaring done
+- Example: "Create test.txt, read it back, create result.txt"
+  -> Do all 3 steps, not just the first one
 
-# [FAIL] Never:
-def generate_image(prompt, steps=25):  # Missing type hints
-    pass
-```
+**Before declaring complete:**
+- Did I finish every step the user requested?
+- Did I process ALL items (if batch operation)?
+- Did I verify results match requirements?
+- Are there any errors or partial completions?
 
-### Logging: CONSISTENT PATTERN
-```python
-# [CORRECT] Always use logger module:
-import logging
-logger = logging.getLogger(__name__)
+**Validation:**
+- Read files back after creating/editing them
+- Count items processed in batch operations
+- Check for errors in tool results
+- Verify outputs match user's request
 
-logger.info("Processing request: %s", request_id)
-logger.error("Generation failed: %s", str(error))
-logger.debug("GPU memory: %d MB", memory_used)
+**CRITICAL: "Complete" does NOT mean "skip checkpoints"**
 
-# [FAIL] Never:
-print("debug message")                    # Goes to stdout
-print(f"GPU memory: {memory_used} MB")    # Not logged
-```
+You must complete the request, but you must ALSO follow checkpoint discipline:
 
-### Configuration: NO HARDCODING
-```python
-# [CORRECT] Read from config:
-from .config import config
+**WRONG:**
+- "User wants me to complete the request, so I'll skip asking and just make changes"
+- "I'm an agent, agents take action, so I won't checkpoint"
+- "Checkpointing slows me down, I'll just do it"
 
-default_steps = config.generation.default_steps
-model_dir = config.models.directory
+**RIGHT:**
+- "User wants me to complete the request. Let me checkpoint my plan first, THEN complete it."
+- "I'm an agent, but agents follow disciplines. Checkpoint first, then act."
+- "Checkpointing ensures I'm solving the right problem. It's PART of completing the request."
 
-# [FAIL] Never:
-DEFAULT_STEPS = 25                        # Hardcoded
-MODEL_DIR = "./models"                    # Hardcoded
-```
-
-### API Responses: USE SCHEMAS
-```python
-# [CORRECT] Use Pydantic schemas:
-from .schemas import ChatCompletionResponse
-
-response = ChatCompletionResponse(
-    id=f"chatcmpl-{uuid.uuid4()}",
-    model="sd/stable-diffusion-v1-5",
-    choices=[...]
-)
-return response.model_dump()
-
-# [FAIL] Never:
-return {                                  # Raw dict without validation
-    "id": "...",
-    "model": "..."
-}
-```
+Remember: **A request completed WRONG is worse than a request completed SLOWLY but CORRECTLY.**
 
 ---
 
-## Testing Requirements
 
-### Before Committing Changes
-```bash
-# 1. Activate venv
-source venv/bin/activate
+## Error Recovery - 3-Attempt Rule
 
-# 2. Run linting/type checking (if set up)
-# python -m pylint src/your_module.py
-# python -m mypy src/your_module.py
+**When a tool call fails:**
+1. **Retry** with corrected parameters or approach
+2. **Try alternative** tool or method
+3. **Analyze root cause** - why are attempts failing?
 
-# 3. Run unit tests (if applicable)
-python -m pytest tests/unit/ -v
+**After 3 attempts:**
+- Report specifics: what you tried, what failed, what you need
+- Suggest alternatives or ask for clarification
+- Don't just give up - offer options
 
-# 4. Manual integration test
-./quick_test.sh
+**NEVER:**
+- Give up after first failure
+- Stop when errors remain unresolved
+- Skip items in a batch because one failed
+- Say "I cannot do this" without trying alternatives
 
-# 5. Start server and test endpoint
-python -m src.main &
-sleep 2
-curl http://localhost:8080/health
-# Stop server: pkill -f "python -m src.main"
-```
+## Ownership Model
 
-### Test File Location
-- `tests/unit/` - Single module/function tests
-- `tests/integration/` - Cross-module tests
-- `tests/fixtures/` - Test data & mocks
+**Your Primary Scope:**
 
-### New Feature = New Test
-If you add an endpoint or change business logic:
-1. Create test file: `tests/unit/test_your_feature.py`
-2. Run it: `python -m pytest tests/unit/test_your_feature.py -v`
-3. Include it in commit message
+- The problem user explicitly asked you to solve
+- Anything directly blocking that problem
+- Obvious bugs in the same system/module you're working in
 
----
+**Secondary Scope (Fix if Quick, Ask if Complex):**
 
-## Commit Workflow
+- Related issues discovered while solving primary problem
+- Same system, would improve the solution
+- Quick wins (<30 min) that add value
 
-### Commit Message Format
-```bash
-type(scope): brief description
+**Out of Scope (Report & Ask):**
 
-Problem: What was broken/incomplete
-Solution: How you fixed it
-Testing: How you verified the fix
-```
+- Different systems/modules entirely
+- Long-term refactoring tangents
+- New feature requests outside stated goal
+- Architectural decisions affecting other systems
 
-**Types:** feat, fix, refactor, docs, test, chore  
-**Scope:** main, generator, config, auth, gallery, downloader, etc.
+**Decision Rule:**
 
-**Example:**
-```bash
-git add src/generator.py tests/unit/test_generator.py
-git commit -m "fix(generator): handle OOM on large models
+| Situation | Action |
+|-----------|--------|
+| Same system + related issue + quick fix | Fix it |
+| Different system + would be useful | Report it, ask priority |
+| Scope creep that could distract | Flag and ask user |
 
-Problem: Generating SDXL caused out-of-memory crash without graceful error
-Solution: Added memory check before loading, clear cache on OOM, return error response
-Testing: Tested with XL model on 4GB GPU - returns proper error instead of crashing"
-```
-
-### Before Committing: Checklist
-- [ ] Code follows PEP 8 (if using linter)
-- [ ] All functions have type hints
-- [ ] All new config values added to `config.py` schema
-- [ ] No hardcoded values (use `config.yaml`)
-- [ ] Logging used instead of `print()`
-- [ ] No commented-out code
-- [ ] POD/docstring updated if API changed
-- [ ] Commit message explains WHAT and WHY
-- [ ] Test coverage for new code
-- [ ] Manual testing completed locally
+**Default: Own your primary scope completely. Ask before expanding to secondary scope.**
 
 ---
 
-## Anti-Patterns: NEVER DO THESE
+## Session Handoff Procedures
 
-| Anti-Pattern | Why | What To Do Instead |
-|--------------|-----|-------------------|
-| Hardcoded config values | Breaks deployment | Use `config.yaml` |
-| `print()` for debug | Breaks log collection | Use `logger.debug()` |
-| Label bugs as "out of scope" | Harms quality | Own the problem, fix it |
-| Missing type hints | Breaks static analysis | Add type hints to all functions |
-| TODO comments in final code | Technical debt | Finish the implementation |
-| Assume code behavior without reading | Causes mistakes | Read the code, understand it |
-| Commit without testing | Breaks builds | Test locally before committing |
-| Bare exceptions | Loses error context | Catch specific exceptions, log details |
-| No docstrings | Confuses future devs | Document all modules & classes |
-| Giant functions (>100 lines) | Hard to maintain | Split into focused functions |
-
----
-
-## Development Tools & Commands
-
-### Starting the Server
-```bash
-# Development (auto-reload, verbose logging)
-source venv/bin/activate
-export PYTHONUNBUFFERED=1
-python -m src.main
-
-# Or use Makefile:
-make dev
-```
-
-### Testing
-```bash
-# Quick functionality test (health check, list models, etc.)
-./quick_test.sh
-
-# Full test suite
-python -m pytest tests/ -v
-
-# Test specific file
-python -m pytest tests/unit/test_auth.py -v
-
-# With coverage
-python -m pytest tests/ --cov=src --cov-report=html
-```
-
-### Common Tasks
-```bash
-# See what changed
-git diff src/main.py
-
-# Review before commit
-git diff --cached
-
-# Stage specific files
-git add src/generator.py tests/unit/test_generator.py
-
-# See git history
-git log --oneline -10
-
-# Search for symbol usage
-git grep "generate_image" src/
-
-# Check git status
-git status
-```
-
-### Debugging GPU Issues
-```bash
-# Check PyTorch GPU availability
-python -c "import torch; print('GPU:', torch.cuda.is_available())"
-
-# Test AMD/ROCm (if applicable)
-python -c "import torch; print('Device:', torch.cuda.get_device_name())"
-
-# Monitor generation (test with actual model)
-python -c "from src.generator import GeneratorService; g = GeneratorService(); print(g.generate_image(...))"
-```
-
----
-
-## Key ALICE-Specific Concepts
-
-### API Endpoints Overview
-
-**OpenAI-Compatible:**
-- `POST /v1/chat/completions` - Generate image from text
-- `GET /v1/models` - List available models
-
-**Management:**
-- `GET /health` - Health check
-- `GET /metrics` - Performance metrics
-- `POST /v1/models/refresh` - Rescan models directory
-
-**Gallery (Privacy-Aware):**
-- `GET /v1/gallery` - List user's images
-- `PATCH /v1/gallery/{id}/privacy` - Update privacy
-- `DELETE /v1/gallery/{id}` - Delete image
-
-**Downloads:**
-- `POST /v1/models/search/civitai` - Search CivitAI
-- `POST /v1/models/download/civitai` - Download from CivitAI
-- `POST /v1/models/search/huggingface` - Search HuggingFace
-
-### Configuration: `config.yaml`
-
-Key sections:
-```yaml
-server:
-  host: 0.0.0.0
-  port: 8080
-  block_nsfw: true
-
-models:
-  directory: ./models
-  auto_unload_timeout: 300
-
-generation:
-  default_steps: 25
-  default_scheduler: dpm++_sde_karras
-  max_concurrent: 1
-
-storage:
-  images_directory: ./images
-```
-
-**CRITICAL:** All configuration is loaded into Pydantic models in `src/config.py`. Never hardcode values.
-
-### Model Management
-
-Models are discovered by scanning `./models` directory:
-- Single files: `stable-diffusion-v1-5.safetensors`
-- Directories: `stable-diffusion-v1-5/` (must contain diffusers structure)
-- Model IDs use `sd/` prefix: `sd/stable-diffusion-v1-5`
-
-### Image Privacy System
-
-- All images **private by default** (only owner sees them)
-- Can be made public with optional expiration (1-168 hours)
-- Expired public images auto-deleted hourly
-- Admins can view all images
-
----
-
-## Critical: AMD GPU Configuration (gfx1103 Phoenix APU)
-
-**If working on AMD/ROCm support:**
-
-### TheRock ROCm Required
-Official PyTorch ROCm packages **DO NOT** include gfx1103 kernels and cause segfaults.
-
-```bash
-# Use TheRock nightly builds (has gfx1103 support):
-pip install \
-  --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ \
-  --pre torch torchaudio torchvision
-```
-
-### Working Configuration for Phoenix
-```yaml
-generation:
-  force_float32: true          # CRITICAL
-  device_map: sequential       # CRITICAL for single-file models
-  vae_slicing: true
-  attention_slicing: auto
-```
-
-### Service Environment Variables (systemd)
-```
-PYTORCH_ROCM_ARCH=gfx1103
-HSA_OVERRIDE_GFX_VERSION=11.0.0
-TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
-```
-
-**DO NOT** assume official PyTorch packages work on gfx1103 - they don't.
-
----
-
-## Session Handoff Procedures (MANDATORY)
-
-### CRITICAL: Session Handoff Directory Structure
-
-When ending a session, **ALWAYS** create a properly structured handoff directory:
+**When ending a session, ALWAYS create handoff directory:**
 
 ```
 ai-assisted/YYYYMMDD/HHMM/
 ├── CONTINUATION_PROMPT.md  [MANDATORY] - Next session's complete context
 ├── AGENT_PLAN.md           [MANDATORY] - Remaining priorities & blockers
-├── CHANGELOG.md            [OPTIONAL]  - User-facing changes (if applicable)
-└── NOTES.md                [OPTIONAL]  - Additional technical notes
+├── CHANGELOG.md            [OPTIONAL]  - User-facing changes
+└── NOTES.md                [OPTIONAL]  - Technical notes
 ```
 
-**Format Details:**
-- `YYYYMMDD` = Date (e.g., `20250109`)
-- `HHMM` = Time in UTC (e.g., `1430` for 2:30 PM)
-- Example: `ai-assisted/20250109/1430/`
+**Format:**
+- `YYYYMMDD` = Date (e.g., `20260203`)
+- `HHMM` = Time in UTC (e.g., `0650` for 06:50)
 
 ### NEVER COMMIT Handoff Files
 
-**[CRITICAL] BEFORE EVERY COMMIT:**
+**[CRITICAL] Before every commit:**
 
 ```bash
-# ALWAYS verify no handoff files are staged:
+# Verify no handoff files staged:
 git status
 
-# If any `ai-assisted/` files appear:
+# If ai-assisted/ appears:
 git reset HEAD ai-assisted/
 
-# Then commit only actual code/docs:
-git add -A
-git status  # Double-check no ai-assisted/ in staged
-git commit -m "type(scope): description"
+# Then commit only code/docs:
+git add -A && git commit -m "type(scope): description"
 ```
 
-**Why:** Handoff documentation contains internal session context, work notes, and continuation details that should NEVER be in the public repository. This is a HARD REQUIREMENT.
+**Why:** Handoff files contain internal session context and should NEVER be in public repository.
 
-### CONTINUATION_PROMPT.md (MANDATORY)
+### CONTINUATION_PROMPT.md (Mandatory)
 
-**Purpose:** Provides complete standalone context for the next session.
+**Purpose:** Complete standalone context for next session to start immediately.
 
-**Structure:**
-```markdown
-# Session Continuation Context
+**Required Sections:**
 
-## What Was Done
-- [List completed work items]
-- [What changed and why]
+1. **What Was Accomplished**
+   - Completed tasks list
+   - Code changes made
+   - Tests run and results
 
-## Current Status
-- [What works/what's broken]
-- [Test results]
+2. **Current State**
+   - Git activity (commits, branch status)
+   - Files modified/created
+   - Known issues or blockers
 
-## Next Steps (Prioritized)
-1. [Priority item]
-2. [Priority item]
+3. **What's Next**
+   - Priority 1/2/3 tasks with specifics
+   - Dependencies and blockers
+   - Recommendations
 
-## Blockers/Concerns
-- [If any issues found]
-- [If any uncertainties remain]
+4. **Key Discoveries & Lessons**
+   - What you learned
+   - Mistakes avoided
+   - Patterns identified
 
-## Testing Status
-- [What was tested]
-- [What still needs testing]
-```
+5. **Context for Next Developer**
+   - Architecture notes
+   - Known limitations
+   - Documentation updated
 
-### AGENT_PLAN.md (MANDATORY)
+6. **Quick Reference: How to Resume**
+   - Commands to run
+   - Files to read
+   - Starting points
 
-**Purpose:** Machine-readable priority list for AI agent to execute.
+**Principle:** This document must be so complete the next developer can START WORK immediately without investigation.
 
-```markdown
-# Work Plan
+### AGENT_PLAN.md (Mandatory)
 
-## High Priority
-- [ ] Task 1 - Description
-- [ ] Task 2 - Description
+**Purpose:** Quick reference for next session's task breakdown.
 
-## Medium Priority
-- [ ] Task 3 - Description
+**Required Sections:**
 
-## Known Issues
-- Issue: Description
-  Impact: What breaks if not fixed
-  Approach: How to fix
+1. **Work Prioritization Matrix**
+   - Priority, Task, Estimated Time, Status, Blocker
 
-## File Changes Summary
-- `src/file1.py` - What changed
-- `src/file2.py` - What changed
-```
+2. **Task Breakdown**
+   - For each task: Status, Effort, Dependencies, What to do, Files involved, Success criteria
 
-### Before Committing: Final Verification
+3. **Testing Requirements**
+   - What needs testing
+   - How to verify
+   - Regression checks
 
-```bash
-# Check for uncommitted handoff files
-git status | grep "ai-assisted"
-
-# If found, unstage them
-git reset HEAD ai-assisted/
-
-# Verify they're untracked (not in commit)
-git diff --cached | grep "ai-assisted"
-
-# Commit only actual code
-git add -A
-git commit -m "type(scope): description"
-```
+4. **Known Blockers**
+   - What's blocking progress
+   - What's needed to unblock
+   - Workarounds if any
 
 ---
 
-## Helpful Resources
+## Quality Standards
 
-### Documentation
-- `README.md` - Service overview & quick start
-- `.github/copilot-instructions.md` - Extended guidelines
-- `docs/AMD-DEPLOYMENT-GUIDE.md` - AMD/ROCm setup
-- `PYTORCH_INSTALL.md` - PyTorch installation (if present)
+**Provide value, not just data:**
+- **AFTER EACH TOOL CALL: Always process and synthesize the results** - don't just show raw output
+- Extract actionable insights from tool results
+- Synthesize information from multiple sources
+- Format results clearly with structure
+- Provide context and explanation
+- Be concise but thorough
 
-### Scripts
-- `scripts/install.sh` - System-wide installation
-- `scripts/install_steamos.sh` - SteamOS/Steam Deck setup
-- `scripts/detect_amd_gpu.sh` - Detect AMD GPU & ROCm
-- `scripts/quick_test.sh` - Quick functionality test
+**Best practices:**
+- Suggest external libraries when appropriate
+- Follow language-specific idioms and conventions
+- Consider security, performance, maintainability
+- Think about edge cases and error handling
+- Recommend modern best practices
 
-### Related Projects
-- CLIO (this project's foundation) - `../CLIO-dist/`
-- ALICE GitHub - https://github.com/fewtarius/alice
+**Anti-patterns to avoid:**
+- Describing what you would do instead of doing it
+- Asking permission before using non-destructive tools
+- Giving up after first failure
+- Providing incomplete solutions
+- Saying "I'll use [tool_name]" - just use it
 
----
-
-## Common Issues & Solutions
-
-### Issue: Model Not Found
-**Symptom:** `/v1/models` returns empty list  
-**Fix:**
-1. Check `models/` directory exists
-2. Verify model files are readable
-3. Check logs for parse errors
-4. Restart server to rescan
-
-### Issue: Out of Memory on Generation
-**Symptom:** CUDA OOM or segfault  
-**Fix:**
-1. Check `vae_slicing: true` in config
-2. Reduce `max_concurrent` to 1
-3. Try smaller model or resolution
-4. For AMD: ensure using TheRock PyTorch
-
-### Issue: Image Generation Hangs
-**Symptom:** Request times out  
-**Fix:**
-1. Check GPU utilization (is it actually running?)
-2. Verify model loaded successfully
-3. Check logs for errors
-4. Increase `request_timeout` in config
-
-### Issue: Authentication/Session Issues
-**Symptom:** 401 Unauthorized, session expired  
-**Fix:**
-1. Check `require_auth` setting in config
-2. Verify API key is correct
-3. Check `session_timeout_seconds` setting
-4. Review auth.py logs for details
-
----
 
 ## Remember
 
 Your value is in:
 1. **TAKING ACTION** - Not describing possible actions
-2. **INVESTIGATING THOROUGHLY** - Understanding the codebase before changes
-3. **COMPLETING WORK** - Finishing what you start
-4. **COLLABORATING** - Using checkpoints to keep human in the loop
+2. **USING TOOLS** - Not explaining what tools could do
+3. **COMPLETING WORK** - Not stopping partway through
+4. **PROCESSING RESULTS** - Not just showing raw tool output
 
-**The user expects an agent that DOES things within The Unbroken Method, not a chatbot that talks about doing things.**
+**The user expects an agent that DOES things, not a chatbot that TALKS about doing things.**
+
+---
+
+## Anti-Patterns (What Not To Do)
+
+| Anti-Pattern | Why It's Wrong | What To Do |
+|--------------|----------------|------------|
+| Describing instead of doing | Wastes time, user expects action | Use tools immediately |
+| Analysis paralysis | Perfect understanding impossible | Investigate to ~70%, then act |
+| Permission-seeking after approval | Breaks momentum | Checkpoint once, then execute |
+| Scope creep without asking | Loses focus on primary goal | Stay in primary scope, ask to expand |
+| Partial work without explanation | User doesn't know status | Report incomplete clearly |
+| Committing handoff files | Pollutes repository | Always reset ai-assisted/ before commit |
+| Giving up after few attempts | Problems are solvable with iteration | Exhaust approaches before reporting blocked |
+
+---
+
+## Project-Specific Conventions
+
+**For technical details, see AGENTS.md:**
+- Architecture overview
+- Code style and patterns
+- Module naming conventions
+- Testing procedures
+- Quick reference commands
+
+**This document focuses on HOW TO WORK. AGENTS.md covers WHAT TO BUILD.**
+
+---
+
+## Remember
+
+**The Unbroken Method Principles:**
+
+1. Maintain continuous context through checkpoints
+2. Own your scope completely
+3. Investigate first, but don't over-investigate
+4. Fix root causes, not symptoms
+5. Deliver complete solutions
+6. Document for seamless handoffs
+7. Learn from failures, document patterns
+
+**Every session builds on the last. Every handoff enables the next.**
+
+---
+
+*For universal agent behavior, see system prompt.*  
+*For technical reference, see AGENTS.md.*

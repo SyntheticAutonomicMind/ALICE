@@ -45,9 +45,14 @@ test_images/
 dist-creation.log
 dist-build.log
 
-# CLIO AI Assistant
+# Transient Data
 ai-assisted/202*
 scratch/
+reference/
+data/
+build/
+
+# CLIO AI Assistant
 .clio/logs/
 .clio/sessions/
 .clio/memory/
