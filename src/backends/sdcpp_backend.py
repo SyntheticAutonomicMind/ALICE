@@ -9,6 +9,8 @@ Executes sd-cli binary as subprocess for image generation.
 """
 
 import asyncio
+import glob
+import json
 import logging
 import subprocess
 import time
@@ -63,6 +65,13 @@ class SDCppBackend(BaseBackend):
         sdcpp_threads: int = 8,
         vae_on_cpu: bool = False,
         vae_decode_cpu: bool = False,  # Alias for vae_on_cpu (from PyTorch config)
+        enable_vae_tiling: bool = False,
+        enable_mmap: bool = False,
+        keep_clip_on_cpu: bool = False,
+        enable_model_cpu_offload: bool = False,
+        diffusion_conv_direct: bool = False,
+        vae_conv_direct: bool = False,
+        circular: bool = False,
         **kwargs
     ):
         """
@@ -79,6 +88,13 @@ class SDCppBackend(BaseBackend):
             sdcpp_threads: CPU threads for Vulkan operations
             vae_on_cpu: Keep VAE in CPU to reduce VRAM usage
             vae_decode_cpu: Alias for vae_on_cpu (PyTorch config compatibility)
+            enable_vae_tiling: Process VAE in tiles to reduce memory usage
+            enable_mmap: Memory-map model weights (can reduce RAM usage)
+            keep_clip_on_cpu: Keep CLIP encoder in CPU (for low VRAM)
+            enable_model_cpu_offload: Offload model weights to RAM (auto-load to VRAM as needed)
+            diffusion_conv_direct: Use ggml_conv2d_direct in diffusion model (potentially faster)
+            vae_conv_direct: Use ggml_conv2d_direct in VAE model (potentially faster)
+            circular: Enable circular padding for seamless/tiling images
         """
         self.images_dir = Path(images_dir)
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -90,9 +106,18 @@ class SDCppBackend(BaseBackend):
         self.default_height = default_height
         self.sdcpp_threads = sdcpp_threads
         self.vae_on_cpu = vae_on_cpu or vae_decode_cpu  # Use either parameter
+        self.enable_vae_tiling = enable_vae_tiling
+        self.enable_mmap = enable_mmap
+        self.keep_clip_on_cpu = keep_clip_on_cpu
+        self.enable_model_cpu_offload = enable_model_cpu_offload
+        self.diffusion_conv_direct = diffusion_conv_direct
+        self.vae_conv_direct = vae_conv_direct
+        self.circular = circular
         
         # Log initialization parameters
-        logger.info(f"SDCppBackend init: vae_on_cpu={vae_on_cpu}, vae_decode_cpu={vae_decode_cpu}, final={self.vae_on_cpu}")
+        logger.info(f"SDCppBackend init: vae_on_cpu={self.vae_on_cpu}, vae_tiling={self.enable_vae_tiling}, "
+                   f"mmap={self.enable_mmap}, clip_cpu={self.keep_clip_on_cpu}, "
+                   f"model_offload={self.enable_model_cpu_offload}")
         
         # Auto-detect or validate binary
         if sdcpp_binary is None:
@@ -260,9 +285,33 @@ class SDCppBackend(BaseBackend):
         # VAE on CPU for low VRAM systems
         if self.vae_on_cpu:
             cmd.append("--vae-on-cpu")
-            logger.info("VAE on CPU enabled (vae_on_cpu=%s)", self.vae_on_cpu)
-        else:
-            logger.warning("VAE on CPU NOT enabled (vae_on_cpu=%s)", self.vae_on_cpu)
+        
+        # VAE tiling for large images
+        if self.enable_vae_tiling:
+            cmd.append("--vae-tiling")
+        
+        # Memory mapping
+        if self.enable_mmap:
+            cmd.append("--mmap")
+        
+        # CLIP on CPU
+        if self.keep_clip_on_cpu:
+            cmd.append("--clip-on-cpu")
+        
+        # Model CPU offload
+        if self.enable_model_cpu_offload:
+            cmd.append("--offload-to-cpu")
+        
+        # Direct convolution optimizations
+        if self.diffusion_conv_direct:
+            cmd.append("--diffusion-conv-direct")
+        
+        if self.vae_conv_direct:
+            cmd.append("--vae-conv-direct")
+        
+        # Circular padding for seamless images
+        if self.circular:
+            cmd.append("--circular")
         
         # LoRA support check
         if lora_paths:
@@ -361,6 +410,16 @@ class SDCppBackend(BaseBackend):
         Returns:
             Dict with GPU details (name, type, driver, VRAM if available, gpu_available)
         """
+        info = {
+            "type": "vulkan",
+            "backend": "stable-diffusion.cpp",
+            "gpu_available": True,
+            "stats_available": False,
+            "memory_used": "0 GB",
+            "memory_total": "0 GB",
+            "utilization": 0.0,
+        }
+        
         try:
             # Try to get Vulkan device info via vulkaninfo
             result = subprocess.run(
@@ -383,27 +442,85 @@ class SDCppBackend(BaseBackend):
                             device_name = parts[1].strip()
                             break
                 
-                return {
-                    "type": "vulkan",
-                    "name": device_name,
-                    "driver": "Vulkan",
-                    "backend": "stable-diffusion.cpp",
-                    "gpu_available": True,
-                    "stats_available": False,
-                }
+                info["name"] = device_name
+                info["driver"] = "Vulkan"
             
         except (subprocess.TimeoutExpired, FileNotFoundError):
             logger.debug("vulkaninfo not available, using generic Vulkan info")
+            info["name"] = "Vulkan Device"
+            info["driver"] = "Vulkan"
         
-        # Fallback
-        return {
-            "type": "vulkan",
-            "name": "Vulkan Device",
-            "driver": "Vulkan",
-            "backend": "stable-diffusion.cpp",
-            "gpu_available": True,
-            "stats_available": False,
-        }
+        # Try to get AMD GPU stats from multiple sources
+        # Priority: sysfs (fastest) -> rocm-smi (if available)
+        
+        # Method 1: AMD sysfs (works on all AMD GPUs with kernel driver)
+        try:
+            gpu_cards = glob.glob('/sys/class/drm/card*/device/mem_info_vram_total')
+            
+            if gpu_cards:
+                card_path = Path(gpu_cards[0]).parent
+                
+                # Read VRAM stats
+                vram_total_path = card_path / 'mem_info_vram_total'
+                vram_used_path = card_path / 'mem_info_vram_used'
+                gpu_busy_path = card_path / 'gpu_busy_percent'
+                
+                if vram_total_path.exists() and vram_used_path.exists():
+                    vram_total = int(vram_total_path.read_text().strip())
+                    vram_used = int(vram_used_path.read_text().strip())
+                    
+                    info["memory_used"] = f"{vram_used / (1024**3):.1f} GB"
+                    info["memory_total"] = f"{vram_total / (1024**3):.1f} GB"
+                    info["utilization"] = vram_used / vram_total if vram_total > 0 else 0.0
+                    info["stats_available"] = True
+                    info["stats_source"] = "sysfs"
+                    
+                    # Try to get GPU busy percent if available
+                    if gpu_busy_path.exists():
+                        try:
+                            gpu_busy = int(gpu_busy_path.read_text().strip())
+                            info["gpu_busy_percent"] = gpu_busy
+                        except (ValueError, IOError):
+                            pass
+                    
+                    return info  # Success via sysfs
+                        
+        except (FileNotFoundError, ValueError, IOError, IndexError):
+            logger.debug("AMD sysfs stats not available")
+        
+        # Method 2: rocm-smi (if installed)
+        try:
+            result = subprocess.run(
+                ["rocm-smi", "--showmeminfo", "vram", "--json"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=2,
+                check=False
+            )
+            
+            if result.returncode == 0:
+                data = json.loads(result.stdout.decode('utf-8'))
+                
+                # Parse ROCm memory info
+                if isinstance(data, dict):
+                    # Try to find first GPU card entry
+                    for key, value in data.items():
+                        if key.startswith('card'):
+                            vram_used = value.get('VRAM Total Used Memory (B)', 0)
+                            vram_total = value.get('VRAM Total Memory (B)', 0)
+                            
+                            if vram_total > 0:
+                                info["memory_used"] = f"{vram_used / (1024**3):.1f} GB"
+                                info["memory_total"] = f"{vram_total / (1024**3):.1f} GB"
+                                info["utilization"] = vram_used / vram_total
+                                info["stats_available"] = True
+                                info["stats_source"] = "rocm-smi"
+                                return info  # Success via rocm-smi
+                            break
+        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError, KeyError):
+            logger.debug("rocm-smi not available")
+        
+        return info
     
     @property
     def current_model(self) -> Optional[str]:
