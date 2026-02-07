@@ -127,6 +127,9 @@ def get_backend(
         try:
             from .pytorch_backend import PyTorchBackend
             backend_class = PyTorchBackend
+            # Filter kwargs - remove sdcpp-specific params
+            filtered_kwargs = {k: v for k, v in kwargs.items() 
+                              if k not in ('sdcpp_binary', 'sdcpp_threads')}
         except ImportError as e:
             raise RuntimeError(f"PyTorch backend not available: {e}")
     
@@ -134,6 +137,14 @@ def get_backend(
         try:
             from .sdcpp_backend import SDCppBackend
             backend_class = SDCppBackend
+            # Filter kwargs - remove pytorch-specific params
+            pytorch_params = {
+                'force_cpu', 'device_map', 'force_float32', 'force_bfloat16',
+                'enable_vae_slicing', 'enable_vae_tiling', 'enable_model_cpu_offload',
+                'enable_sequential_cpu_offload', 'attention_slice_size', 'vae_decode_cpu',
+                'enable_torch_compile', 'torch_compile_mode', 'max_concurrent_generations'
+            }
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k not in pytorch_params}
         except ImportError as e:
             raise RuntimeError(f"SDCpp backend not available: {e}")
     
@@ -152,7 +163,8 @@ def get_backend(
     
     # Create and return backend instance
     logger.info("Creating backend: %s", backend_class.get_backend_name())
-    return backend_class(images_dir=images_dir, **kwargs)
+    return backend_class(images_dir=images_dir, **filtered_kwargs)
+
 
 
 __all__ = [

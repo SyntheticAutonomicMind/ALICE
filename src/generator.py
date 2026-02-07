@@ -186,6 +186,17 @@ class GeneratorService:
             return self._backend.get_queue_depth()
         return 0
     
+    def get_active_generations(self) -> int:
+        """
+        Get number of currently executing generations.
+        
+        Note: Not all backends support this metric.
+        Returns 0 if backend doesn't implement this.
+        """
+        if hasattr(self._backend, 'get_active_generations'):
+            return self._backend.get_active_generations()
+        return 0
+    
     def get_average_generation_time(self) -> float:
         """
         Get average generation time.

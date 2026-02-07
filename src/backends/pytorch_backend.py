@@ -15,14 +15,17 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, Type, List
+from typing import Optional, Dict, Any, Tuple, Type, List, TYPE_CHECKING
 
 import torch
 from PIL import Image
-from compel import CompelForSDXL
 
 from .base import BaseBackend
 from ..cancellation import CancellationToken, CancellationError
+
+# Lazy import CompelForSDXL only when needed to avoid torchvision import at module load
+if TYPE_CHECKING:
+    from compel import CompelForSDXL
 
 logger = logging.getLogger(__name__)
 
@@ -513,6 +516,14 @@ class PyTorchBackend(BaseBackend):
     def get_queue_depth(self) -> int:
         """Get current number of pending generation requests."""
         return self._pending_requests
+    
+    def get_active_generations(self) -> int:
+        """Get number of currently executing generations."""
+        # Number of currently executing = total pending - waiting in queue
+        # Since we have a semaphore limiting concurrent generations, active = min(pending, max_concurrent)
+        if self._pending_requests == 0:
+            return 0
+        return min(self._pending_requests, self._max_concurrent)
     
     def get_gpu_info(self) -> Dict[str, Any]:
         """Get GPU information."""

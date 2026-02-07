@@ -75,9 +75,11 @@ install_alice() {
             # See: https://github.com/ROCm/TheRock/blob/main/RELEASES.md
             log_info "Installing PyTorch with TheRock ROCm support (gfx110X family)..."
             log_info "This includes native gfx1103 (Phoenix/780M) support!"
+            # CRITICAL: Do NOT use --pre flag! It installs incompatible nightly builds.
+            # Use only --index-url to get stable 2.10.0 builds.
             "${ALICE_DIR}/venv/bin/pip" install \
                 --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ \
-                --pre torch torchaudio torchvision
+                torch torchaudio torchvision
         elif [[ "$gfx_arch" == "gfx90c" ]]; then
             # Cezanne/Renoir APUs (Ryzen 5000/4000 series)
             # These APUs need special handling similar to gfx1103:
