@@ -127,9 +127,15 @@ def get_backend(
         try:
             from .pytorch_backend import PyTorchBackend
             backend_class = PyTorchBackend
-            # Filter kwargs - remove sdcpp-specific params
-            filtered_kwargs = {k: v for k, v in kwargs.items() 
-                              if k not in ('sdcpp_binary', 'sdcpp_threads')}
+            # Filter kwargs - remove sdcpp/vulkan-specific params
+            vulkan_only_params = {
+                'sdcpp_binary', 'sdcpp_threads',
+                'enable_mmap', 'keep_clip_on_cpu',
+                'diffusion_conv_direct', 'vae_conv_direct',
+                'circular', 'enable_flash_attention',
+                'max_concurrent_generations'  # Generator-level, not backend
+            }
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k not in vulkan_only_params}
         except ImportError as e:
             raise RuntimeError(f"PyTorch backend not available: {e}")
     
