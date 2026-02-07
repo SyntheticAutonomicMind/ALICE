@@ -126,10 +126,15 @@ async def lifespan(app: FastAPI):
         enable_vae_tiling=config.generation.enable_vae_tiling,
         enable_model_cpu_offload=config.generation.enable_model_cpu_offload,
         enable_sequential_cpu_offload=config.generation.enable_sequential_cpu_offload,
+        enable_mmap=config.generation.enable_mmap,
+        keep_clip_on_cpu=config.generation.keep_clip_on_cpu,
         attention_slice_size=config.generation.attention_slice_size,
         vae_decode_cpu=config.generation.vae_decode_cpu,
         enable_torch_compile=config.generation.enable_torch_compile,
         torch_compile_mode=config.generation.torch_compile_mode,
+        diffusion_conv_direct=config.generation.diffusion_conv_direct,
+        vae_conv_direct=config.generation.vae_conv_direct,
+        circular=config.generation.circular,
         max_concurrent_generations=config.generation.max_concurrent,
     )
     download_manager = DownloadManager(

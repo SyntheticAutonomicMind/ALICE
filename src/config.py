@@ -57,17 +57,23 @@ class GenerationConfig(BaseModel):
     device_map: Optional[str] = Field(default=None, description="Device map for model loading (e.g., 'balanced' for AMD APUs)")
     force_float32: bool = Field(default=False, description="Force float32 (required for some AMD GPUs)")
     force_bfloat16: bool = Field(default=False, description="Force bfloat16 (better for AMD Phoenix APU)")
-    # Memory optimization settings
-    enable_vae_slicing: bool = Field(default=True, description="Enable VAE slicing for lower memory usage")
-    enable_vae_tiling: bool = Field(default=False, description="Enable VAE tiling for very large images")
-    enable_model_cpu_offload: bool = Field(default=False, description="Enable model CPU offload (slower but uses less VRAM)")
-    enable_sequential_cpu_offload: bool = Field(default=False, description="Enable sequential CPU offload (slowest, minimum VRAM)")
-    attention_slice_size: Optional[str] = Field(default="auto", description="Attention slice size: 'auto', 'max', or number")
+    # Memory optimization settings (shared by PyTorch and Vulkan where applicable)
+    enable_vae_slicing: bool = Field(default=True, description="Enable VAE slicing for lower memory usage (PyTorch only)")
+    enable_vae_tiling: bool = Field(default=False, description="Enable VAE tiling for very large images (both backends)")
+    enable_model_cpu_offload: bool = Field(default=False, description="Enable model CPU offload (both backends - slower but uses less VRAM)")
+    enable_sequential_cpu_offload: bool = Field(default=False, description="Enable sequential CPU offload (PyTorch only - slowest, minimum VRAM)")
+    enable_mmap: bool = Field(default=False, description="Memory-map model weights (Vulkan only - can reduce RAM usage)")
+    keep_clip_on_cpu: bool = Field(default=False, description="Keep CLIP encoder in CPU (Vulkan only - for low VRAM)")
+    attention_slice_size: Optional[str] = Field(default="auto", description="Attention slice size: 'auto', 'max', or number (PyTorch only)")
     # AMD gfx1103 workaround: decode VAE on CPU to prevent GPU hang during decode
-    vae_decode_cpu: bool = Field(default=False, description="Decode VAE on CPU (fixes GPU hang on AMD gfx1103)")
+    vae_decode_cpu: bool = Field(default=False, description="Decode VAE on CPU (Vulkan: fixes GPU hang on AMD gfx1103)")
     # Performance optimization settings
     enable_torch_compile: bool = Field(default=False, description="Enable torch.compile for UNet (PyTorch 2.0+, 30-50% speedup after warmup)")
     torch_compile_mode: str = Field(default="reduce-overhead", description="Torch compile mode: 'default', 'reduce-overhead', 'max-autotune'")
+    # Advanced Vulkan optimizations
+    diffusion_conv_direct: bool = Field(default=False, description="Use direct conv2d in diffusion model (Vulkan only - potentially faster)")
+    vae_conv_direct: bool = Field(default=False, description="Use direct conv2d in VAE model (Vulkan only - potentially faster)")
+    circular: bool = Field(default=False, description="Enable circular padding for seamless/tiling images (Vulkan only)")
 
 
 class StorageConfig(BaseModel):

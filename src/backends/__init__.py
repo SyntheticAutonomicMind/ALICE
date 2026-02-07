@@ -137,14 +137,16 @@ def get_backend(
         try:
             from .sdcpp_backend import SDCppBackend
             backend_class = SDCppBackend
-            # Filter kwargs - remove pytorch-specific params (but keep vae_decode_cpu)
-            pytorch_params = {
+            # Filter kwargs - remove pytorch-only params (keep shared params like enable_vae_tiling)
+            pytorch_only_params = {
                 'force_cpu', 'device_map', 'force_float32', 'force_bfloat16',
-                'enable_vae_slicing', 'enable_vae_tiling', 'enable_model_cpu_offload',
-                'enable_sequential_cpu_offload', 'attention_slice_size',
-                'enable_torch_compile', 'torch_compile_mode', 'max_concurrent_generations'
+                'enable_vae_slicing',  # PyTorch-specific
+                'enable_sequential_cpu_offload',  # PyTorch-specific
+                'attention_slice_size',  # PyTorch-specific
+                'enable_torch_compile', 'torch_compile_mode',  # PyTorch-specific
+                'max_concurrent_generations'  # Generator-level, not backend
             }
-            filtered_kwargs = {k: v for k, v in kwargs.items() if k not in pytorch_params}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k not in pytorch_only_params}
         except ImportError as e:
             raise RuntimeError(f"SDCpp backend not available: {e}")
     

@@ -47,10 +47,15 @@ class GeneratorService:
         enable_vae_tiling: bool = False,
         enable_model_cpu_offload: bool = False,
         enable_sequential_cpu_offload: bool = False,
+        enable_mmap: bool = False,
+        keep_clip_on_cpu: bool = False,
         attention_slice_size: Optional[str] = None,
         vae_decode_cpu: bool = False,
         enable_torch_compile: bool = False,
         torch_compile_mode: str = "default",
+        diffusion_conv_direct: bool = False,
+        vae_conv_direct: bool = False,
+        circular: bool = False,
         max_concurrent_generations: int = 1,
     ):
         """
@@ -96,10 +101,15 @@ class GeneratorService:
             enable_vae_tiling=enable_vae_tiling,
             enable_model_cpu_offload=enable_model_cpu_offload,
             enable_sequential_cpu_offload=enable_sequential_cpu_offload,
+            enable_mmap=enable_mmap,
+            keep_clip_on_cpu=keep_clip_on_cpu,
             attention_slice_size=attention_slice_size,
             vae_decode_cpu=vae_decode_cpu,
             enable_torch_compile=enable_torch_compile,
             torch_compile_mode=torch_compile_mode,
+            diffusion_conv_direct=diffusion_conv_direct,
+            vae_conv_direct=vae_conv_direct,
+            circular=circular,
             max_concurrent_generations=max_concurrent_generations,
         )
         
