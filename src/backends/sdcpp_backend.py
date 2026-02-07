@@ -65,13 +65,14 @@ class SDCppBackend(BaseBackend):
         sdcpp_threads: int = 8,
         vae_on_cpu: bool = False,
         vae_decode_cpu: bool = False,  # Alias for vae_on_cpu (from PyTorch config)
-        enable_vae_tiling: bool = False,
+        enable_vae_tiling: bool = False,  # WARNING: VAE tiling is SLOWER on Vulkan for typical resolutions (<2048px)
         enable_mmap: bool = False,
         keep_clip_on_cpu: bool = False,
         enable_model_cpu_offload: bool = False,
-        diffusion_conv_direct: bool = False,
-        vae_conv_direct: bool = False,
+        diffusion_conv_direct: bool = False,  # NOT recommended - actually slower than default
+        vae_conv_direct: bool = True,  # RECOMMENDED - 3x faster VAE decode with direct conv2d
         circular: bool = False,
+        enable_flash_attention: bool = True,  # RECOMMENDED - faster with COOPMAT1 + reduces memory
         **kwargs
     ):
         """
@@ -95,6 +96,7 @@ class SDCppBackend(BaseBackend):
             diffusion_conv_direct: Use ggml_conv2d_direct in diffusion model (potentially faster)
             vae_conv_direct: Use ggml_conv2d_direct in VAE model (potentially faster)
             circular: Enable circular padding for seamless/tiling images
+            enable_flash_attention: Use flash attention in diffusion model (FASTER with COOPMAT1 AND lower memory)
         """
         self.images_dir = Path(images_dir)
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -113,6 +115,7 @@ class SDCppBackend(BaseBackend):
         self.diffusion_conv_direct = diffusion_conv_direct
         self.vae_conv_direct = vae_conv_direct
         self.circular = circular
+        self.enable_flash_attention = enable_flash_attention
         
         # Log initialization parameters
         logger.info(f"SDCppBackend init: vae_on_cpu={self.vae_on_cpu}, vae_tiling={self.enable_vae_tiling}, "
@@ -313,6 +316,10 @@ class SDCppBackend(BaseBackend):
         if self.circular:
             cmd.append("--circular")
         
+        # Flash attention for memory efficiency (critical for AMD iGPUs with limited VRAM)
+        if self.enable_flash_attention:
+            cmd.append("--diffusion-fa")
+        
         # LoRA support check
         if lora_paths:
             logger.warning("LoRA support not yet implemented for sd.cpp backend")
@@ -323,7 +330,8 @@ class SDCppBackend(BaseBackend):
         
         # Log command (sanitized)
         logger.info(f"Executing sd-cli: steps={steps}, scheduler={sdcpp_scheduler}, size={width}x{height}")
-        logger.debug(f"Full command: {' '.join(cmd)}")
+        logger.info(f"Output path: {output_path}")
+        logger.info(f"Full command: {' '.join(cmd)}")
         
         # Execute subprocess in thread pool (don't block event loop)
         loop = asyncio.get_event_loop()
@@ -340,7 +348,9 @@ class SDCppBackend(BaseBackend):
         
         try:
             # Run in executor
+            logger.info("Starting sd-cli execution...")
             result = await loop.run_in_executor(None, _run_subprocess)
+            logger.info(f"sd-cli completed with return code: {result.returncode}")
             
             # Check cancellation
             if cancellation_token and cancellation_token.is_cancelled():
@@ -349,22 +359,38 @@ class SDCppBackend(BaseBackend):
                     output_path.unlink()
                 raise CancellationError("Generation cancelled")
             
+            # Log stdout and stderr for debugging
+            stdout = result.stdout.decode('utf-8', errors='replace')
+            stderr = result.stderr.decode('utf-8', errors='replace')
+            if stdout:
+                logger.info(f"sd-cli stdout: {stdout[:500]}")
+            if stderr:
+                logger.info(f"sd-cli stderr: {stderr[:500]}")
+            
             # Check exit code
             if result.returncode != 0:
-                error_msg = result.stderr.decode('utf-8', errors='replace')
+                error_msg = stderr
                 logger.error(f"sd-cli failed with code {result.returncode}: {error_msg}")
                 raise RuntimeError(f"Image generation failed: {error_msg}")
             
-            # Verify output file exists
+            # Verify output file exists with multiple checks
+            logger.info(f"Checking for output file: {output_path}")
+            logger.info(f"Output path exists: {output_path.exists()}")
+            logger.info(f"Output path is_file: {output_path.is_file() if output_path.exists() else 'N/A'}")
+            
+            # Try listing directory contents
+            try:
+                dir_contents = list(self.images_dir.glob(f"{image_id}*"))
+                logger.info(f"Files matching {image_id}*: {dir_contents}")
+            except Exception as e:
+                logger.warning(f"Could not list directory: {e}")
+            
             if not output_path.exists():
                 logger.error(f"sd-cli succeeded but output file not found: {output_path}")
+                logger.error(f"Directory {self.images_dir} contains: {list(self.images_dir.iterdir())[:10]}")
                 raise RuntimeError("Image generation completed but output file not created")
             
             elapsed = time.time() - start_time
-            
-            # Parse stdout for any useful info
-            stdout = result.stdout.decode('utf-8', errors='replace')
-            stderr = result.stderr.decode('utf-8', errors='replace')
             
             # Build metadata
             metadata = {
@@ -499,7 +525,8 @@ class SDCppBackend(BaseBackend):
             )
             
             if result.returncode == 0:
-                data = json.loads(result.stdout.decode('utf-8'))
+                import json as json_module
+                data = json_module.loads(result.stdout.decode('utf-8'))
                 
                 # Parse ROCm memory info
                 if isinstance(data, dict):
@@ -517,8 +544,8 @@ class SDCppBackend(BaseBackend):
                                 info["stats_source"] = "rocm-smi"
                                 return info  # Success via rocm-smi
                             break
-        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError, KeyError):
-            logger.debug("rocm-smi not available")
+        except Exception as e:
+            logger.debug(f"rocm-smi not available: {e}")
         
         return info
     

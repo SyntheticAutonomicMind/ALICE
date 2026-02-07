@@ -59,7 +59,7 @@ class GenerationConfig(BaseModel):
     force_bfloat16: bool = Field(default=False, description="Force bfloat16 (better for AMD Phoenix APU)")
     # Memory optimization settings (shared by PyTorch and Vulkan where applicable)
     enable_vae_slicing: bool = Field(default=True, description="Enable VAE slicing for lower memory usage (PyTorch only)")
-    enable_vae_tiling: bool = Field(default=False, description="Enable VAE tiling for very large images (both backends)")
+    enable_vae_tiling: bool = Field(default=False, description="Enable VAE tiling for very large images (PyTorch recommended, Vulkan only for >2048px - slower otherwise)")
     enable_model_cpu_offload: bool = Field(default=False, description="Enable model CPU offload (both backends - slower but uses less VRAM)")
     enable_sequential_cpu_offload: bool = Field(default=False, description="Enable sequential CPU offload (PyTorch only - slowest, minimum VRAM)")
     enable_mmap: bool = Field(default=False, description="Memory-map model weights (Vulkan only - can reduce RAM usage)")
@@ -71,9 +71,11 @@ class GenerationConfig(BaseModel):
     enable_torch_compile: bool = Field(default=False, description="Enable torch.compile for UNet (PyTorch 2.0+, 30-50% speedup after warmup)")
     torch_compile_mode: str = Field(default="reduce-overhead", description="Torch compile mode: 'default', 'reduce-overhead', 'max-autotune'")
     # Advanced Vulkan optimizations
-    diffusion_conv_direct: bool = Field(default=False, description="Use direct conv2d in diffusion model (Vulkan only - potentially faster)")
-    vae_conv_direct: bool = Field(default=False, description="Use direct conv2d in VAE model (Vulkan only - potentially faster)")
+    diffusion_conv_direct: bool = Field(default=False, description="Use direct conv2d in diffusion model (Vulkan only - NOT recommended, slower)")
+    vae_conv_direct: bool = Field(default=True, description="Use direct conv2d in VAE model (Vulkan only - RECOMMENDED, 3x faster VAE decode)")
     circular: bool = Field(default=False, description="Enable circular padding for seamless/tiling images (Vulkan only)")
+    # Flash attention - uses COOPMAT1 on AMD, faster AND uses less memory
+    enable_flash_attention: bool = Field(default=True, description="Enable flash attention in diffusion model (Vulkan only - faster AND lower memory on AMD with COOPMAT1)")
 
 
 class StorageConfig(BaseModel):

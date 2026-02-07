@@ -652,6 +652,56 @@
                                 <small style="color: var(--text-muted); font-size: 0.75rem;">For AMD APUs use 'balanced'</small>
                             </div>
                         </div>
+                        
+                        <!-- Vulkan Backend Optimizations -->
+                        <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: var(--radius);">
+                            <h4 style="font-size: 0.9rem; color: var(--primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                                </svg>
+                                Vulkan Backend Optimizations
+                                <small style="color: var(--text-muted); font-weight: normal;">(sd.cpp only)</small>
+                            </h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="setting-gen-flash-attention">Flash Attention</label>
+                                    <select id="setting-gen-flash-attention" data-key="generation.enable_flash_attention">
+                                        <option value="true">Enabled (Recommended)</option>
+                                        <option value="false">Disabled</option>
+                                    </select>
+                                    <small style="color: var(--success); font-size: 0.75rem;">⚡ Faster + lower memory with COOPMAT1</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-vae-conv-direct">VAE Conv Direct</label>
+                                    <select id="setting-gen-vae-conv-direct" data-key="generation.vae_conv_direct">
+                                        <option value="true">Enabled (Recommended)</option>
+                                        <option value="false">Disabled</option>
+                                    </select>
+                                    <small style="color: var(--success); font-size: 0.75rem;">⚡ 3x faster VAE decode</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-vae-tiling">VAE Tiling</label>
+                                    <select id="setting-gen-vae-tiling" data-key="generation.enable_vae_tiling">
+                                        <option value="false">Disabled (Recommended)</option>
+                                        <option value="true">Enabled</option>
+                                    </select>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">Only for >2048px images</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-gen-vae-decode-cpu">VAE on CPU</label>
+                                    <select id="setting-gen-vae-decode-cpu" data-key="generation.vae_decode_cpu">
+                                        <option value="false">No (GPU decode)</option>
+                                        <option value="true">Yes (CPU decode)</option>
+                                    </select>
+                                    <small style="color: var(--warning); font-size: 0.75rem;">Fixes GPU hang on AMD gfx1103</small>
+                                </div>
+                            </div>
+                            <div style="margin-top: 0.75rem; padding: 0.5rem; background: rgba(0, 0, 0, 0.2); border-radius: var(--radius-sm);">
+                                <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">
+                                    <strong>Optimal Vulkan config:</strong> Flash Attention ON, VAE Conv Direct ON, VAE Tiling OFF (unless images >2048px)
+                                </p>
+                            </div>
+                        </div>
                     </div>
                     
                     <!-- Storage Settings -->
@@ -1283,6 +1333,12 @@
                     document.getElementById('setting-gen-force-float32').value = config.generation.force_float32 ? 'true' : 'false';
                     document.getElementById('setting-gen-force-bfloat16').value = config.generation.force_bfloat16 ? 'true' : 'false';
                     document.getElementById('setting-gen-device-map').value = config.generation.device_map || '';
+                    
+                    // Vulkan optimization settings
+                    document.getElementById('setting-gen-flash-attention').value = config.generation.enable_flash_attention !== false ? 'true' : 'false';
+                    document.getElementById('setting-gen-vae-conv-direct').value = config.generation.vae_conv_direct !== false ? 'true' : 'false';
+                    document.getElementById('setting-gen-vae-tiling').value = config.generation.enable_vae_tiling ? 'true' : 'false';
+                    document.getElementById('setting-gen-vae-decode-cpu').value = config.generation.vae_decode_cpu ? 'true' : 'false';
                     
                     // Storage settings
                     document.getElementById('setting-storage-dir').value = config.storage.images_directory || '';

@@ -135,6 +135,7 @@ async def lifespan(app: FastAPI):
         diffusion_conv_direct=config.generation.diffusion_conv_direct,
         vae_conv_direct=config.generation.vae_conv_direct,
         circular=config.generation.circular,
+        enable_flash_attention=config.generation.enable_flash_attention,
         max_concurrent_generations=config.generation.max_concurrent,
     )
     download_manager = DownloadManager(

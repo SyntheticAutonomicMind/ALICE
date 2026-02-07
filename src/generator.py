@@ -56,6 +56,7 @@ class GeneratorService:
         diffusion_conv_direct: bool = False,
         vae_conv_direct: bool = False,
         circular: bool = False,
+        enable_flash_attention: bool = True,  # Default True - faster AND lower memory with COOPMAT1
         max_concurrent_generations: int = 1,
     ):
         """
@@ -110,6 +111,7 @@ class GeneratorService:
             diffusion_conv_direct=diffusion_conv_direct,
             vae_conv_direct=vae_conv_direct,
             circular=circular,
+            enable_flash_attention=enable_flash_attention,
             max_concurrent_generations=max_concurrent_generations,
         )
         
