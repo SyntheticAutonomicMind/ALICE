@@ -48,7 +48,7 @@ clone_repo() {
     else
         echo "Cloning stable-diffusion.cpp..."
         mkdir -p "$(dirname "$BUILD_DIR")"
-        git clone --recursive https://github.com/leejet/stable-diffusion.cpp "$BUILD_DIR"
+        git clone --recursive https://github.com/SyntheticAutonomicMind/stable-diffusion.cpp "$BUILD_DIR"
     fi
 }
 

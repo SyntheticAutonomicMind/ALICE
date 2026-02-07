@@ -243,7 +243,7 @@ generation:
 
 ```bash
 # Build stable-diffusion.cpp with Vulkan
-git clone --recursive https://github.com/leejet/stable-diffusion.cpp
+git clone --recursive https://github.com/SyntheticAutonomicMind/stable-diffusion.cpp
 cd stable-diffusion.cpp
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_VULKAN=ON
