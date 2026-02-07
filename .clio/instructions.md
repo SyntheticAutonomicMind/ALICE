@@ -44,6 +44,7 @@ The user has already provided their request. Your job is to break it into action
 - [CHECKPOINT REQUIRED] Checkpoint BEFORE making changes
 - [OK] Checkpoint AFTER implementation (show results)
 
+
 ### Session Start Protocol
 
 **When:** User gives multi-step request OR recovering from handoff
