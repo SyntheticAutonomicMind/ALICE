@@ -946,10 +946,15 @@
         
         // Open viewer by image ID (finds visual position in gallery)
         function openViewerByImageId(imageId) {
-            const visualIndex = visualImageOrder.findIndex(img => img && img.id === imageId);
-            if (visualIndex !== -1) {
-                currentViewerIndex = visualIndex;
-                openViewer(visualIndex);
+            // First try visual order, then fall back to filteredImages index
+            let index = visualImageOrder.findIndex(img => img && img.id === imageId);
+            if (index === -1) {
+                // Visual order not populated yet, use filteredImages
+                index = filteredImages.findIndex(img => img.id === imageId);
+            }
+            if (index !== -1) {
+                currentViewerIndex = index;
+                openViewer(index, true); // preserve state to keep viewer open
             }
         }
         
@@ -1209,7 +1214,7 @@
                 const { API, Toast } = window.SDAPI;
                 
                 // Get current tags from the image in our local data
-                const img = allImages.find(i => i.id === imageId);
+                const img = currentImages.find(i => i.id === imageId);
                 const currentTags = img?.tags || [];
                 
                 // Add new tag if not already present
@@ -1225,9 +1230,8 @@
                     Toast.success('Tag added');
                     await loadGallery();
                     
-                    // Reopen the same image
-                    const updatedImg = allImages.find(i => i.id === imageId);
-                    if (updatedImg) openViewer(updatedImg);
+                    // Reopen the same image after a short delay for DOM to update
+                    setTimeout(() => openViewerByImageId(imageId), 100);
                 } else {
                     Toast.warning('Tag already exists');
                 }
@@ -1242,7 +1246,7 @@
                 const { API, Toast } = window.SDAPI;
                 
                 // Get current tags
-                const img = allImages.find(i => i.id === imageId);
+                const img = currentImages.find(i => i.id === imageId);
                 const currentTags = img?.tags || [];
                 const newTags = currentTags.filter(t => t !== tagToRemove);
                 
@@ -1254,9 +1258,8 @@
                 Toast.success('Tag removed');
                 await loadGallery();
                 
-                // Reopen the same image
-                const updatedImg = allImages.find(i => i.id === imageId);
-                if (updatedImg) openViewer(updatedImg);
+                // Reopen the same image after a short delay for DOM to update
+                setTimeout(() => openViewerByImageId(imageId), 100);
             } catch (error) {
                 window.SDAPI.Toast.error('Failed to remove tag: ' + error.message);
             }
