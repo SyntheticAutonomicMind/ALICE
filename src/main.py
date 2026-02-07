@@ -2660,6 +2660,16 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
             "enable_sequential_cpu_offload": generation_cfg.get("enable_sequential_cpu_offload", False),
             "attention_slice_size": generation_cfg.get("attention_slice_size", "auto"),
             "vae_decode_cpu": generation_cfg.get("vae_decode_cpu", False),
+            # PyTorch-specific optimizations
+            "enable_torch_compile": generation_cfg.get("enable_torch_compile", False),
+            "torch_compile_mode": generation_cfg.get("torch_compile_mode", "reduce-overhead"),
+            # Vulkan/sdcpp-specific optimizations
+            "enable_flash_attention": generation_cfg.get("enable_flash_attention", True),
+            "vae_conv_direct": generation_cfg.get("vae_conv_direct", True),
+            "diffusion_conv_direct": generation_cfg.get("diffusion_conv_direct", False),
+            "enable_mmap": generation_cfg.get("enable_mmap", False),
+            "keep_clip_on_cpu": generation_cfg.get("keep_clip_on_cpu", False),
+            "circular": generation_cfg.get("circular", False),
         },
         "storage": {
             "images_directory": str(storage_cfg.get("images_directory", "./images")),

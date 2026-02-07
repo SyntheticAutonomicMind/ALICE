@@ -526,7 +526,7 @@ class PyTorchBackend(BaseBackend):
         return min(self._pending_requests, self._max_concurrent)
     
     def get_gpu_info(self) -> Dict[str, Any]:
-        """Get GPU information."""
+        """Get GPU information with ROCm/AMD support."""
         info = {
             "device": self._device,
             "gpu_available": self._device in ("cuda", "mps"),
@@ -537,26 +537,146 @@ class PyTorchBackend(BaseBackend):
         }
         
         if self._device == "cuda":
+            # Check if this is ROCm (AMD) pretending to be CUDA
             try:
                 props = torch.cuda.get_device_properties(0)
-                allocated = torch.cuda.memory_allocated(0)
-                total = props.total_memory
+                device_name = props.name.lower()
+                is_amd = "radeon" in device_name or "amd" in device_name or "gfx" in device_name
                 
-                info["memory_used"] = f"{allocated / (1024**3):.1f} GB"
-                info["memory_total"] = f"{total / (1024**3):.1f} GB"
-                info["utilization"] = allocated / total if total > 0 else 0.0
-                info["gpu_name"] = props.name
-                info["stats_available"] = True
+                if is_amd:
+                    # AMD GPU with ROCm - use rocm-smi for accurate stats
+                    amd_stats = self._get_amd_gpu_stats()
+                    if amd_stats:
+                        info.update(amd_stats)
+                        info["gpu_name"] = props.name
+                        info["stats_available"] = True
+                    else:
+                        # Fallback to torch memory (less accurate for utilization)
+                        allocated = torch.cuda.memory_allocated(0)
+                        total = props.total_memory
+                        info["memory_used"] = f"{allocated / (1024**3):.1f} GB"
+                        info["memory_total"] = f"{total / (1024**3):.1f} GB"
+                        info["utilization"] = allocated / total if total > 0 else 0.0
+                        info["gpu_name"] = props.name
+                        info["stats_available"] = True
+                else:
+                    # NVIDIA GPU - use torch stats
+                    allocated = torch.cuda.memory_allocated(0)
+                    total = props.total_memory
+                    info["memory_used"] = f"{allocated / (1024**3):.1f} GB"
+                    info["memory_total"] = f"{total / (1024**3):.1f} GB"
+                    info["utilization"] = allocated / total if total > 0 else 0.0
+                    info["gpu_name"] = props.name
+                    info["stats_available"] = True
             except Exception as e:
-                logger.warning("Failed to get CUDA info: %s", e)
+                logger.warning("Failed to get CUDA/ROCm info: %s", e)
         elif self._device == "mps":
             # MPS (Apple Silicon) - PyTorch doesn't expose detailed memory stats yet
             info["gpu_name"] = "Apple Silicon (MPS)"
             info["stats_available"] = False
-            # MPS memory stats are not available through PyTorch API
             logger.debug("MPS device detected - detailed stats not available")
         
         return info
+    
+    def _get_amd_gpu_stats(self) -> Optional[Dict[str, Any]]:
+        """Get AMD GPU statistics using rocm-smi or sysfs fallback."""
+        import subprocess
+        import re
+        from pathlib import Path
+        
+        # Try rocm-smi first (most accurate)
+        try:
+            result = subprocess.run(
+                ["rocm-smi", "--showuse", "--showmeminfo", "vram", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            
+            if result.returncode == 0:
+                import json
+                data = json.loads(result.stdout)
+                
+                # Parse rocm-smi JSON output
+                # Format varies by version, try common structures
+                stats = {}
+                
+                # Try to find GPU 0 stats
+                if isinstance(data, dict):
+                    gpu_data = data.get("card0") or data.get("0") or next(iter(data.values()), {})
+                    
+                    # GPU utilization
+                    gpu_use = gpu_data.get("GPU use (%)", gpu_data.get("use", 0))
+                    if isinstance(gpu_use, str):
+                        gpu_use = float(gpu_use.strip("%"))
+                    stats["utilization"] = float(gpu_use) / 100.0
+                    
+                    # Memory info
+                    vram = gpu_data.get("VRAM Total Memory (B)", gpu_data.get("vram_total"))
+                    vram_used = gpu_data.get("VRAM Total Used Memory (B)", gpu_data.get("vram_used"))
+                    
+                    if vram:
+                        stats["memory_total"] = f"{int(vram) / (1024**3):.1f} GB"
+                    if vram_used:
+                        stats["memory_used"] = f"{int(vram_used) / (1024**3):.1f} GB"
+                    
+                    if stats:
+                        return stats
+                        
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError) as e:
+            logger.debug("rocm-smi failed, trying sysfs fallback: %s", e)
+        
+        # Fallback to sysfs (/sys/class/drm)
+        try:
+            drm_path = Path("/sys/class/drm")
+            
+            # Find AMD GPU card
+            for card_dir in sorted(drm_path.glob("card*")):
+                if not card_dir.is_dir():
+                    continue
+                
+                device_dir = card_dir / "device"
+                if not device_dir.exists():
+                    continue
+                
+                # Check if it's an AMD GPU
+                vendor_file = device_dir / "vendor"
+                if vendor_file.exists():
+                    vendor = vendor_file.read_text().strip()
+                    if vendor != "0x1002":  # AMD vendor ID
+                        continue
+                
+                stats = {}
+                
+                # GPU utilization
+                gpu_busy_file = device_dir / "gpu_busy_percent"
+                if gpu_busy_file.exists():
+                    try:
+                        busy_percent = int(gpu_busy_file.read_text().strip())
+                        stats["utilization"] = busy_percent / 100.0
+                    except (ValueError, IOError):
+                        pass
+                
+                # Memory usage
+                mem_info_file = device_dir / "mem_info_vram_used"
+                mem_total_file = device_dir / "mem_info_vram_total"
+                
+                if mem_info_file.exists() and mem_total_file.exists():
+                    try:
+                        used = int(mem_info_file.read_text().strip())
+                        total = int(mem_total_file.read_text().strip())
+                        stats["memory_used"] = f"{used / (1024**3):.1f} GB"
+                        stats["memory_total"] = f"{total / (1024**3):.1f} GB"
+                    except (ValueError, IOError):
+                        pass
+                
+                if stats:
+                    return stats
+                    
+        except Exception as e:
+            logger.debug("sysfs GPU stats failed: %s", e)
+        
+        return None
     
     def _apply_memory_optimizations(self) -> None:
         """Apply memory optimization settings to the loaded pipeline."""
@@ -698,8 +818,8 @@ class PyTorchBackend(BaseBackend):
             if self._is_single_file_sdxl:
                 try:
                     from compel import CompelForSDXL
-                    self._compel = CompelForSDXL(self._pipeline)
-                    logger.info("Initialized CompelForSDXL for long prompt support")
+                    self._compel = CompelForSDXL(self._pipeline, device=self._device)
+                    logger.info("Initialized CompelForSDXL for long prompt support (device=%s)", self._device)
                 except Exception as e:
                     logger.warning("Failed to initialize CompelForSDXL: %s", e)
             
@@ -1049,11 +1169,14 @@ class PyTorchBackend(BaseBackend):
                                     logger.debug("Embedding shapes: embeds=%s, pooled=%s", 
                                                 result.embeds.shape, result.pooled_embeds.shape)
                                     
+                                    # Ensure all embeddings are on the correct device
+                                    device = torch.device(self._device)
+                                    
                                     # Replace text prompts with pre-computed embeddings
-                                    pipeline_kwargs["prompt_embeds"] = result.embeds
-                                    pipeline_kwargs["negative_prompt_embeds"] = result.negative_embeds
-                                    pipeline_kwargs["pooled_prompt_embeds"] = result.pooled_embeds
-                                    pipeline_kwargs["negative_pooled_prompt_embeds"] = result.negative_pooled_embeds
+                                    pipeline_kwargs["prompt_embeds"] = result.embeds.to(device)
+                                    pipeline_kwargs["negative_prompt_embeds"] = result.negative_embeds.to(device)
+                                    pipeline_kwargs["pooled_prompt_embeds"] = result.pooled_embeds.to(device)
+                                    pipeline_kwargs["negative_pooled_prompt_embeds"] = result.negative_pooled_embeds.to(device)
                                     
                                     # Remove text prompts (using embeddings instead)
                                     del pipeline_kwargs["prompt"]
