@@ -7,15 +7,117 @@
     <link rel="stylesheet" href="/web/fonts/inter.css">
     <link rel="stylesheet" href="/web/style.css">
     <style>
-        /* Search section uses shared .toolbar from style.css */
+        /* Search toolbar - same pill design as gallery page */
         .search-section {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
             margin-bottom: 1.5rem;
+            flex-wrap: wrap;
         }
-        
-        .search-section .form-group {
-            margin-bottom: 0;
+
+        .search-section .search-item {
+            position: relative;
+            flex-shrink: 0;
         }
-        
+
+        .search-section .search-item select {
+            appearance: none;
+            -webkit-appearance: none;
+            padding: 0.5rem 2rem 0.5rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 9999px;
+            background-color: var(--bg-secondary);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.65rem center;
+            color: var(--text-primary);
+            font-size: 0.8125rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
+            white-space: nowrap;
+            line-height: 1.4;
+        }
+
+        .search-section .search-item select:hover {
+            border-color: var(--accent);
+            background-color: var(--bg-card);
+        }
+
+        .search-section .search-item select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .search-section .search-item.search-box {
+            flex: 1;
+            min-width: 200px;
+            position: relative;
+        }
+
+        .search-section .search-item.search-box::before {
+            content: '';
+            position: absolute;
+            left: 0.7rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 14px;
+            height: 14px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-size: contain;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .search-section .search-item.search-box input {
+            width: 100%;
+            padding: 0.5rem 0.75rem 0.5rem 2.1rem;
+            border: 1px solid var(--border);
+            border-radius: 9999px;
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 0.8125rem;
+            font-weight: 400;
+            transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
+            line-height: 1.4;
+            box-sizing: border-box;
+        }
+
+        .search-section .search-item.search-box input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-section .search-item.search-box input:hover {
+            border-color: var(--accent);
+            background-color: var(--bg-card);
+        }
+
+        .search-section .search-item.search-box input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .search-section .pill-btn {
+            border-radius: 9999px;
+            padding: 0.5rem 1.25rem;
+            font-size: 0.8125rem;
+            line-height: 1.4;
+        }
+
+        @media (max-width: 640px) {
+            .search-section {
+                gap: 0.4rem;
+            }
+            .search-section .search-item.search-box {
+                flex-basis: 100%;
+                min-width: unset;
+            }
+        }
+
         .source-tabs {
             display: flex;
             gap: 0.5rem;
@@ -312,11 +414,11 @@
                 </button>
             </div>
             
-            <div class="toolbar search-section">
-                <div class="toolbar-item toolbar-search">
+            <div class="search-section">
+                <div class="search-item search-box">
                     <input type="text" id="search-query" placeholder="Search for models..." autocomplete="off">
                 </div>
-                <div class="toolbar-item" id="type-filter-group">
+                <div class="search-item" id="type-filter-group">
                     <select id="type-filter">
                         <option value="">All Types</option>
                         <option value="Checkpoint">Checkpoints</option>
@@ -531,7 +633,7 @@
                         method: 'POST',
                         body: JSON.stringify({
                             query: query,
-                            limit: 1000  // Fetch more results for better search
+                            limit: 100
                         })
                     });
                     

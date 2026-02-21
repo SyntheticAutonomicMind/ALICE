@@ -1855,9 +1855,51 @@ async def search_civitai(
         )
         
         logger.info("Cache search returned %d models (total=%d)", len(models), total)
+        
+        # Transform cache rows to match the CivitAI live API format expected by frontend
+        # Note: search() already parses JSON fields and strips "civitai:" prefix from ID
+        # Cache has: id (int), thumbnail_url, download_url, metadata (dict), tags (list)
+        # Frontend expects: id, images=[url], versions=[{id, files:[{downloadUrl}]}], creator, etc.
+        transformed = []
+        for m in models:
+            try:
+                metadata = m.get("metadata") or {}
+                
+                images = []
+                if m.get("thumbnail_url"):
+                    images.append(m["thumbnail_url"])
+                
+                versions = []
+                version_id = metadata.get("version_id")
+                if version_id and m.get("download_url"):
+                    versions.append({
+                        "id": version_id,
+                        "name": metadata.get("version_name", "Latest"),
+                        "files": [{
+                            "downloadUrl": m["download_url"],
+                            "sizeKB": m.get("file_size", 0) / 1024 if m.get("file_size") else 0,
+                        }]
+                    })
+                
+                transformed.append({
+                    "id": m.get("id"),
+                    "name": m.get("name", "Unknown"),
+                    "type": m.get("type", "Unknown"),
+                    "creator": m.get("creator", "Unknown"),
+                    "images": images,
+                    "rating": m.get("rating", 0.0),
+                    "download_count": m.get("download_count", 0),
+                    "tags": m.get("tags", []),
+                    "nsfw": m.get("nsfw", False),
+                    "versions": versions,
+                })
+            except Exception as e:
+                logger.warning("Error transforming cached model %s: %s", m.get("id", "?"), e)
+                continue
+        
         return {
             "object": "list",
-            "data": models,
+            "data": transformed,
             "total": total,
             "page": request.page,
             "cached": True,
@@ -1905,12 +1947,43 @@ async def search_huggingface(
             offset=0,
         )
         
-        return {
-            "object": "list",
-            "data": models,
-            "total": total,
-            "cached": True,
-        }
+        # Transform cache rows to match HuggingFace live API format expected by frontend
+        # Note: search() already parses JSON fields and metadata
+        # Cache has: id (with huggingface: prefix stripped or not), creator, download_count, metadata (dict)
+        # Frontend expects: id="author/name", author, downloads, likes, pipeline_tag, tags
+        transformed = []
+        for m in models:
+            try:
+                metadata = m.get("metadata") or {}
+                hf_id = metadata.get("huggingface_id", m.get("id", ""))
+                # Strip prefix if present
+                if isinstance(hf_id, str) and hf_id.startswith("huggingface:"):
+                    hf_id = hf_id[len("huggingface:"):]
+                
+                transformed.append({
+                    "id": hf_id,
+                    "author": m.get("creator", "Unknown"),
+                    "last_modified": m.get("updated_at", ""),
+                    "downloads": m.get("download_count", 0),
+                    "likes": metadata.get("likes", 0),
+                    "tags": m.get("tags", []),
+                    "pipeline_tag": metadata.get("pipeline_tag"),
+                })
+            except Exception as e:
+                logger.warning("Error transforming cached HF model: %s", e)
+                continue
+        
+        # Only return cache results if we actually have HF models cached
+        # Otherwise fall through to live API (HF cache may not be synced yet)
+        if transformed:
+            return {
+                "object": "list",
+                "data": transformed,
+                "total": total,
+                "cached": True,
+            }
+        else:
+            logger.info("HuggingFace cache empty, falling through to live API")
     
     # Fallback to live API search
     if download_manager is None:

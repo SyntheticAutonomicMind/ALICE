@@ -513,7 +513,9 @@ class ModelCacheService:
             
             # Get thumbnail
             images = latest_version.get("images", [])
-            thumbnail = images[0].get("url") if images else None
+            thumbnail = None
+            if images and images[0] is not None:
+                thumbnail = images[0].get("url") if isinstance(images[0], dict) else images[0]
             
             # Get base model
             base_model = latest_version.get("baseModel", "Unknown")
