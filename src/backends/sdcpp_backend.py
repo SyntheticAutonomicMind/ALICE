@@ -251,13 +251,12 @@ class SDCppBackend(BaseBackend):
         # Log received parameters
         logger.info(f"generate_image called: width={width}, height={height}, steps={steps}, guidance={guidance_scale}")
         
-        # Warn if img2img parameters are provided (not supported by sdcpp backend)
-        if input_images and len(input_images) > 0:
-            logger.warning("img2img not supported by sdcpp backend - input images will be ignored")
-        
         # Validate model
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found: {model_path}")
+        
+        # Load model-specific configuration if available
+        model_config = self._load_model_config(model_path)
         
         # Apply defaults
         steps = steps or self.default_steps
@@ -265,6 +264,16 @@ class SDCppBackend(BaseBackend):
         width = width or self.default_width
         height = height or self.default_height
         scheduler = scheduler or self.default_scheduler
+        
+        # Apply model-specific defaults (override generic defaults but not user-specified values)
+        if model_config:
+            defaults = model_config.get("defaults", {})
+            if defaults.get("guidance_scale") and guidance_scale == self.default_guidance_scale:
+                guidance_scale = defaults["guidance_scale"]
+            if defaults.get("scheduler") and scheduler == self.default_scheduler:
+                scheduler = defaults["scheduler"]
+            if defaults.get("steps") and steps == self.default_steps:
+                steps = defaults["steps"]
         
         # Map scheduler name
         sdcpp_scheduler = SCHEDULER_MAPPING.get(scheduler, "euler_a")
@@ -275,10 +284,60 @@ class SDCppBackend(BaseBackend):
         image_id = uuid.uuid4().hex[:12]
         output_path = self.images_dir / f"{image_id}.png"
         
+        # Determine if this is a multi-component model (e.g., Qwen, FLUX)
+        # that needs --diffusion-model instead of -m
+        is_multicomponent = model_config is not None and (
+            model_config.get("vae") or model_config.get("llm")
+        )
+        
         # Build command
-        cmd = [
-            str(self.sdcpp_binary),
-            "-m", str(model_path),
+        cmd = [str(self.sdcpp_binary)]
+        
+        if is_multicomponent:
+            # Multi-component model: use --diffusion-model and separate component flags
+            cmd.extend(["--diffusion-model", str(model_path)])
+            
+            # VAE path
+            vae_path = model_config.get("vae")
+            if vae_path:
+                vae_full_path = self._resolve_auxiliary_path(model_path, vae_path)
+                if vae_full_path:
+                    cmd.extend(["--vae", str(vae_full_path)])
+                else:
+                    logger.warning(f"VAE file not found: {vae_path}")
+            
+            # LLM text encoder
+            llm_path = model_config.get("llm")
+            if llm_path:
+                llm_full_path = self._resolve_auxiliary_path(model_path, llm_path)
+                if llm_full_path:
+                    cmd.extend(["--llm", str(llm_full_path)])
+                else:
+                    logger.warning(f"LLM encoder file not found: {llm_path}")
+            
+            # LLM vision encoder
+            llm_vision_path = model_config.get("llm_vision")
+            if llm_vision_path:
+                llm_vision_full_path = self._resolve_auxiliary_path(model_path, llm_vision_path)
+                if llm_vision_full_path:
+                    cmd.extend(["--llm_vision", str(llm_vision_full_path)])
+                else:
+                    logger.warning(f"LLM vision encoder file not found: {llm_vision_path}")
+            
+            # CLIP vision encoder
+            clip_vision_path = model_config.get("clip_vision")
+            if clip_vision_path:
+                clip_vision_full_path = self._resolve_auxiliary_path(model_path, clip_vision_path)
+                if clip_vision_full_path:
+                    cmd.extend(["--clip_vision", str(clip_vision_full_path)])
+                else:
+                    logger.warning(f"CLIP vision encoder file not found: {clip_vision_path}")
+        else:
+            # Standard single-file model
+            cmd.extend(["-m", str(model_path)])
+        
+        # Core generation parameters
+        cmd.extend([
             "-p", prompt,
             "-n", negative_prompt or "",
             "--steps", str(steps),
@@ -288,45 +347,59 @@ class SDCppBackend(BaseBackend):
             "--sampling-method", sdcpp_scheduler,
             "-o", str(output_path),
             "-t", str(self.sdcpp_threads),
-        ]
+        ])
         
         if seed is not None:
             cmd.extend(["--seed", str(seed)])
         
-        # VAE on CPU for low VRAM systems
+        # Input image for img2img / image editing
+        if input_images and len(input_images) > 0:
+            # Save the first input image to a temp file for sd-cli
+            import tempfile
+            input_img = input_images[0]
+            temp_input = tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir=str(self.images_dir))
+            input_img.save(temp_input.name)
+            temp_input.close()
+            
+            # Use -r for reference image (Qwen image edit uses this)
+            # Use -i for standard img2img init image
+            if model_config and model_config.get("model_type", "").startswith("qwen"):
+                cmd.extend(["-r", temp_input.name])
+            else:
+                cmd.extend(["-i", temp_input.name])
+            
+            # Denoising strength
+            if strength is not None:
+                cmd.extend(["--strength", str(strength)])
+            
+            logger.info(f"img2img mode: input image saved to {temp_input.name}")
+        
+        # Hardware optimization flags
         if self.vae_on_cpu:
             cmd.append("--vae-on-cpu")
-        
-        # VAE tiling for large images
         if self.enable_vae_tiling:
             cmd.append("--vae-tiling")
-        
-        # Memory mapping
         if self.enable_mmap:
             cmd.append("--mmap")
-        
-        # CLIP on CPU
         if self.keep_clip_on_cpu:
             cmd.append("--clip-on-cpu")
-        
-        # Model CPU offload
         if self.enable_model_cpu_offload:
             cmd.append("--offload-to-cpu")
-        
-        # Direct convolution optimizations
         if self.diffusion_conv_direct:
             cmd.append("--diffusion-conv-direct")
-        
         if self.vae_conv_direct:
             cmd.append("--vae-conv-direct")
-        
-        # Circular padding for seamless images
         if self.circular:
             cmd.append("--circular")
-        
-        # Flash attention for memory efficiency (critical for AMD iGPUs with limited VRAM)
         if self.enable_flash_attention:
             cmd.append("--diffusion-fa")
+        
+        # Model-specific extra flags from config
+        if model_config:
+            extra_flags = model_config.get("flags", [])
+            if extra_flags:
+                cmd.extend(extra_flags)
+                logger.info(f"Added model-specific flags: {extra_flags}")
         
         # LoRA support check
         if lora_paths:
@@ -436,6 +509,17 @@ class SDCppBackend(BaseBackend):
             if output_path.exists():
                 output_path.unlink()
             raise
+        
+        finally:
+            # Clean up temp input image file if created
+            if input_images and len(input_images) > 0:
+                try:
+                    import os
+                    if 'temp_input' in dir() and hasattr(temp_input, 'name') and os.path.exists(temp_input.name):
+                        os.unlink(temp_input.name)
+                        logger.debug(f"Cleaned up temp input image: {temp_input.name}")
+                except Exception as cleanup_err:
+                    logger.debug(f"Could not clean up temp input image: {cleanup_err}")
     
     def get_gpu_info(self) -> Dict[str, Any]:
         """
@@ -582,6 +666,112 @@ class SDCppBackend(BaseBackend):
             return True
         except RuntimeError:
             return False
+    
+    @staticmethod
+    def _load_model_config(self, model_path: Path) -> Optional[Dict[str, Any]]:
+        """
+        Load model-specific configuration from a YAML file alongside the model.
+        
+        Looks for a .yaml file with the same stem as the model file.
+        For example: qwen-image-edit-2511.gguf -> qwen-image-edit-2511.yaml
+        
+        The YAML config can specify:
+            model_type: qwen_image_edit_2511
+            vae: qwen_image_vae.safetensors
+            llm: Qwen2.5-VL-7B-Instruct-Q8_0.gguf
+            llm_vision: Qwen2.5-VL-7B-Instruct.mmproj-Q8_0.gguf
+            clip_vision: clip_vision.safetensors
+            flags:
+              - --qwen-image-zero-cond-t
+              - --flow-shift
+              - "3"
+            defaults:
+              guidance_scale: 2.5
+              scheduler: euler
+              steps: 30
+        
+        Args:
+            model_path: Path to the model file
+            
+        Returns:
+            Configuration dict or None if no config found
+        """
+        import yaml
+        
+        # Look for config with same stem
+        config_path = model_path.with_suffix(".yaml")
+        if not config_path.exists():
+            # Also try .yml extension
+            config_path = model_path.with_suffix(".yml")
+        
+        if not config_path.exists():
+            # If model is inside a directory, check for config in the directory
+            if model_path.parent != model_path.parent.parent:
+                dir_config = model_path.parent / "model_config.yaml"
+                if dir_config.exists():
+                    config_path = dir_config
+                else:
+                    dir_config = model_path.parent / "model_config.yml"
+                    if dir_config.exists():
+                        config_path = dir_config
+        
+        if not config_path.exists():
+            return None
+        
+        try:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f) or {}
+            logger.info(f"Loaded model config from {config_path}: type={config.get('model_type', 'unknown')}")
+            return config
+        except Exception as e:
+            logger.warning(f"Failed to load model config {config_path}: {e}")
+            return None
+    
+    def _resolve_auxiliary_path(self, model_path: Path, aux_filename: str) -> Optional[Path]:
+        """
+        Resolve path to an auxiliary model file (VAE, LLM encoder, etc.).
+        
+        Search order:
+        1. Same directory as the main model file
+        2. Parent directory (models root)
+        3. Absolute path (if aux_filename is absolute)
+        
+        Args:
+            model_path: Path to the main model file
+            aux_filename: Filename or relative path of auxiliary file
+            
+        Returns:
+            Resolved Path or None if not found
+        """
+        aux_path = Path(aux_filename)
+        
+        # If absolute path, use directly
+        if aux_path.is_absolute():
+            if aux_path.exists():
+                return aux_path
+            logger.warning(f"Auxiliary file not found at absolute path: {aux_path}")
+            return None
+        
+        # Search in same directory as model
+        candidate = model_path.parent / aux_filename
+        if candidate.exists():
+            logger.debug(f"Found auxiliary file: {candidate}")
+            return candidate
+        
+        # Search in parent directory (models root)
+        candidate = model_path.parent.parent / aux_filename
+        if candidate.exists():
+            logger.debug(f"Found auxiliary file in parent: {candidate}")
+            return candidate
+        
+        # Search with glob for partial matches (e.g., "qwen_image_vae*")
+        for pattern_dir in [model_path.parent, model_path.parent.parent]:
+            matches = list(pattern_dir.glob(f"{aux_path.stem}*{aux_path.suffix}"))
+            if matches:
+                logger.debug(f"Found auxiliary file via glob: {matches[0]}")
+                return matches[0]
+        
+        return None
     
     @staticmethod
     def get_backend_name() -> str:

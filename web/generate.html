@@ -224,6 +224,16 @@
                         <button type="button" id="img2img-clear-btn" style="display: none; margin-top: 0.5rem; width: 100%; background: var(--danger-color, #dc3545); border: none; color: white; padding: 0.4rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">
                             Clear Input Images
                         </button>
+                        <div id="img2img-strength-group" style="display: none; margin-top: 0.75rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <label for="img2img-strength" style="font-size: 0.85rem;">Denoising Strength</label>
+                                <span id="img2img-strength-value" style="font-size: 0.85rem; color: var(--text-secondary);">0.75</span>
+                            </div>
+                            <input type="range" id="img2img-strength" min="0" max="1" step="0.05" value="0.75" style="width: 100%;">
+                            <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                Lower = closer to input image, Higher = more creative freedom
+                            </p>
+                        </div>
                     </div>
                     
                     <!-- Two Column Layout for Basic/Advanced Settings -->
@@ -581,6 +591,14 @@
                 placeholder.style.display = '';
                 clearBtn.style.display = 'none';
                 fileInput.value = '';
+                document.getElementById('img2img-strength-group').style.display = 'none';
+            });
+            
+            // Strength slider
+            const strengthSlider = document.getElementById('img2img-strength');
+            const strengthValue = document.getElementById('img2img-strength-value');
+            strengthSlider.addEventListener('input', () => {
+                strengthValue.textContent = strengthSlider.value;
             });
             
             function handleImg2ImgFiles(files) {
@@ -603,6 +621,7 @@
                 }
                 placeholder.style.display = 'none';
                 clearBtn.style.display = '';
+                document.getElementById('img2img-strength-group').style.display = '';
             }
             
             // Global helper for removing individual images
@@ -611,6 +630,7 @@
                 if (img2imgInputFiles.length === 0) {
                     placeholder.style.display = '';
                     clearBtn.style.display = 'none';
+                    document.getElementById('img2img-strength-group').style.display = 'none';
                 }
             };
             
@@ -960,7 +980,8 @@
                         log(`Encoding ${img2imgInputFiles.length} input image(s) for img2img...`);
                         const base64Images = await Promise.all(img2imgInputFiles.map(f => fileToBase64(f)));
                         formData.input_images = base64Images;
-                        log(`img2img mode: ${img2imgInputFiles.length} image(s) encoded`, 'info');
+                        formData.strength = parseFloat(document.getElementById('img2img-strength').value);
+                        log(`img2img mode: ${img2imgInputFiles.length} image(s) encoded, strength=${formData.strength}`, 'info');
                     }
                     
                     log(`Starting generation with ${formData.model}...`);
