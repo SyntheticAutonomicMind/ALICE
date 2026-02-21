@@ -236,6 +236,14 @@ class ModelRegistry:
                 if is_component:
                     continue
                 
+                # Skip known auxiliary files (VAE, text encoders, etc.)
+                # These are used by multi-component models but shouldn't be listed separately
+                stem_lower = safetensors_file.stem.lower()
+                if any(aux in stem_lower for aux in ['_vae', 'text_encoder', 'clip_vision', 'mmproj']):
+                    # Check if a corresponding model config references this file
+                    logger.debug("Skipping auxiliary safetensors file: %s", safetensors_file.name)
+                    continue
+                
                 # Determine model name: use parent directory name if file is in a subdirectory
                 # Otherwise use the filename stem
                 if safetensors_file.parent != self.models_dir:
@@ -257,6 +265,46 @@ class ModelRegistry:
                 found_models.append(entry)
                 self.models[model_id] = entry
                 logger.debug("Found safetensors model: %s", model_id)
+        
+        # Scan for .gguf files (quantized models for sd.cpp/Vulkan backend)
+        for gguf_file in self.models_dir.rglob("*.gguf"):
+            if gguf_file.is_file():
+                # Skip files in the loras subdirectory
+                if self.loras_dir in gguf_file.parents or gguf_file.parent == self.loras_dir:
+                    continue
+                
+                # Skip auxiliary files (LLM encoders, etc.) that shouldn't be listed as models
+                # Only list files that are diffusion models - detect by name patterns
+                name_lower = gguf_file.stem.lower()
+                # Skip known auxiliary files (LLM encoders, vision processors)
+                if any(aux in name_lower for aux in ['qwen2.5-vl', 'qwen2_5_vl', 'mmproj', 'text_encoder', 'clip']):
+                    logger.debug("Skipping auxiliary GGUF file: %s", gguf_file.name)
+                    continue
+                
+                # Determine model name
+                if gguf_file.parent != self.models_dir:
+                    model_name = gguf_file.parent.name
+                else:
+                    model_name = gguf_file.stem
+                
+                model_id = f"{self.MODEL_PREFIX}/{model_name}"
+                
+                # Skip if already found (e.g., same name as safetensors model)
+                if model_id in self.models:
+                    continue
+                
+                entry = ModelEntry(
+                    id=model_id,
+                    name=model_name,
+                    path=str(gguf_file),
+                    model_type=self._detect_model_type(gguf_file),
+                    created=int(gguf_file.stat().st_ctime),
+                    size_mb=self._calculate_size(gguf_file)
+                )
+                
+                found_models.append(entry)
+                self.models[model_id] = entry
+                logger.debug("Found GGUF model: %s", model_id)
         
         # Scan for diffusers directories (contain model_index.json)
         for model_dir in self.models_dir.iterdir():
