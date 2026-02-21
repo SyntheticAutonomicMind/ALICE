@@ -146,6 +146,18 @@ async def lifespan(app: FastAPI):
         huggingface_token=config.models.huggingface_token,
     )
     
+    # Auto-rescan models after a download completes
+    def _on_download_complete():
+        """Rescan model registry when a download finishes."""
+        try:
+            models = model_registry.refresh()
+            loras = model_registry.list_loras()
+            logger.info("Auto-rescan after download: %d models, %d LoRAs found", len(models), len(loras))
+        except Exception as e:
+            logger.warning("Auto-rescan after download failed: %s", e)
+    
+    download_manager.on_complete(_on_download_complete)
+    
     # Initialize model cache service if enabled
     logger.info("Checking model cache config: enabled=%s", config.model_cache.enabled)
     if config.model_cache.enabled:

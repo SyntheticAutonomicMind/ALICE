@@ -190,6 +190,9 @@ class DownloadManager:
         # Progress callbacks
         self._progress_callbacks: List[Callable[[DownloadTask], None]] = []
         
+        # Completion callbacks (called when a download finishes successfully)
+        self._completion_callbacks: List[Callable[[], None]] = []
+        
         logger.info(
             "DownloadManager initialized: models_dir=%s, loras_dir=%s",
             self.models_dir, self.loras_dir
@@ -226,6 +229,10 @@ class DownloadManager:
     def on_progress(self, callback: Callable[[DownloadTask], None]) -> None:
         """Register a progress callback."""
         self._progress_callbacks.append(callback)
+    
+    def on_complete(self, callback: Callable[[], None]) -> None:
+        """Register a completion callback (called when any download finishes successfully)."""
+        self._completion_callbacks.append(callback)
     
     def _notify_progress(self, task: DownloadTask) -> None:
         """Notify all progress callbacks."""
@@ -828,6 +835,14 @@ class DownloadManager:
                 await self._process_download(task)
                 self._queue.task_done()
                 
+                # Notify completion callbacks if download succeeded
+                if task.status == DownloadStatus.COMPLETED:
+                    for callback in self._completion_callbacks:
+                        try:
+                            callback()
+                        except Exception as e:
+                            logger.warning("Completion callback error: %s", e)
+                
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -926,6 +941,79 @@ class DownloadManager:
         
         self._notify_progress(task)
     
+    def _get_dir_size(self, path: Path) -> int:
+        """Calculate total size of a directory in bytes."""
+        total = 0
+        try:
+            for root, dirs, files in os.walk(path):
+                for f in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, f))
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        return total
+
+    async def _monitor_download_progress(self, task: DownloadTask, destination: Path) -> None:
+        """Monitor directory size growth and update task progress during snapshot_download.
+        
+        Runs concurrently with the download. Estimates progress by checking the
+        expected total size from the HuggingFace API, or by tracking size growth rate.
+        Progress is reported between 5% and 95% (5% = started, 95% = nearly done,
+        100% is set only when the download is confirmed complete).
+        """
+        last_size = 0
+        stall_count = 0
+        
+        # Try to get expected total size from HuggingFace API
+        expected_size = task.metadata.get("expected_size", 0)
+        
+        while task.status == DownloadStatus.DOWNLOADING:
+            await asyncio.sleep(3)  # Check every 3 seconds
+            
+            if task.status != DownloadStatus.DOWNLOADING:
+                break
+            
+            current_size = self._get_dir_size(destination)
+            task.downloaded_size = current_size
+            
+            # Calculate speed
+            size_delta = current_size - last_size
+            if size_delta > 0:
+                task.speed = size_delta / 3.0  # bytes per second (3s interval)
+                stall_count = 0
+            else:
+                stall_count += 1
+            
+            # Update progress
+            if expected_size > 0:
+                # We know the expected size - calculate real percentage
+                raw_pct = (current_size / expected_size) * 100.0
+                # Clamp between 5% and 95% (100% only set on confirmed completion)
+                task.progress = min(95.0, max(5.0, raw_pct))
+                task.total_size = expected_size
+            else:
+                # Unknown total size - use a logarithmic curve that approaches 95%
+                # This gives meaningful progress even without knowing the total
+                if current_size > 0:
+                    # Each GB downloaded adds less progress (diminishing returns)
+                    gb_downloaded = current_size / (1024 ** 3)
+                    # Asymptotic curve: approaches 95% as size grows
+                    task.progress = min(95.0, 5.0 + 90.0 * (1.0 - 1.0 / (1.0 + gb_downloaded / 5.0)))
+            
+            self._notify_progress(task)
+            last_size = current_size
+            
+            if current_size > 0:
+                logger.debug(
+                    "Download progress: %s - %.1f MB (%.1f%%, %.1f MB/s)",
+                    task.name,
+                    current_size / (1024 * 1024),
+                    task.progress,
+                    (task.speed or 0) / (1024 * 1024),
+                )
+
     async def _process_git_clone(self, task: DownloadTask) -> None:
         """Process a HuggingFace diffusers model download using huggingface_hub."""
         try:
@@ -939,6 +1027,28 @@ class DownloadManager:
                 shutil.rmtree(destination)
             
             logger.info("Downloading HuggingFace model: %s -> %s", model_id, destination)
+            
+            # Try to get expected total size from HuggingFace API for accurate progress
+            try:
+                headers = {}
+                if self.huggingface_token:
+                    headers["Authorization"] = f"Bearer {self.huggingface_token}"
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{self.HUGGINGFACE_API_BASE}/models/{model_id}",
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as response:
+                        if response.status == 200:
+                            model_info = await response.json()
+                            siblings = model_info.get("siblings", [])
+                            expected_size = sum(s.get("size", 0) for s in siblings if s.get("size"))
+                            if expected_size > 0:
+                                task.metadata["expected_size"] = expected_size
+                                task.total_size = expected_size
+                                logger.info("Expected download size for %s: %.1f MB", model_id, expected_size / (1024 * 1024))
+            except Exception as e:
+                logger.debug("Could not get expected size from HuggingFace API: %s", e)
             
             task.progress = 5.0
             self._notify_progress(task)
@@ -954,22 +1064,30 @@ class DownloadManager:
                     local_dir=str(destination),
                     local_dir_use_symlinks=False,
                     token=self.huggingface_token,
-                    # Don't resume partial downloads - start fresh
                     resume_download=True,
                 )
             
-            # Run in thread pool
-            await loop.run_in_executor(None, do_download)
+            # Start progress monitor and download concurrently
+            # The monitor tracks directory size growth while snapshot_download runs
+            monitor_task = asyncio.create_task(self._monitor_download_progress(task, destination))
             
-            # Calculate total size
-            total_size = 0
-            for root, dirs, files in os.walk(destination):
-                for f in files:
-                    total_size += os.path.getsize(os.path.join(root, f))
+            try:
+                await loop.run_in_executor(None, do_download)
+            finally:
+                # Stop the monitor
+                monitor_task.cancel()
+                try:
+                    await monitor_task
+                except asyncio.CancelledError:
+                    pass
+            
+            # Calculate final total size
+            total_size = self._get_dir_size(destination)
             
             task.downloaded_size = total_size
             task.total_size = total_size
             task.progress = 100.0
+            task.speed = 0
             task.status = DownloadStatus.COMPLETED
             task.completed_at = time.time()
             

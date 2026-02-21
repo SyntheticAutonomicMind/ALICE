@@ -208,6 +208,10 @@ class ModelRegistry:
         logger.info("Scanning for models in: %s", self.models_dir)
         found_models: List[ModelEntry] = []
         
+        # Clear existing entries before rescanning to remove stale models
+        self.models.clear()
+        self.loras.clear()
+        
         if not self.models_dir.exists():
             logger.warning("Models directory does not exist: %s", self.models_dir)
             return found_models
@@ -219,8 +223,17 @@ class ModelRegistry:
                 if self.loras_dir in safetensors_file.parents or safetensors_file.parent == self.loras_dir:
                     continue
                 
-                # Skip files in subdirectories of diffusers models
-                if any(p.name == "model_index.json" for p in safetensors_file.parents):
+                # Skip files that are components inside diffusers model directories
+                # A diffusers model has model_index.json at its root - any safetensors files
+                # in its subdirectories (text_encoder/, transformer/, vae/ etc.) are components
+                is_component = False
+                for parent in safetensors_file.parents:
+                    if parent == self.models_dir:
+                        break  # Don't look above models_dir
+                    if (parent / "model_index.json").exists():
+                        is_component = True
+                        break
+                if is_component:
                     continue
                 
                 # Determine model name: use parent directory name if file is in a subdirectory
