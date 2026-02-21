@@ -140,9 +140,11 @@ class GeneratorService:
         lora_paths: Optional[List[Path]] = None,
         lora_scales: Optional[List[float]] = None,
         cancellation_token: Optional[CancellationToken] = None,
+        input_images: Optional[list] = None,
+        strength: Optional[float] = None,
     ) -> Tuple[List[Path], Dict[str, Any]]:
         """
-        Generate image(s) from prompt.
+        Generate image(s) from prompt, optionally with input images (img2img).
         
         Returns:
             Tuple of (list_of_image_paths, metadata_dict)
@@ -161,6 +163,8 @@ class GeneratorService:
             lora_paths=lora_paths,
             lora_scales=lora_scales,
             cancellation_token=cancellation_token,
+            input_images=input_images,
+            strength=strength,
         )
         
         # Update statistics

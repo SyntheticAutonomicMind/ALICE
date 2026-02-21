@@ -7,23 +7,13 @@
     <link rel="stylesheet" href="/web/fonts/inter.css">
     <link rel="stylesheet" href="/web/style.css">
     <style>
+        /* Search section uses shared .toolbar from style.css */
         .search-section {
-            display: flex;
-            gap: 1rem;
             margin-bottom: 1.5rem;
-            justify-content: center;
-            flex-wrap: wrap;
         }
         
         .search-section .form-group {
-            flex: 1;
-            max-width: 400px;
             margin-bottom: 0;
-        }
-        
-        .search-section .btn {
-            align-self: flex-end;
-            height: 44px;
         }
         
         .source-tabs {
@@ -238,10 +228,6 @@
         }
         
         @media (max-width: 768px) {
-            .search-section {
-                flex-direction: column;
-            }
-            
             .source-tabs {
                 flex-wrap: wrap;
             }
@@ -326,21 +312,18 @@
                 </button>
             </div>
             
-            <div class="search-section">
-                <div class="form-group">
+            <div class="toolbar search-section">
+                <div class="toolbar-item toolbar-search">
                     <input type="text" id="search-query" placeholder="Search for models..." autocomplete="off">
                 </div>
-                <div class="form-group" id="type-filter-group">
+                <div class="toolbar-item" id="type-filter-group">
                     <select id="type-filter">
                         <option value="">All Types</option>
                         <option value="Checkpoint">Checkpoints</option>
                         <option value="LORA">LoRAs</option>
                     </select>
                 </div>
-                <button class="btn btn-primary" id="search-btn">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+                <button class="btn btn-primary pill-btn" id="search-btn">
                     Search
                 </button>
             </div>

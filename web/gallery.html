@@ -159,48 +159,112 @@
             background: rgb(239, 68, 68);
         }
         
-        /* Filters Bar */
+        /* Filters Toolbar */
         .filters-bar {
-            background: var(--bg-secondary);
-            padding: 1rem;
-            border-radius: 12px;
-            margin-bottom: 1.5rem;
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-        
-        .filter-group {
             display: flex;
             align-items: center;
             gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
         }
-        
-        .filter-group label {
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: var(--text-secondary);
-            white-space: nowrap;
+
+        .toolbar-item {
+            position: relative;
+            flex-shrink: 0;
         }
-        
-        .filter-group select,
-        .filter-group input {
-            padding: 0.5rem 0.75rem;
+
+        .toolbar-item label {
+            display: none;
+        }
+
+        .toolbar-item select {
+            appearance: none;
+            -webkit-appearance: none;
+            padding: 0.5rem 2rem 0.5rem 0.75rem;
             border: 1px solid var(--border);
-            border-radius: 8px;
-            background: var(--bg-primary);
+            border-radius: 9999px;
+            background-color: var(--bg-secondary);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.65rem center;
             color: var(--text-primary);
-            font-size: 0.875rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
+            white-space: nowrap;
+            line-height: 1.4;
         }
-        
-        .search-box {
+
+        .toolbar-item select:hover {
+            border-color: var(--accent);
+            background-color: var(--bg-card);
+        }
+
+        .toolbar-item select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .toolbar-item.toolbar-search {
             flex: 1;
-            min-width: 200px;
+            min-width: 160px;
+            position: relative;
         }
-        
-        .search-box input {
+
+        .toolbar-item.toolbar-search::before {
+            content: '';
+            position: absolute;
+            left: 0.7rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 14px;
+            height: 14px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-size: contain;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .toolbar-item.toolbar-search input {
             width: 100%;
+            padding: 0.5rem 0.75rem 0.5rem 2.1rem;
+            border: 1px solid var(--border);
+            border-radius: 9999px;
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 0.8125rem;
+            font-weight: 400;
+            transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
+            line-height: 1.4;
+            box-sizing: border-box;
+        }
+
+        .toolbar-item.toolbar-search input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .toolbar-item.toolbar-search input:hover {
+            border-color: var(--accent);
+            background-color: var(--bg-card);
+        }
+
+        .toolbar-item.toolbar-search input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        @media (max-width: 640px) {
+            .filters-bar {
+                gap: 0.4rem;
+            }
+            .toolbar-item.toolbar-search {
+                flex-basis: 100%;
+                min-width: unset;
+            }
         }
         
         /* Image Viewer with Side Panel */
@@ -616,24 +680,24 @@
         </div>
         
         <!-- Filters -->
-        <div class="filters-bar">
-            <div class="filter-group">
+        <div class="toolbar filters-bar">
+            <div class="toolbar-item">
                 <label>Model</label>
                 <select id="filter-model">
                     <option value="">All Models</option>
                 </select>
             </div>
             
-            <div class="filter-group">
+            <div class="toolbar-item">
                 <label>Privacy</label>
                 <select id="filter-privacy">
-                    <option value="">All Images</option>
+                    <option value="">Privacy: All</option>
                     <option value="private">Private Only</option>
                     <option value="public">Public Only</option>
                 </select>
             </div>
             
-            <div class="filter-group">
+            <div class="toolbar-item">
                 <label>Sort</label>
                 <select id="filter-sort">
                     <option value="newest">Newest First</option>
@@ -641,12 +705,12 @@
                 </select>
             </div>
             
-            <div class="filter-group search-box">
-                <input type="text" id="search-prompt" placeholder="Search by prompt...">
+            <div class="toolbar-item toolbar-search">
+                <input type="text" id="search-prompt" placeholder="Search prompts...">
             </div>
             
-            <div class="filter-group search-box">
-                <input type="text" id="filter-tags" placeholder="Filter by tags (comma separated)...">
+            <div class="toolbar-item toolbar-search">
+                <input type="text" id="filter-tags" placeholder="Filter tags...">
             </div>
         </div>
         

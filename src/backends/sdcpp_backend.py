@@ -215,6 +215,8 @@ class SDCppBackend(BaseBackend):
         lora_paths: Optional[List[Path]] = None,
         lora_scales: Optional[List[float]] = None,
         cancellation_token: Optional[CancellationToken] = None,
+        input_images: Optional[list] = None,
+        strength: Optional[float] = None,
     ) -> Tuple[List[Path], Dict[str, Any]]:
         """
         Generate image(s) using sd-cli subprocess.
@@ -233,6 +235,8 @@ class SDCppBackend(BaseBackend):
             lora_paths: List of LoRA model paths (not yet supported)
             lora_scales: List of LoRA scales (not yet supported)
             cancellation_token: Token for cancelling generation
+            input_images: Input images for img2img (not yet supported by sdcpp backend)
+            strength: Denoising strength for img2img (not yet supported by sdcpp backend)
             
         Returns:
             Tuple of (image_paths, metadata_dict)
@@ -246,6 +250,10 @@ class SDCppBackend(BaseBackend):
         
         # Log received parameters
         logger.info(f"generate_image called: width={width}, height={height}, steps={steps}, guidance={guidance_scale}")
+        
+        # Warn if img2img parameters are provided (not supported by sdcpp backend)
+        if input_images and len(input_images) > 0:
+            logger.warning("img2img not supported by sdcpp backend - input images will be ignored")
         
         # Validate model
         if not model_path.exists():

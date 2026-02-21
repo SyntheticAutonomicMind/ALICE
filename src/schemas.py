@@ -35,6 +35,11 @@ class SAMImageConfig(BaseModel):
     
     NOTE: Width and height will be automatically rounded to the nearest multiple of 8
     if not already divisible by 8 (required for Stable Diffusion VAE).
+    
+    For image-to-image (img2img) generation:
+    - Set input_images to a list of base64-encoded images
+    - Or set input_image_urls to a list of URLs to fetch images from
+    - The model must support img2img (e.g., Qwen-Image-Edit-2511)
     """
     negative_prompt: Optional[str] = Field(default=None, description="Negative prompt")
     steps: Optional[int] = Field(default=None, ge=1, le=150, description="Inference steps")
@@ -46,6 +51,9 @@ class SAMImageConfig(BaseModel):
     num_images: Optional[int] = Field(default=None, ge=1, le=100, description="Number of images")
     lora_paths: Optional[List[str]] = Field(default=None, description="List of LoRA IDs to apply")
     lora_scales: Optional[List[float]] = Field(default=None, description="LoRA weights (0.0-1.0)")
+    input_images: Optional[List[str]] = Field(default=None, description="Base64-encoded input images for img2img")
+    input_image_urls: Optional[List[str]] = Field(default=None, description="URLs of input images for img2img")
+    strength: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="img2img denoising strength (0.0=no change, 1.0=full denoise)")
 
 
 class ChatCompletionRequest(BaseModel):
@@ -90,6 +98,8 @@ class ImageMetadata(BaseModel):
     scheduler: str
     width: int
     height: int
+    mode: str = Field(default="txt2img", description="Generation mode: txt2img or img2img")
+    input_image_count: Optional[int] = Field(default=None, description="Number of input images (img2img only)")
 
 
 class ResponseMessage(BaseModel):

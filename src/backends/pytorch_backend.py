@@ -69,6 +69,7 @@ def _import_diffusers() -> None:
     logger.info("Importing diffusers library...")
     
     from diffusers import (
+        DiffusionPipeline,
         StableDiffusionPipeline,
         StableDiffusionImg2ImgPipeline,
         AutoPipelineForText2Image,
@@ -80,6 +81,13 @@ def _import_diffusers() -> None:
         LMSDiscreteScheduler,
     )
     
+    # Try to import Qwen Image Edit pipeline (may not be available in all versions)
+    try:
+        from diffusers import QwenImageEditPlusPipeline
+        _pipeline_classes["QwenImageEditPlusPipeline"] = QwenImageEditPlusPipeline
+    except ImportError:
+        logger.debug("QwenImageEditPlusPipeline not available - install latest diffusers for Qwen img2img support")
+    
     # Try to import flow matching schedulers (may not be available in all versions)
     try:
         from diffusers import FlowMatchEulerDiscreteScheduler
@@ -89,6 +97,7 @@ def _import_diffusers() -> None:
     
     # Pipeline classes
     _pipeline_classes.update({
+        "DiffusionPipeline": DiffusionPipeline,
         "StableDiffusionPipeline": StableDiffusionPipeline,
         "StableDiffusionImg2ImgPipeline": StableDiffusionImg2ImgPipeline,
         "AutoPipelineForText2Image": AutoPipelineForText2Image,
@@ -180,7 +189,9 @@ def _detect_pipeline_class(model_path: Path) -> Tuple[str, str]:
         # Detect model type from pipeline name
         model_type = default_type
         class_lower = pipeline_class.lower()
-        if "xl" in class_lower:
+        if "qwen" in class_lower:
+            model_type = "qwen"
+        elif "xl" in class_lower:
             model_type = "sdxl"
         elif "flux" in class_lower:
             model_type = "flux"
@@ -899,24 +910,46 @@ class PyTorchBackend(BaseBackend):
                 )
                 is_single_file_sdxl_result = is_sdxl_result
             else:
-                # Load from directory using AutoPipeline
-                # NOTE: device_map: sequential does NOT work with from_pretrained
-                # Only 'balanced' and 'cuda' are valid for from_pretrained
+                # Load from directory
                 is_single_file_sdxl_result = False  # Directory models are more memory efficient
-                from diffusers import AutoPipelineForText2Image
-                if self.device_map and self.device_map in ('balanced', 'cuda'):
-                    load_kwargs["device_map"] = self.device_map
-                    logger.info("Using device_map: %s (directory mode)", self.device_map)
-                elif self.device_map:
-                    logger.warning(
-                        "device_map '%s' not supported for directory models. "
-                        "Valid options: 'balanced', 'cuda'. Loading without device_map.",
-                        self.device_map
+                
+                # Check if this is a Qwen model that needs a specific pipeline
+                if model_type == "qwen":
+                    # Qwen models use DiffusionPipeline.from_pretrained which will auto-resolve
+                    # to QwenImageEditPlusPipeline based on model_index.json
+                    logger.info("Loading Qwen img2img model with DiffusionPipeline (auto-resolve)")
+                    from diffusers import DiffusionPipeline
+                    if self.device_map and self.device_map in ('balanced', 'cuda'):
+                        load_kwargs["device_map"] = self.device_map
+                        logger.info("Using device_map: %s (Qwen model)", self.device_map)
+                    elif self.device_map:
+                        logger.warning(
+                            "device_map '%s' not supported for Qwen models. "
+                            "Valid options: 'balanced', 'cuda'. Loading without device_map.",
+                            self.device_map
+                        )
+                    pipeline = DiffusionPipeline.from_pretrained(
+                        str(model_path),
+                        **load_kwargs,
                     )
-                pipeline = AutoPipelineForText2Image.from_pretrained(
-                    str(model_path),
-                    **load_kwargs,
-                )
+                else:
+                    # Load from directory using AutoPipeline for text2image models
+                    # NOTE: device_map: sequential does NOT work with from_pretrained
+                    # Only 'balanced' and 'cuda' are valid for from_pretrained
+                    from diffusers import AutoPipelineForText2Image
+                    if self.device_map and self.device_map in ('balanced', 'cuda'):
+                        load_kwargs["device_map"] = self.device_map
+                        logger.info("Using device_map: %s (directory mode)", self.device_map)
+                    elif self.device_map:
+                        logger.warning(
+                            "device_map '%s' not supported for directory models. "
+                            "Valid options: 'balanced', 'cuda'. Loading without device_map.",
+                            self.device_map
+                        )
+                    pipeline = AutoPipelineForText2Image.from_pretrained(
+                        str(model_path),
+                        **load_kwargs,
+                    )
             
             # Determine if we need to move to device
             # - If device_map was in load_kwargs, the model is already on the right device(s)
@@ -979,9 +1012,11 @@ class PyTorchBackend(BaseBackend):
         lora_paths: Optional[List[Path]] = None,
         lora_scales: Optional[List[float]] = None,
         cancellation_token: Optional[CancellationToken] = None,
+        input_images: Optional[List[Any]] = None,
+        strength: Optional[float] = None,
     ) -> Tuple[List[Path], Dict[str, Any]]:
         """
-        Generate image(s) from prompt.
+        Generate image(s) from prompt, optionally with input images (img2img).
         
         Args:
             model_path: Path to model
@@ -997,6 +1032,8 @@ class PyTorchBackend(BaseBackend):
             lora_paths: List of paths to LoRA files to apply
             lora_scales: List of LoRA weights (0.0-1.0)
             cancellation_token: Optional token for cancellation support
+            input_images: Optional list of PIL images for img2img
+            strength: Denoising strength for img2img (0.0-1.0)
             
         Returns:
             Tuple of (list_of_image_paths, metadata_dict)
@@ -1133,25 +1170,58 @@ class PyTorchBackend(BaseBackend):
                             # If VAE CPU decode is enabled, get latents instead of images
                             output_type = "latent" if self.vae_decode_cpu else "pil"
                             
-                            # For SDXL, use prompt_2/negative_prompt_2 for dual text encoder support
-                            # This allows for longer prompts (77 tokens per encoder = 154 tokens total)
-                            pipeline_kwargs = {
-                                "prompt": prompt,
-                                "negative_prompt": negative_prompt if negative_prompt else None,
-                                "num_inference_steps": steps,
-                                "width": width,
-                                "height": height,
-                                "num_images_per_prompt": num_images,
-                                "generator": generator,
-                                "output_type": output_type,
-                            }
+                            # Determine generation mode: img2img vs txt2img
+                            is_img2img = input_images is not None and len(input_images) > 0
                             
-                            # Qwen models use true_cfg_scale instead of guidance_scale
-                            if self._current_model_type == "qwen":
-                                pipeline_kwargs["true_cfg_scale"] = guidance_scale
-                                logger.debug("Using true_cfg_scale=%s for Qwen model", guidance_scale)
+                            # Build pipeline kwargs based on generation mode
+                            if is_img2img and self._current_model_type == "qwen":
+                                # Qwen img2img: uses image parameter, no width/height
+                                # Qwen models accept a list of images or a single image
+                                logger.info("Using Qwen img2img mode with %d input image(s)", len(input_images))
+                                pipeline_kwargs = {
+                                    "prompt": prompt,
+                                    "negative_prompt": negative_prompt if negative_prompt else " ",
+                                    "image": input_images if len(input_images) > 1 else input_images[0],
+                                    "num_inference_steps": steps,
+                                    "num_images_per_prompt": num_images,
+                                    "generator": generator,
+                                    "output_type": output_type,
+                                    "true_cfg_scale": guidance_scale,
+                                    "guidance_scale": 1.0,  # Qwen uses true_cfg_scale instead
+                                }
+                            elif is_img2img:
+                                # Generic img2img: SD/SDXL img2img pipeline
+                                logger.info("Using generic img2img mode with %d input image(s)", len(input_images))
+                                pipeline_kwargs = {
+                                    "prompt": prompt,
+                                    "negative_prompt": negative_prompt if negative_prompt else None,
+                                    "image": input_images[0],  # SD img2img takes a single image
+                                    "num_inference_steps": steps,
+                                    "strength": strength if strength is not None else 0.75,
+                                    "num_images_per_prompt": num_images,
+                                    "generator": generator,
+                                    "output_type": output_type,
+                                    "guidance_scale": guidance_scale,
+                                }
                             else:
-                                pipeline_kwargs["guidance_scale"] = guidance_scale
+                                # Standard text-to-image generation
+                                pipeline_kwargs = {
+                                    "prompt": prompt,
+                                    "negative_prompt": negative_prompt if negative_prompt else None,
+                                    "num_inference_steps": steps,
+                                    "width": width,
+                                    "height": height,
+                                    "num_images_per_prompt": num_images,
+                                    "generator": generator,
+                                    "output_type": output_type,
+                                }
+                            
+                                # Qwen text2img models use true_cfg_scale instead of guidance_scale
+                                if self._current_model_type == "qwen":
+                                    pipeline_kwargs["true_cfg_scale"] = guidance_scale
+                                    logger.debug("Using true_cfg_scale=%s for Qwen model", guidance_scale)
+                                else:
+                                    pipeline_kwargs["guidance_scale"] = guidance_scale
                             
                             # Use CompelForSDXL for SDXL models to support long prompts
                             if self._compel is not None:
@@ -1282,6 +1352,9 @@ class PyTorchBackend(BaseBackend):
                     image_path.name, generation_time
                 )
                 
+                # Determine generation mode
+                is_img2img = input_images is not None and len(input_images) > 0
+                
                 # Build metadata
                 metadata = {
                     "prompt": prompt,
@@ -1298,6 +1371,8 @@ class PyTorchBackend(BaseBackend):
                     "num_images": num_images,
                     "loras": lora_names if lora_names else None,
                     "lora_scales": list(lora_scales[:len(lora_paths)]) if lora_paths and lora_scales else None,
+                    "mode": "img2img" if is_img2img else "txt2img",
+                    "input_image_count": len(input_images) if is_img2img else None,
                 }
                 
                 # Unload LoRAs after generation to prevent memory buildup

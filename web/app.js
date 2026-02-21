@@ -238,6 +238,17 @@ const API = {
             sam_config.lora_scales = formData.loras.map(lora => lora.weight);
         }
         
+        // Handle img2img input images
+        if (formData.input_images && formData.input_images.length > 0) {
+            sam_config.input_images = formData.input_images;
+        }
+        if (formData.input_image_urls && formData.input_image_urls.length > 0) {
+            sam_config.input_image_urls = formData.input_image_urls;
+        }
+        if (formData.strength !== undefined && formData.strength !== null) {
+            sam_config.strength = formData.strength;
+        }
+        
         // Handle privacy settings
         if (formData.privacy !== undefined) {
             sam_config.privacy = formData.privacy;

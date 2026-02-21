@@ -1264,6 +1264,63 @@ async def chat_completions(
                 detail="NSFW content detected in negative_prompt and blocked. This server has NSFW generation disabled."
             )
         
+        # Decode input images for img2img (if provided)
+        input_images = None
+        gen_strength = sam_config.strength if sam_config else None
+        
+        if sam_config and (sam_config.input_images or sam_config.input_image_urls):
+            import base64
+            import io
+            from PIL import Image as PILImage
+            
+            input_images = []
+            
+            # Decode base64-encoded images
+            if sam_config.input_images:
+                for i, b64_data in enumerate(sam_config.input_images):
+                    try:
+                        # Handle data URI prefix (e.g., "data:image/png;base64,...")
+                        if "," in b64_data:
+                            b64_data = b64_data.split(",", 1)[1]
+                        image_bytes = base64.b64decode(b64_data)
+                        image = PILImage.open(io.BytesIO(image_bytes)).convert("RGB")
+                        input_images.append(image)
+                        logger.debug("Decoded input image %d: %dx%d", i, image.width, image.height)
+                    except Exception as e:
+                        logger.error("Failed to decode input image %d: %s", i, e)
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Failed to decode input image {i}: {str(e)}"
+                        )
+            
+            # Fetch images from URLs
+            if sam_config.input_image_urls:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    for i, url in enumerate(sam_config.input_image_urls):
+                        try:
+                            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                                if resp.status != 200:
+                                    raise HTTPException(
+                                        status_code=400,
+                                        detail=f"Failed to fetch input image from URL {url}: HTTP {resp.status}"
+                                    )
+                                image_bytes = await resp.read()
+                                image = PILImage.open(io.BytesIO(image_bytes)).convert("RGB")
+                                input_images.append(image)
+                                logger.debug("Fetched input image %d from URL: %dx%d", i, image.width, image.height)
+                        except aiohttp.ClientError as e:
+                            logger.error("Failed to fetch input image %d from URL %s: %s", i, url, e)
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Failed to fetch input image from URL {url}: {str(e)}"
+                            )
+            
+            if not input_images:
+                input_images = None  # Reset if no images were successfully decoded
+            else:
+                logger.info("Prepared %d input image(s) for img2img generation", len(input_images))
+        
         # Generate image(s)
         image_paths, metadata = await generator.generate(
             model_path=Path(model_info.path),
@@ -1279,6 +1336,8 @@ async def chat_completions(
             lora_paths=lora_paths if lora_paths else None,
             lora_scales=lora_scales,
             cancellation_token=cancellation_token,
+            input_images=input_images,
+            strength=gen_strength,
         )
         
         # Build image URLs and record in gallery
@@ -1329,6 +1388,8 @@ async def chat_completions(
             scheduler=metadata["scheduler"],
             width=metadata["width"],
             height=metadata["height"],
+            mode=metadata.get("mode", "txt2img"),
+            input_image_count=metadata.get("input_image_count"),
         )
         
         return ChatCompletionResponse(

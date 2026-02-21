@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import logging
 
+from PIL import Image
+
 logger = logging.getLogger(__name__)
 
 
@@ -89,9 +91,11 @@ class BaseBackend(ABC):
         lora_paths: Optional[List[Path]] = None,
         lora_scales: Optional[List[float]] = None,
         cancellation_token: Optional[Any] = None,
+        input_images: Optional[List[Image.Image]] = None,
+        strength: Optional[float] = None,
     ) -> Tuple[List[Path], Dict[str, Any]]:
         """
-        Generate image(s) from prompt.
+        Generate image(s) from prompt, optionally with input images (img2img).
         
         Args:
             model_path: Path to model
@@ -107,6 +111,8 @@ class BaseBackend(ABC):
             lora_paths: List of LoRA model paths to apply
             lora_scales: List of LoRA weights (0.0-1.0)
             cancellation_token: Optional cancellation token
+            input_images: Optional list of PIL images for img2img generation
+            strength: Denoising strength for img2img (0.0-1.0, default varies by model)
             
         Returns:
             Tuple of (list_of_image_paths, metadata_dict)
@@ -124,6 +130,8 @@ class BaseBackend(ABC):
                 - model: Model name/path
                 - generation_time: Time taken in seconds
                 - backend: Backend name (e.g., "pytorch", "sdcpp")
+                - mode: "txt2img" or "img2img"
+                - input_image_count: Number of input images (img2img only)
         
         Raises:
             RuntimeError: If generation fails
