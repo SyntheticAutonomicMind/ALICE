@@ -847,7 +847,16 @@ class PyTorchBackend(BaseBackend):
             Tuple of (pipeline, model_type, device_map_applied, is_single_file_sdxl)
         """
         logger.info("Loading model in thread pool: %s", model_path)
-        
+
+        # GGUF files are sd.cpp/Vulkan-only - cannot be loaded by PyTorch/diffusers
+        if model_path.is_file() and model_path.suffix.lower() == ".gguf":
+            raise RuntimeError(
+                f"Model '{model_path.name}' is a GGUF file which requires the Vulkan (sd.cpp) backend. "
+                f"The PyTorch backend cannot load GGUF models. "
+                f"Either change 'backend' to 'vulkan' or 'auto' in config.yaml, "
+                f"or use a .safetensors model instead."
+            )
+
         # Import diffusers if needed
         _import_diffusers()
         
