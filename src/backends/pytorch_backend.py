@@ -826,7 +826,7 @@ class PyTorchBackend(BaseBackend):
             self._apply_memory_optimizations()
             
             # Initialize Compel for SDXL if needed
-            if self._is_single_file_sdxl:
+            if self._current_model_type == "sdxl":
                 try:
                     from compel import CompelForSDXL
                     self._compel = CompelForSDXL(self._pipeline, device=self._device)
@@ -1233,7 +1233,7 @@ class PyTorchBackend(BaseBackend):
                                     pipeline_kwargs["guidance_scale"] = guidance_scale
                             
                             # Use CompelForSDXL for SDXL models to support long prompts
-                            if self._compel is not None:
+                            if self._compel is not None and not is_img2img:
                                 logger.info("Using CompelForSDXL for long prompt encoding")
                                 try:
                                     # Encode with CompelForSDXL (proper SDXL support, no length limits)
