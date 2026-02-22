@@ -883,7 +883,10 @@ async def health_check():
         )
     
     gpu_info = generator.get_gpu_info()
-    active_backend = getattr(generator, '_backend_name', None) or config.generation.backend
+    try:
+        active_backend = generator._backend.get_backend_name()
+    except Exception:
+        active_backend = config.generation.backend
     
     return HealthResponse(
         status="ok",
