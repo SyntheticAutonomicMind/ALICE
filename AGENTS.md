@@ -1,7 +1,7 @@
 # AGENTS.md
 
-**Version:** 1.0  
-**Date:** 2026-02-07  
+**Version:** 2.0  
+**Date:** 2026-02-22  
 **Purpose:** Technical reference for ALICE development
 
 ---
@@ -143,6 +143,7 @@ FastAPI Application (src/main.py)
 | `src/backends/` | Generation backend implementations |
 | `web/` | Static web UI files |
 | `scripts/` | Installation and utility scripts |
+| `docker/` | Docker configuration files |
 | `docs/` | Technical documentation |
 | `tests/` | Unit and integration tests |
 | `models/` | Stable Diffusion models (gitignored) |
@@ -151,12 +152,16 @@ FastAPI Application (src/main.py)
 | `logs/` | Application logs (gitignored) |
 | `venv/` | Python virtual environment (gitignored) |
 | `.clio/` | CLIO agent configuration |
+| `.github/workflows/` | GitHub Actions (CI/CD, release, triage) |
 | `ai-assisted/` | Session handoff documents (gitignored) |
 | `scratch/` | Working documents (gitignored) |
 
 **Key Files:**
 
 - `src/main.py` - FastAPI application entry point
+- `src/__init__.py` - **Version single source of truth** (`__version__`)
+- `src/updater.py` - Self-update system (GitHub Releases integration)
+- `src/config_migration.py` - Config migration for cross-version upgrades
 - `src/backends/pytorch_backend.py` - PyTorch generation backend (text2img + img2img)
 - `src/backends/sdcpp_backend.py` - sd.cpp Vulkan backend (text2img + img2img, GGUF models)
 - `src/model_registry.py` - Model scanning (.safetensors, .gguf, diffusers directories)
@@ -165,8 +170,12 @@ FastAPI Application (src/main.py)
 - `src/auth.py` - Authentication and authorization
 - `src/schemas.py` - Pydantic schemas (includes img2img fields)
 - `config.yaml` - Configuration file
-- `Makefile` - Build and run commands
+- `Makefile` - Build, run, update, Docker, and dist commands
+- `release.sh` - Release automation script
 - `requirements.txt` - Python dependencies
+- `Dockerfile` - Container build (CPU/CUDA)
+- `Dockerfile.rocm` - Container build (AMD ROCm)
+- `docker-compose.yml` - Multi-profile Docker Compose
 
 **Model Configuration Files (YAML):**
 
@@ -267,9 +276,12 @@ results = await asyncio.gather(
 | Module | Purpose |
 |--------|---------|
 | `src/main.py` | FastAPI application and endpoints |
+| `src/__init__.py` | Package init, `__version__` (single source of truth) |
 | `src/config.py` | Configuration loading and validation |
+| `src/config_migration.py` | Config migration for cross-version upgrades |
 | `src/schemas.py` | Pydantic schemas for API requests/responses |
 | `src/auth.py` | Authentication and authorization |
+| `src/updater.py` | Self-update system (GitHub Releases integration) |
 | `src/model_registry.py` | Model detection and listing |
 | `src/model_cache.py` | In-memory model caching |
 | `src/generator.py` | Generation service coordination |
@@ -686,6 +698,185 @@ generation:
   backend: pytorch
   # MPS backend automatically detected
 ```
+
+---
+
+## Versioning
+
+**All Synthetic Autonomic Mind software uses date-based versioning:**
+
+```
+Format: YYYYMMDD.RELEASE
+Example: 20260222.1  (first release on Feb 22, 2026)
+         20260222.2  (second release on same day)
+         20260223.1  (first release next day)
+```
+
+**Single source of truth:** `src/__init__.py` (`__version__`)
+
+All other files import from `__init__.py`:
+- `src/main.py` - FastAPI app version
+- `src/schemas.py` - HealthResponse default
+- `src/updater.py` - Version comparison
+
+**NEVER hardcode version strings.** Always use `from . import __version__`.
+
+---
+
+## Release Process
+
+**Use the release script:**
+
+```bash
+# Syntax: ./release.sh YYYYMMDD.RELEASE
+./release.sh 20260223.1
+```
+
+**What the script does:**
+1. Validates version format
+2. Updates `src/__init__.py`
+3. Commits: `chore(release): prepare version YYYYMMDD.R`
+4. Creates annotated tag: `vYYYYMMDD.R`
+5. Pushes commit and tag to origin
+
+**What GitHub Actions does (triggered by tag push):**
+1. Verifies version in code matches tag
+2. Builds distribution tarball (`alice-VERSION.tar.gz`)
+3. Creates GitHub Release with assets
+4. Builds 3 Docker images and pushes to GHCR:
+   - `ghcr.io/syntheticautonomicmind/alice:VERSION` (CPU)
+   - `ghcr.io/syntheticautonomicmind/alice:VERSION-cuda` (NVIDIA)
+   - `ghcr.io/syntheticautonomicmind/alice:VERSION-rocm` (AMD)
+
+**Manual release (without script):**
+
+```bash
+# 1. Update version
+sed -i 's/__version__ = ".*"/__version__ = "20260223.1"/' src/__init__.py
+
+# 2. Commit
+git add src/__init__.py
+git commit -m "chore(release): prepare version 20260223.1"
+
+# 3. Tag and push
+git tag -a v20260223.1 -m "ALICE 20260223.1"
+git push origin main
+git push origin v20260223.1
+```
+
+---
+
+## Deployment Methods
+
+### 1. Self-Update (Recommended for Existing Installations)
+
+ALICE includes a built-in update system that checks GitHub Releases:
+
+**API Endpoints (admin-only):**
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/v1/update/status` | Current update status and version info |
+| `POST` | `/v1/update/check` | Check GitHub for available updates |
+| `POST` | `/v1/update/apply?restart=true` | Download and apply update |
+| `POST` | `/v1/update/rollback` | Rollback to previous backup |
+| `GET` | `/v1/update/backups` | List available backups |
+
+**How it works:**
+1. Checks `https://api.github.com/repos/SyntheticAutonomicMind/ALICE/releases/latest`
+2. Compares version tuples (date-based versions sort naturally)
+3. Downloads named asset (`alice-VERSION.tar.gz`) or source tarball
+4. Creates backup of current installation in `.alice-backups/backups/`
+5. Extracts to staging directory, then copies files (skips user data)
+6. Runs `pip install -r requirements.txt`
+7. Migrates config (adds new fields with defaults)
+8. Restarts service (systemd or SIGTERM)
+
+**Protected paths (never overwritten):** `config.yaml`, `models/`, `images/`, `data/`, `logs/`, `venv/`
+
+**Automatic checking:** Every 60 minutes (configurable, starts 60s after boot)
+
+**Web UI:** Admin panel shows update banner with progress bar and one-click update
+
+### 2. Docker (Recommended for New Deployments)
+
+```bash
+# CPU
+docker compose --profile default up -d
+
+# NVIDIA GPU
+docker compose --profile cuda up -d
+
+# AMD GPU
+docker compose --profile rocm up -d
+```
+
+**Volume mounts:**
+- `./models:/data/models` - Model files
+- `alice-images:/data/images` - Generated images
+- `alice-data:/data/data` - Database and metadata
+- `./config.yaml:/config/config.yaml:ro` - Config override
+
+**Update Docker:**
+```bash
+docker compose pull && docker compose up -d
+```
+
+### 3. Git-Based (Development)
+
+```bash
+make update           # Pull + reinstall deps
+make update-restart   # Pull + reinstall + restart service
+```
+
+### 4. Script-Based (Traditional)
+
+```bash
+sudo ./scripts/install.sh          # System-wide install
+./scripts/install_steamos.sh       # SteamOS/Steam Deck
+```
+
+---
+
+## Health & Monitoring Endpoints
+
+| Endpoint | Purpose | Auth Required |
+|----------|---------|---------------|
+| `GET /health` | Full health (version, GPU, uptime, backend) | No |
+| `GET /api/health` | Alias for `/health` | No |
+| `GET /livez` | Liveness probe (containers) | No |
+| `GET /readyz` | Readiness probe (503 if starting) | No |
+| `GET /metrics` | Service metrics | No |
+
+**Health response example:**
+```json
+{
+    "status": "ok",
+    "gpuAvailable": true,
+    "gpuStatsAvailable": true,
+    "modelsLoaded": 1,
+    "version": "20260222.1",
+    "uptimeSeconds": 3600.5,
+    "backend": "vulkan"
+}
+```
+
+---
+
+## Config Migration
+
+When new config options are added between versions, `src/config_migration.py`:
+1. Compares user's `config.yaml` against current defaults
+2. Identifies missing keys
+3. Creates a timestamped backup (`.bak`)
+4. Adds missing keys with default values
+
+**IMPORTANT:** When adding new config fields:
+1. Add the field to the Pydantic model in `src/config.py`
+2. Add the same default to `get_default_config()` in `src/config_migration.py`
+3. These MUST stay in sync
+
+**Runs automatically:** On startup and after self-updates.
 
 ---
 
