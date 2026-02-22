@@ -262,7 +262,7 @@ const API = {
             messages: [{ role: 'user', content: formData.prompt }],
             sam_config: sam_config
         };
-        
+
         // Get the raw OpenAI-compatible response
         const openaiResponse = await this.fetch('/v1/chat/completions', {
             method: 'POST',

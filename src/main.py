@@ -214,11 +214,19 @@ async def lifespan(app: FastAPI):
         # Mount style.css and app.js as static files (no auth needed for these)
         @app.get("/web/style.css")
         async def serve_style():
-            return FileResponse(web_dir / "style.css", media_type="text/css")
-        
+            return FileResponse(
+                web_dir / "style.css",
+                media_type="text/css",
+                headers={"Cache-Control": "no-cache, must-revalidate"}
+            )
+
         @app.get("/web/app.js")
         async def serve_app_js():
-            return FileResponse(web_dir / "app.js", media_type="application/javascript")
+            return FileResponse(
+                web_dir / "app.js",
+                media_type="application/javascript",
+                headers={"Cache-Control": "no-cache, must-revalidate"}
+            )
         
         # Serve logo image
         @app.get("/web/alice-logo.png")
@@ -1097,6 +1105,12 @@ async def list_loras(access: AccessLevel = Depends(require_access_level(AccessLe
     )
 
 
+@app.get("/v1/models/loras", response_model=LoRAsResponse)
+async def list_loras_alias(access: AccessLevel = Depends(require_access_level(AccessLevel.ANONYMOUS))):
+    """Alias for /v1/loras - list available LoRAs."""
+    return await list_loras(access)
+
+
 # NOTE: Download cancel must come BEFORE model delete due to route priority
 # The /v1/models/{model_id:path} pattern would otherwise match "download/task_id"
 @app.delete("/v1/models/download/{task_id}")
@@ -1331,7 +1345,7 @@ async def chat_completions(
         # Decode input images for img2img (if provided)
         input_images = None
         gen_strength = sam_config.strength if sam_config else None
-        
+
         if sam_config and (sam_config.input_images or sam_config.input_image_urls):
             import base64
             import io

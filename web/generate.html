@@ -983,10 +983,10 @@
                         formData.strength = parseFloat(document.getElementById('img2img-strength').value);
                         log(`img2img mode: ${img2imgInputFiles.length} image(s) encoded, strength=${formData.strength}`, 'info');
                     }
-                    
+
                     log(`Starting generation with ${formData.model}...`);
                     log(`Resolution: ${formData.width}x${formData.height}, Steps: ${formData.steps || 'default'}, Scheduler: ${formData.scheduler || 'default'}`);
-                    
+
                     const startTime = Date.now();
                     const response = await API.generateImage(formData);
                     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
