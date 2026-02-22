@@ -39,6 +39,7 @@ from .auth import AuthManager, SESSION_TIMEOUT_SECONDS, SESSION_INACTIVITY_TIMEO
 from .gallery import GalleryManager, ImageRecord
 from .cancellation import get_cancellation_registry, CancellationError
 from .updater import init_update_manager, shutdown_update_manager, get_update_manager
+from .config_migration import migrate_config
 from . import __version__
 from .schemas import (
     ChatCompletionRequest,
@@ -106,6 +107,14 @@ async def lifespan(app: FastAPI):
     
     logger.info("ALICE starting up...")
     _startup_time = time.time()
+    
+    # Run config migration to add any new settings from this version
+    try:
+        migration = migrate_config()
+        if migration["migrated"]:
+            logger.info("Config migrated: added %s", ", ".join(migration["added"]))
+    except Exception as e:
+        logger.debug("Config migration skipped: %s", e)
     
     # Configure session timeout from config
     set_session_timeout(config.server.session_timeout_seconds)

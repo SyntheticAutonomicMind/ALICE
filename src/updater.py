@@ -387,10 +387,23 @@ class UpdateManager:
                 self._status.update_stage = "dependencies"
                 await self._update_dependencies()
 
-                # Step 6: Clean up old backups
+                # Step 6: Migrate config (add new settings with defaults)
+                self._status.update_stage = "config_migration"
+                try:
+                    from .config_migration import migrate_config
+                    migration = migrate_config()
+                    if migration["migrated"]:
+                        logger.info(
+                            "Config migrated: added %s",
+                            ", ".join(migration["added"]),
+                        )
+                except Exception as e:
+                    logger.debug("Config migration after update skipped: %s", e)
+
+                # Step 7: Clean up old backups
                 self._cleanup_old_backups()
 
-                # Step 7: Clean up download
+                # Step 8: Clean up download
                 if tarball_path.exists():
                     tarball_path.unlink()
 

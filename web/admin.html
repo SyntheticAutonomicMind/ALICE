@@ -208,6 +208,44 @@
             <h1>Admin Panel</h1>
             <p>Manage API keys and sessions</p>
         </div>
+
+        <!-- Update Notification Banner -->
+        <div id="update-banner" class="card" style="display: none; border-left: 4px solid var(--accent); margin-bottom: 1.5rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="var(--accent)">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <div>
+                        <div style="font-weight: 600;" id="update-title">Update Available</div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted);" id="update-detail"></div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.75rem;" id="update-actions">
+                    <a id="update-release-link" href="#" target="_blank" style="font-size: 0.85rem; color: var(--accent);">Release Notes</a>
+                    <button class="btn btn-primary" id="update-apply-btn" onclick="applyUpdate()">Update Now</button>
+                </div>
+                <!-- Progress section (hidden by default) -->
+                <div id="update-progress" style="display: none; width: 100%;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem;">
+                        <div style="flex: 1; height: 6px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden;">
+                            <div id="update-progress-bar" style="height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; width: 0%;"></div>
+                        </div>
+                        <span id="update-stage" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">Checking...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Version Info Banner -->
+        <div id="version-banner" class="card" style="display: none; margin-bottom: 1.5rem; padding: 0.75rem 1rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 0.85rem; color: var(--text-muted);">
+                    ALICE <strong id="version-current"></strong> &mdash; <span id="version-status">Checking for updates...</span>
+                </span>
+                <button class="btn btn-sm" onclick="checkForUpdate()" style="font-size: 0.8rem; padding: 0.25rem 0.75rem;">Check for Updates</button>
+            </div>
+        </div>
         
         <!-- Admin Key Input -->
         <div class="card">
@@ -1616,7 +1654,142 @@
                     btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> Restart Service`;
                 }
             });
+
+            // ==========================================
+            // Update Notification System
+            // ==========================================
+            checkUpdateStatus();
         });
+
+        // Global update functions (outside DOMContentLoaded)
+        let _updatePollInterval = null;
+
+        async function checkUpdateStatus() {
+            try {
+                const data = await API.fetch('/v1/update/status');
+                updateBannerUI(data);
+            } catch (e) {
+                console.debug('Update status check failed:', e.message);
+                try {
+                    const health = await API.fetch('/health');
+                    const vb = document.getElementById('version-banner');
+                    if (vb && health.version) {
+                        document.getElementById('version-current').textContent = health.version;
+                        document.getElementById('version-status').textContent = 'Update check unavailable';
+                        vb.style.display = 'block';
+                    }
+                } catch (e2) { /* ignore */ }
+            }
+        }
+
+        async function checkForUpdate() {
+            const btn = event && event.target;
+            if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
+            try {
+                const data = await API.fetch('/v1/update/check', { method: 'POST' });
+                updateBannerUI(data);
+                if (!data.update_available) Toast.success('ALICE is up to date!');
+            } catch (e) {
+                Toast.error('Update check failed: ' + e.message);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Check for Updates'; }
+            }
+        }
+
+        async function applyUpdate() {
+            var btn = document.getElementById('update-apply-btn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
+            try {
+                await API.fetch('/v1/update/apply?restart=true', { method: 'POST' });
+                Toast.info('Update started! Monitoring progress...');
+                document.getElementById('update-actions').style.display = 'none';
+                document.getElementById('update-progress').style.display = 'block';
+                _updatePollInterval = setInterval(pollUpdateProgress, 2000);
+            } catch (e) {
+                Toast.error('Failed to start update: ' + e.message);
+                if (btn) { btn.disabled = false; btn.textContent = 'Update Now'; }
+            }
+        }
+
+        async function pollUpdateProgress() {
+            try {
+                var data = await API.fetch('/v1/update/status');
+                var bar = document.getElementById('update-progress-bar');
+                var stage = document.getElementById('update-stage');
+                if (data.update_in_progress) {
+                    var pct = Math.round(data.download_progress * 100);
+                    bar.style.width = pct + '%';
+                    var names = {
+                        checking: 'Checking...', downloading: 'Downloading (' + pct + '%)...',
+                        backing_up: 'Creating backup...', applying: 'Applying update...',
+                        config_migration: 'Migrating config...', dependencies: 'Installing dependencies...',
+                        complete: 'Complete!', restarting: 'Restarting service...'
+                    };
+                    stage.textContent = names[data.update_stage] || data.update_stage || 'Processing...';
+                } else {
+                    clearInterval(_updatePollInterval);
+                    _updatePollInterval = null;
+                    if (data.error) {
+                        Toast.error('Update failed: ' + data.error);
+                        document.getElementById('update-progress').style.display = 'none';
+                        document.getElementById('update-actions').style.display = 'flex';
+                        var rbtn = document.getElementById('update-apply-btn');
+                        if (rbtn) { rbtn.disabled = false; rbtn.textContent = 'Retry Update'; }
+                    } else if (data.update_stage === 'complete' || data.update_stage === 'restarting') {
+                        bar.style.width = '100%';
+                        stage.textContent = 'Update complete! Restarting...';
+                        Toast.success('Update complete! Service is restarting...');
+                        setTimeout(function() {
+                            var attempts = 0;
+                            var waitRestart = function() {
+                                API.fetch('/health').then(function(h) {
+                                    Toast.success('Restarted! Version: ' + h.version);
+                                    setTimeout(function() { location.reload(); }, 1500);
+                                }).catch(function() {
+                                    if (++attempts < 30) setTimeout(waitRestart, 2000);
+                                    else Toast.warning('Service may still be restarting. Please refresh manually.');
+                                });
+                            };
+                            waitRestart();
+                        }, 3000);
+                    } else {
+                        updateBannerUI(data);
+                    }
+                }
+            } catch (e) {
+                console.debug('Update poll failed (server may be restarting):', e.message);
+            }
+        }
+
+        function updateBannerUI(data) {
+            var ub = document.getElementById('update-banner');
+            var vb = document.getElementById('version-banner');
+            var vc = document.getElementById('version-current');
+            var vs = document.getElementById('version-status');
+            if (vb && data.current_version) {
+                vc.textContent = data.current_version;
+                vb.style.display = 'block';
+            }
+            if (data.update_available && data.release_info) {
+                document.getElementById('update-title').textContent =
+                    'Update Available: ' + data.current_version + ' \u2192 ' + data.latest_version;
+                document.getElementById('update-detail').textContent =
+                    data.release_info.name || ('Version ' + data.latest_version);
+                var rl = document.getElementById('update-release-link');
+                if (data.release_info.html_url) { rl.href = data.release_info.html_url; rl.style.display = 'inline'; }
+                else { rl.style.display = 'none'; }
+                ub.style.display = 'block';
+                document.getElementById('update-actions').style.display = 'flex';
+                document.getElementById('update-progress').style.display = 'none';
+                if (vs) vs.innerHTML = '<span style="color: var(--accent);">Update available: ' + data.latest_version + '</span>';
+            } else {
+                ub.style.display = 'none';
+                if (vs) {
+                    var lc = data.last_check ? new Date(data.last_check).toLocaleString() : 'never';
+                    vs.textContent = 'Up to date (last checked: ' + lc + ')';
+                }
+            }
+        }
     </script>
 </body>
 </html>

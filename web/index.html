@@ -198,6 +198,11 @@
     </nav>
     
     <main>
+        <!-- Update Notification (admin only) -->
+        <div id="dash-update-banner" style="display: none; background: var(--accent); color: white; padding: 0.5rem 1rem; border-radius: var(--radius-md); margin-bottom: 1rem; font-size: 0.9rem;">
+            <span id="dash-update-text"></span>
+            <a href="/web/admin.html" style="color: white; text-decoration: underline; margin-left: 0.5rem;">Go to Admin</a>
+        </div>
         <div class="page-header">
             <h1>Dashboard</h1>
             <div class="live-indicator">
@@ -543,6 +548,17 @@
             // Start status polling with faster updates (3 seconds)
             StatusPoller.onUpdate(updateStatus);
             StatusPoller.start(3000);
+
+            // Check for updates (admin-only, non-blocking)
+            try {
+                var ud = await API.fetch('/v1/update/status');
+                if (ud.update_available) {
+                    var banner = document.getElementById('dash-update-banner');
+                    document.getElementById('dash-update-text').textContent =
+                        'Update available: ' + ud.current_version + ' \u2192 ' + ud.latest_version;
+                    banner.style.display = 'block';
+                }
+            } catch (e) { /* ignore - non-admin or update manager not available */ }
         });
     </script>
 </body>
