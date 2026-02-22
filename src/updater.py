@@ -303,17 +303,19 @@ class UpdateManager:
                 logger.info("No releases found on GitHub")
             else:
                 self._status.latest_version = release.version
-                self._status.update_available = is_newer_version(release.version, __version__)
+                self._status.update_available = is_newer_version(
+                    release.version, self._status.current_version
+                )
                 self._status.release_info = release
 
                 if self._status.update_available:
                     logger.info(
                         "Update available: %s -> %s",
-                        __version__,
+                        self._status.current_version,
                         release.version,
                     )
                 else:
-                    logger.debug("Already up to date (%s)", __version__)
+                    logger.debug("Already up to date (%s)", self._status.current_version)
 
             self._status.last_check = datetime.now(timezone.utc).isoformat()
         except Exception as e:
