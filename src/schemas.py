@@ -10,6 +10,7 @@ These MUST match the formats expected by SAM clients.
 
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
+from . import __version__
 
 
 # =============================================================================
@@ -187,7 +188,9 @@ class HealthResponse(BaseModel):
     gpu_available: bool = Field(default=False, alias="gpuAvailable")
     gpu_stats_available: bool = Field(default=False, alias="gpuStatsAvailable")
     models_loaded: int = Field(default=0, alias="modelsLoaded")
-    version: str = Field(default="1.0.0")
+    version: str = Field(default=__version__)
+    uptime_seconds: Optional[float] = Field(default=None, alias="uptimeSeconds")
+    backend: Optional[str] = Field(default=None, description="Active backend type")
 
     model_config = ConfigDict(populate_by_name=True)
 

@@ -8,5 +8,5 @@ A standalone Python service that provides OpenAI-compatible REST API
 endpoints for Stable Diffusion image generation.
 """
 
-__version__ = "1.0.0"
+__version__ = "20260222.1"
 __author__ = "The ALICE Authors"

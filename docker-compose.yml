@@ -1,0 +1,109 @@
+# ALICE Docker Compose Configuration
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Usage:
+#   CPU:    docker compose up -d
+#   CUDA:   docker compose --profile cuda up -d
+#   ROCm:   docker compose --profile rocm up -d
+#
+# Models: Place .safetensors files in ./models/ (or set ALICE_MODELS_DIR)
+# Config: Override with ALICE_CONFIG_FILE=./my-config.yaml
+
+services:
+  # ==========================================
+  # CPU-only (default)
+  # ==========================================
+  alice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GPU: cpu
+    image: ghcr.io/syntheticautonomicmind/alice:latest
+    container_name: alice
+    ports:
+      - "${ALICE_PORT:-8080}:8080"
+    volumes:
+      - ${ALICE_MODELS_DIR:-./models}:/data/models
+      - alice-images:/data/images
+      - alice-data:/data/data
+      - alice-logs:/data/logs
+      - ${ALICE_CONFIG_FILE:-./docker/config.docker.yaml}:/config/config.yaml:ro
+    environment:
+      - ALICE_CONFIG=/config/config.yaml
+    restart: unless-stopped
+    profiles:
+      - cpu
+      - default
+
+  # ==========================================
+  # NVIDIA CUDA
+  # ==========================================
+  alice-cuda:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GPU: cuda
+    image: ghcr.io/syntheticautonomicmind/alice:cuda
+    container_name: alice
+    ports:
+      - "${ALICE_PORT:-8080}:8080"
+    volumes:
+      - ${ALICE_MODELS_DIR:-./models}:/data/models
+      - alice-images:/data/images
+      - alice-data:/data/data
+      - alice-logs:/data/logs
+      - ${ALICE_CONFIG_FILE:-./docker/config.docker.yaml}:/config/config.yaml:ro
+    environment:
+      - ALICE_CONFIG=/config/config.yaml
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    profiles:
+      - cuda
+
+  # ==========================================
+  # AMD ROCm
+  # ==========================================
+  alice-rocm:
+    build:
+      context: .
+      dockerfile: Dockerfile.rocm
+    image: ghcr.io/syntheticautonomicmind/alice:rocm
+    container_name: alice
+    ports:
+      - "${ALICE_PORT:-8080}:8080"
+    volumes:
+      - ${ALICE_MODELS_DIR:-./models}:/data/models
+      - alice-images:/data/images
+      - alice-data:/data/data
+      - alice-logs:/data/logs
+      - ${ALICE_CONFIG_FILE:-./docker/config.docker.yaml}:/config/config.yaml:ro
+    environment:
+      - ALICE_CONFIG=/config/config.yaml
+      - PYTORCH_HIP_ALLOC_CONF=expandable_segments:True
+      - MIOPEN_DEBUG_FIND_ALL=0
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
+    restart: unless-stopped
+    profiles:
+      - rocm
+
+volumes:
+  alice-images:
+    name: alice-images
+  alice-data:
+    name: alice-data
+  alice-logs:
+    name: alice-logs

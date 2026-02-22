@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-FileCopyrightText: Copyright (c) 2026 Andrew Wyatt (Fewtarius)
+#
+# ALICE Dockerfile - AMD ROCm variant
+#
+# Uses the official ROCm base image for AMD GPU support.
+#
+# Build:
+#   docker build -f Dockerfile.rocm -t alice:rocm .
+#
+# Run:
+#   docker run --device=/dev/kfd --device=/dev/dri \
+#     --group-add video --group-add render \
+#     -p 8080:8080 -v alice-models:/data/models \
+#     alice:rocm
+
+ARG ROCM_VERSION=6.2
+ARG PYTHON_VERSION=3.11
+
+# =============================================================================
+# Stage 1: Builder
+# =============================================================================
+FROM rocm/dev-ubuntu-22.04:${ROCM_VERSION}-complete AS builder
+
+ARG PYTHON_VERSION
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-venv \
+    python${PYTHON_VERSION}-dev \
+    python3-pip \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use the specified Python version
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1
+
+WORKDIR /build
+
+# Install PyTorch with ROCm support
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/rocm6.2
+
+# Install remaining dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# =============================================================================
+# Stage 2: Runtime
+# =============================================================================
+FROM rocm/dev-ubuntu-22.04:${ROCM_VERSION}-complete AS runtime
+
+ARG PYTHON_VERSION
+
+LABEL org.opencontainers.image.title="ALICE (ROCm)"
+LABEL org.opencontainers.image.description="ALICE - Remote Stable Diffusion Service with AMD ROCm GPU support"
+LABEL org.opencontainers.image.url="https://github.com/SyntheticAutonomicMind/ALICE"
+LABEL org.opencontainers.image.source="https://github.com/SyntheticAutonomicMind/ALICE"
+LABEL org.opencontainers.image.licenses="GPL-3.0-only"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} \
+    python3-pip \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1
+
+# Create non-root user (with video/render group for GPU access)
+RUN groupadd -r alice && useradd -r -g alice -G video,render -d /app -s /sbin/nologin alice
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python${PYTHON_VERSION}/dist-packages /usr/local/lib/python${PYTHON_VERSION}/dist-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+WORKDIR /app
+RUN mkdir -p /data/models /data/images /data/logs /data/data /data/auth /config
+
+# Copy application code
+COPY src/ /app/src/
+COPY web/ /app/web/
+COPY requirements.txt /app/
+
+# Copy default config
+COPY docker/config.docker.yaml /config/config.yaml
+
+# Set ownership
+RUN chown -R alice:alice /app /data /config
+
+# Environment
+ENV ALICE_CONFIG=/config/config.yaml
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# ROCm environment
+ENV PYTORCH_HIP_ALLOC_CONF=expandable_segments:True
+ENV MIOPEN_DEBUG_FIND_ALL=0
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -sf http://localhost:8080/livez || exit 1
+
+EXPOSE 8080
+
+USER alice
+
+CMD ["python3", "-m", "src.main"]

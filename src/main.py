@@ -38,6 +38,8 @@ from .model_cache import ModelCacheService
 from .auth import AuthManager, SESSION_TIMEOUT_SECONDS, SESSION_INACTIVITY_TIMEOUT_SECONDS, set_session_timeout
 from .gallery import GalleryManager, ImageRecord
 from .cancellation import get_cancellation_registry, CancellationError
+from .updater import init_update_manager, shutdown_update_manager, get_update_manager
+from . import __version__
 from .schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -95,13 +97,15 @@ download_manager: Optional[DownloadManager] = None
 model_cache_service: Optional[ModelCacheService] = None
 auth_manager: Optional[AuthManager] = None
 gallery_manager: Optional[GalleryManager] = None
+_startup_time: Optional[float] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup and shutdown."""
-    global model_registry, generator, download_manager, model_cache_service, auth_manager, gallery_manager
+    global model_registry, generator, download_manager, model_cache_service, auth_manager, gallery_manager, _startup_time
     
     logger.info("ALICE starting up...")
+    _startup_time = time.time()
     
     # Configure session timeout from config
     set_session_timeout(config.server.session_timeout_seconds)
@@ -276,6 +280,16 @@ async def lifespan(app: FastAPI):
     
     cleanup_task = asyncio.create_task(cleanup_expired_images_task())
     
+    # Initialize update manager for self-update capabilities
+    try:
+        await init_update_manager(
+            install_dir=Path(__file__).resolve().parent.parent,
+            auto_check=True,
+        )
+        logger.info("Update manager initialized")
+    except Exception as e:
+        logger.warning("Update manager initialization failed (non-critical): %s", e)
+    
     logger.info(
         "ALICE ready on http://%s:%d",
         config.server.host,
@@ -307,6 +321,9 @@ async def lifespan(app: FastAPI):
     if download_manager:
         await download_manager.stop()
     
+    # Stop update manager
+    await shutdown_update_manager()
+    
     # Unload model
     if generator and generator.is_model_loaded:
         await generator.unload_model()
@@ -321,7 +338,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ALICE",
     description="Remote Stable Diffusion Service with OpenAI-compatible API",
-    version="1.2.1",
+    version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -834,31 +851,54 @@ async def general_exception_handler(request: Request, exc: Exception):
 # ENDPOINTS
 # =============================================================================
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse, tags=["system"])
+@app.get("/api/health", response_model=HealthResponse, tags=["system"])
 async def health_check():
     """
     Health check endpoint.
     
-    Returns service status, GPU availability, and loaded models.
+    Returns service status, GPU availability, loaded models, uptime, and version.
+    Available at both /health (for container probes) and /api/health.
     """
+    uptime = time.time() - _startup_time if _startup_time else None
+
     if generator is None:
         return HealthResponse(
             status="starting",
             gpu_available=False,
             gpu_stats_available=False,
             models_loaded=0,
-            version="1.2.1"
+            version=__version__,
+            uptime_seconds=uptime,
+            backend=None,
         )
     
     gpu_info = generator.get_gpu_info()
+    active_backend = getattr(generator, '_backend_name', None) or config.generation.backend
     
     return HealthResponse(
         status="ok",
         gpu_available=gpu_info["gpu_available"],
         gpu_stats_available=gpu_info.get("stats_available", False),
         models_loaded=1 if generator.is_model_loaded else 0,
-        version="1.2.1"
+        version=__version__,
+        uptime_seconds=uptime,
+        backend=active_backend,
     )
+
+
+@app.get("/livez", tags=["system"])
+async def liveness_probe():
+    """Lightweight liveness probe for container orchestrators (k8s, Docker)."""
+    return {"status": "alive"}
+
+
+@app.get("/readyz", tags=["system"])
+async def readiness_probe():
+    """Readiness probe - returns 200 only when the service can accept requests."""
+    if generator is None:
+        raise HTTPException(status_code=503, detail="Service starting up")
+    return {"status": "ready"}
 
 
 @app.get("/v1/generation/defaults")
@@ -3022,6 +3062,147 @@ async def restart_service(
         "status": "restarting",
         "message": "Service shutdown initiated. If running under a process supervisor, it will restart automatically.",
         "method": "sigterm"
+    }
+
+
+# =============================================================================
+# UPDATE MANAGEMENT ENDPOINTS
+# =============================================================================
+
+@app.get("/v1/update/status", tags=["updates"])
+async def update_status(
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ADMIN))
+):
+    """
+    Get current update status.
+
+    Returns the current version, latest available version, whether an update
+    is available, and the status of any in-progress update operation.
+    Requires admin privileges.
+    """
+    manager = get_update_manager()
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Update manager not available")
+    return manager.status.to_dict()
+
+
+@app.post("/v1/update/check", tags=["updates"])
+async def update_check(
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ADMIN))
+):
+    """
+    Check for available updates.
+
+    Queries GitHub Releases for the latest version and compares with
+    the running version. Requires admin privileges.
+    """
+    manager = get_update_manager()
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Update manager not available")
+
+    status = await manager.check_for_update()
+    return status.to_dict()
+
+
+@app.post("/v1/update/apply", tags=["updates"])
+async def update_apply(
+    version: Optional[str] = None,
+    restart: bool = True,
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ADMIN))
+):
+    """
+    Apply an available update.
+
+    Downloads and installs the specified version (or latest if not specified).
+    Creates a backup of the current installation before applying.
+    Optionally restarts the service after the update.
+    Requires admin privileges.
+
+    Args:
+        version: Specific version to install (e.g., "1.3.0"). Defaults to latest.
+        restart: Whether to restart the service after updating. Defaults to True.
+    """
+    manager = get_update_manager()
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Update manager not available")
+
+    if manager.status.update_in_progress:
+        raise HTTPException(status_code=409, detail="Update already in progress")
+
+    # Run the update in the background so the response returns immediately
+    async def _do_update():
+        try:
+            await manager.apply_update(version=version, restart=restart)
+        except Exception as e:
+            logger.exception("Background update failed: %s", e)
+
+    asyncio.create_task(_do_update())
+
+    return {
+        "status": "update_started",
+        "message": f"Update to {'latest' if not version else version} initiated. "
+                   f"Monitor progress at /v1/update/status.",
+        "restart_after": restart,
+    }
+
+
+@app.post("/v1/update/rollback", tags=["updates"])
+async def update_rollback(
+    version: Optional[str] = None,
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ADMIN))
+):
+    """
+    Rollback to a previous version.
+
+    Restores from a backup created during a previous update.
+    If no version is specified, rolls back to the most recent backup.
+    Requires admin privileges.
+
+    Args:
+        version: Specific backup version to restore. Defaults to most recent.
+    """
+    manager = get_update_manager()
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Update manager not available")
+
+    if manager.status.update_in_progress:
+        raise HTTPException(status_code=409, detail="Update operation in progress")
+
+    success = await manager.rollback(backup_version=version)
+    if not success:
+        raise HTTPException(status_code=404, detail="Rollback failed - no matching backup found")
+
+    return {
+        "status": "rollback_complete",
+        "message": f"Rolled back to version {version or 'previous'}. Restart recommended.",
+    }
+
+
+@app.get("/v1/update/backups", tags=["updates"])
+async def update_list_backups(
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ADMIN))
+):
+    """
+    List available backups for rollback.
+
+    Returns a list of backup snapshots created during previous updates,
+    sorted newest first. Requires admin privileges.
+    """
+    manager = get_update_manager()
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Update manager not available")
+
+    backups = manager.list_backups()
+    return {
+        "backups": [
+            {
+                "version": b.version,
+                "timestamp": b.timestamp,
+                "size_mb": round(b.size_bytes / (1024 * 1024), 1),
+            }
+            for b in backups
+        ],
+        "max_backups": 5,
     }
 
 

@@ -1,0 +1,206 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-FileCopyrightText: Copyright (c) 2026 Andrew Wyatt (Fewtarius)
+#
+# ALICE Release Workflow
+#
+# Triggered by pushing a version tag (e.g., v20260222.1).
+# Creates a GitHub Release with a distribution tarball and
+# builds + pushes Docker container images to GHCR.
+#
+# Version format: YYYYMMDD.RELEASE (e.g., 20260222.1)
+# All Synthetic Autonomic Mind software uses this format.
+#
+# Usage:
+#   git tag v20260222.1
+#   git push origin v20260222.1
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write    # Create releases
+  packages: write    # Push container images
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ===========================================================================
+  # Job 1: Create GitHub Release with distribution tarball
+  # ===========================================================================
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify version consistency
+        run: |
+          # Check that the tag version matches src/__init__.py
+          code_version=$(python3 -c "
+          with open('src/__init__.py') as f:
+              for line in f:
+                  if '__version__' in line:
+                      print(line.split('\"')[1])
+                      break
+          ")
+          tag_version="${{ steps.version.outputs.version }}"
+          if [ "$code_version" != "$tag_version" ]; then
+            echo "::error::Version mismatch! Tag: $tag_version, Code: $code_version"
+            echo "Update src/__init__.py to match the tag version before releasing."
+            exit 1
+          fi
+          echo "Version verified: $tag_version"
+
+      - name: Build distribution tarball
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DIST_NAME="alice-${VERSION}"
+          DIST_DIR="dist/${DIST_NAME}"
+          mkdir -p "${DIST_DIR}"
+
+          # Copy application files (respecting .distignore)
+          rsync -a \
+            --exclude-from=.distignore \
+            --exclude='dist/' \
+            --exclude='.alice-backups/' \
+            . "${DIST_DIR}/"
+
+          # Create tarball
+          cd dist
+          tar -czf "${DIST_NAME}.tar.gz" "${DIST_NAME}"
+          sha256sum "${DIST_NAME}.tar.gz" > "${DIST_NAME}.tar.gz.sha256"
+          echo "Created: dist/${DIST_NAME}.tar.gz"
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cat > release_notes.md << 'EOF'
+          ## ALICE ${{ steps.version.outputs.version }}
+
+          ### Installation
+
+          **Docker (recommended):**
+          ```bash
+          # CPU
+          docker pull ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
+
+          # NVIDIA CUDA
+          docker pull ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}-cuda
+
+          # AMD ROCm
+          docker pull ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}-rocm
+          ```
+
+          **Manual installation:**
+          ```bash
+          # Download and extract
+          wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/alice-${{ steps.version.outputs.version }}.tar.gz
+          tar -xzf alice-${{ steps.version.outputs.version }}.tar.gz
+          cd alice-${{ steps.version.outputs.version }}
+          sudo ./scripts/install.sh
+          ```
+
+          **Self-update (from running ALICE):**
+          ```bash
+          curl -X POST http://localhost:8080/v1/update/apply \
+            -H "Authorization: Bearer YOUR_ADMIN_API_KEY"
+          ```
+
+          ### Checksums
+          See `alice-${{ steps.version.outputs.version }}.tar.gz.sha256` for SHA256 verification.
+          EOF
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/alice-${{ steps.version.outputs.version }}.tar.gz
+            dist/alice-${{ steps.version.outputs.version }}.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ===========================================================================
+  # Job 2: Build and push Docker images
+  # ===========================================================================
+  docker:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: release
+
+    strategy:
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            gpu: cpu
+            suffix: ""
+            platforms: linux/amd64,linux/arm64
+          - dockerfile: Dockerfile
+            gpu: cuda
+            suffix: "-cuda"
+            platforms: linux/amd64
+          - dockerfile: Dockerfile.rocm
+            gpu: rocm
+            suffix: "-rocm"
+            platforms: linux/amd64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU (for multi-arch builds)
+        uses: docker/setup-qemu-action@v3
+        if: contains(matrix.platforms, ',')
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=match,pattern=v(.*),group=1,suffix=${{ matrix.suffix }}
+            type=raw,value=latest,suffix=${{ matrix.suffix }},enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GPU=${{ matrix.gpu }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

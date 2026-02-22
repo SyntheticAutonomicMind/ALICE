@@ -34,11 +34,21 @@ Environment="PYTORCH_ROCM_ARCH=gfx1103"
 # Start command
 ExecStart=/opt/alice/venv/bin/python -m src.main
 
+# Graceful reload - sends SIGHUP for config reload
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Health check before marking service as started
+# Waits up to 120s for the /health endpoint to respond
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf http://localhost:8090/livez >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
+
 # Restart configuration
 Restart=always
 RestartSec=10
 TimeoutStartSec=300
 TimeoutStopSec=60
+
+# Systemd watchdog (optional - requires app support)
+# WatchdogSec=60
 
 # Security hardening
 NoNewPrivileges=yes
