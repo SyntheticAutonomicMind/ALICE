@@ -903,6 +903,7 @@ class PyTorchBackend(BaseBackend):
                     from diffusers import StableDiffusionXLPipeline
                     pipeline_class = StableDiffusionXLPipeline
                     is_sdxl_result = True  # Enable extra memory optimizations
+                    model_type = "sdxl"  # Override detection for single-file SDXL
                 else:
                     logger.info("Detected SD 1.5 single-file model (%.1f GB)", file_size_gb)
                     from diffusers import StableDiffusionPipeline
