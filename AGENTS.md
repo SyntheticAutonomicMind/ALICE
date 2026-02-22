@@ -19,8 +19,19 @@
 - FastAPI 0.104+ for web server
 - PyTorch 2.6.0 for model inference
 - Diffusers (latest) for Stable Diffusion pipelines
+- stable-diffusion.cpp (sd.cpp) for Vulkan-based inference
 - Uvicorn for ASGI server
 - Pydantic for data validation
+
+**Supported Model Types:**
+- **SD 1.5** - Stable Diffusion 1.5 (.safetensors)
+- **SDXL** - Stable Diffusion XL (.safetensors or diffusers)
+- **FLUX** - Black Forest Labs FLUX (.safetensors or diffusers)
+- **Qwen Image Edit** - Qwen2.5-based image editing (.gguf, multi-component)
+
+**Supported Generation Modes:**
+- **Text-to-Image** - Generate images from text prompts
+- **Image-to-Image** - Edit/transform existing images with text instructions
 
 ---
 
@@ -89,6 +100,7 @@ FastAPI Application (src/main.py)
     |   +-- GeneratorService (src/generator.py)
     |   |   - Request coordination
     |   |   - Job queue management
+    |   |   - Text-to-image and image-to-image routing
     |   |
     |   +-- JobQueue (src/job_queue.py)
     |   |   - Concurrent request management
@@ -96,13 +108,17 @@ FastAPI Application (src/main.py)
     |   |
     |   +-- Backend System (src/backends/)
     |       +-- PyTorchBackend (pytorch_backend.py)
-    |       |   - GPU-accelerated generation
-    |       |   - SD 1.5, SDXL, FLUX support
+    |       |   - GPU-accelerated generation (ROCm/CUDA/MPS)
+    |       |   - SD 1.5, SDXL, FLUX, Qwen support
+    |       |   - Text-to-image and image-to-image
     |       |   - Memory optimization
     |       |
     |       +-- SDCppBackend (sdcpp_backend.py)
     |           - Vulkan-based generation
     |           - Universal GPU support
+    |           - GGUF model format
+    |           - Multi-component model configs (YAML)
+    |           - Text-to-image and image-to-image
     |
     +-- Gallery Management (src/gallery.py)
     |   - Image metadata storage
@@ -140,14 +156,24 @@ FastAPI Application (src/main.py)
 
 **Key Files:**
 
-- `src/main.py` - FastAPI application entry point (104,458 bytes)
-- `src/backends/pytorch_backend.py` - PyTorch generation backend (61,215 bytes)
-- `src/downloader.py` - Model download manager (38,232 bytes)
-- `src/model_cache.py` - Model caching system (35,098 bytes)
-- `src/auth.py` - Authentication and authorization (25,348 bytes)
+- `src/main.py` - FastAPI application entry point
+- `src/backends/pytorch_backend.py` - PyTorch generation backend (text2img + img2img)
+- `src/backends/sdcpp_backend.py` - sd.cpp Vulkan backend (text2img + img2img, GGUF models)
+- `src/model_registry.py` - Model scanning (.safetensors, .gguf, diffusers directories)
+- `src/downloader.py` - Model download manager
+- `src/model_cache.py` - Model caching system
+- `src/auth.py` - Authentication and authorization
+- `src/schemas.py` - Pydantic schemas (includes img2img fields)
 - `config.yaml` - Configuration file
 - `Makefile` - Build and run commands
 - `requirements.txt` - Python dependencies
+
+**Model Configuration Files (YAML):**
+
+Multi-component GGUF models use sidecar YAML configs:
+- `models/mymodel.gguf` + `models/mymodel.yaml` - model + config
+- Config specifies auxiliary files (VAE, LLM encoder) and sd-cli flags
+- See `docs/BACKEND-ARCHITECTURE.md` for full schema
 
 ---
 

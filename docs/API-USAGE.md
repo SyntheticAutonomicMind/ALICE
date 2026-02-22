@@ -35,6 +35,51 @@ Authorization: Bearer <your-api-key>  (if authentication is enabled)
 }
 ```
 
+### Image-to-Image (img2img) Request
+
+For image editing or style transfer, provide input images via base64 or URL:
+
+```json
+{
+  "model": "sd/qwen-image-edit-2511-Q2_K",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Transform it into Pixar-inspired 3D"
+    }
+  ],
+  "samConfig": {
+    "steps": 30,
+    "guidance_scale": 2.5,
+    "width": 1024,
+    "height": 1024,
+    "scheduler": "euler",
+    "strength": 0.75,
+    "input_images": ["<base64-encoded-image-data>"]
+  }
+}
+```
+
+Or provide input images via URL:
+
+```json
+{
+  "model": "sd/qwen-image-edit-2511-Q2_K",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Age the person to 50 years old"
+    }
+  ],
+  "samConfig": {
+    "guidance_scale": 2.5,
+    "scheduler": "euler",
+    "strength": 0.75,
+    "input_image_urls": ["https://example.com/photo.jpg"]
+  }
+}
+```
+
 ### SAM Config Fields
 
 All fields are **optional** - server uses `config.yaml` defaults if omitted.
@@ -42,7 +87,7 @@ All fields are **optional** - server uses `config.yaml` defaults if omitted.
 | Field | Type | Range | Description |
 |-------|------|-------|-------------|
 | `steps` | int | 1-150 | Inference steps (NOT `num_inference_steps`) |
-| `guidance_scale` | float | 0.0-20.0 | CFG scale (0.0 for SD Turbo models) |
+| `guidance_scale` | float | 0.0-20.0 | CFG scale (0.0 for SD Turbo models, 2.5 for Qwen) |
 | `width` | int | 64-2048 | Image width (auto-rounded to multiple of 8) |
 | `height` | int | 64-2048 | Image height (auto-rounded to multiple of 8) |
 | `negative_prompt` | string | - | Negative prompt |
@@ -51,6 +96,9 @@ All fields are **optional** - server uses `config.yaml` defaults if omitted.
 | `num_images` | int | 1-100 | Number of images to generate |
 | `lora_paths` | array[string] | - | List of LoRA IDs to apply |
 | `lora_scales` | array[float] | 0.0-1.0 | LoRA weights (same length as `lora_paths`) |
+| `strength` | float | 0.0-1.0 | Denoising strength for img2img (0=no change, 1=full denoise) |
+| `input_images` | array[string] | - | Base64-encoded input images for img2img |
+| `input_image_urls` | array[string] | - | URLs of input images for img2img |
 
 **⚠️ IMPORTANT**: Field names are **case-sensitive**:
 - Use `steps`, NOT `num_inference_steps`
@@ -102,7 +150,7 @@ All fields are **optional** - server uses `config.yaml` defaults if omitted.
 
 ### Examples
 
-#### cURL
+#### cURL (Text-to-Image)
 
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
@@ -117,6 +165,29 @@ curl -X POST http://localhost:8080/v1/chat/completions \
       "height": 512
     }
   }'
+```
+
+#### cURL (Image-to-Image with Qwen)
+
+```bash
+# Encode input image to base64
+INPUT_IMAGE=$(base64 -i input.jpg)
+
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"sd/qwen-image-edit-2511-Q2_K\",
+    \"messages\": [{\"role\": \"user\", \"content\": \"Transform it into Pixar-inspired 3D\"}],
+    \"samConfig\": {
+      \"steps\": 30,
+      \"guidance_scale\": 2.5,
+      \"width\": 1024,
+      \"height\": 1024,
+      \"scheduler\": \"euler\",
+      \"strength\": 0.75,
+      \"input_images\": [\"${INPUT_IMAGE}\"]
+    }
+  }"
 ```
 
 #### Python

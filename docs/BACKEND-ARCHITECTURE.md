@@ -111,9 +111,15 @@ class BaseBackend(ABC):
         lora_paths: Optional[List[Path]] = None,
         lora_scales: Optional[List[float]] = None,
         cancellation_token: Optional[Any] = None,
+        input_images: Optional[list] = None,
+        strength: Optional[float] = None,
     ) -> Tuple[List[Path], Dict[str, Any]]:
         """
         Generate image(s).
+        
+        Args:
+            input_images: List of PIL Images for img2img mode
+            strength: Denoising strength for img2img (0.0-1.0)
         
         Returns:
             Tuple of (list_of_image_paths, metadata_dict)
@@ -358,6 +364,88 @@ async def test_backend_generation():
         assert paths[0].exists()
         assert metadata["prompt"] == "a red apple"
 ```
+
+## Multi-Component Model Configuration (YAML)
+
+Some models (e.g., Qwen Image Edit) require multiple files: a diffusion model, a VAE, and an LLM
+encoder. The sdcpp backend supports this via YAML configuration files placed alongside the model.
+
+### Config File Convention
+
+For a model file `mymodel.gguf`, create `mymodel.yaml` in the same directory:
+
+```yaml
+# Model configuration for multi-component GGUF models
+# Used by ALICE sdcpp backend to wire up auxiliary files
+
+model_type: qwen_image_edit_2511
+
+# Auxiliary model files (resolved relative to this file's directory)
+vae: qwen_image_vae.safetensors
+llm: Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf
+
+# Extra command-line flags for sd-cli
+flags:
+  - --qwen-image-zero-cond-t
+  - --flow-shift
+  - "3"
+  - --offload-to-cpu
+  - -v
+
+# Default generation parameters (overridden by user settings)
+defaults:
+  guidance_scale: 2.5
+  scheduler: euler
+  steps: 30
+```
+
+### How It Works
+
+1. **Model registry** scans for `.gguf` files and registers them as models
+2. **Auxiliary files** (VAE, LLM encoders) are automatically excluded from the model list
+   by name pattern matching (e.g., `qwen2.5-vl`, `_vae`, `text_encoder`, `clip`)
+3. When generating, the sdcpp backend loads the YAML config and:
+   - Adds `--vae <path>` and `--llm <path>` flags to the sd-cli command
+   - Appends any extra `flags` from the config
+   - Applies `defaults` for parameters the user hasn't overridden
+
+### Supported Auxiliary Files
+
+| YAML Key | sd-cli Flag | Purpose |
+|----------|-------------|---------|
+| `vae` | `--vae` | VAE model file (.safetensors or .gguf) |
+| `llm` | `--llm` | LLM text encoder (.gguf) |
+| `clip_l` | `--clip_l` | CLIP-L text encoder |
+| `t5xxl` | `--t5xxl` | T5-XXL text encoder |
+
+### Example: Qwen Image Edit 2511
+
+Required files in the models directory:
+```
+models/
+├── qwen-image-edit-2511-Q2_K.gguf       # Diffusion model (7 GB)
+├── qwen-image-edit-2511-Q2_K.yaml       # Config file
+├── qwen_image_vae.safetensors           # Shared VAE (243 MB)
+└── Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf  # LLM encoder (4.4 GB)
+```
+
+## Image-to-Image (img2img) Pipeline
+
+Both backends support img2img generation. The pipeline:
+
+1. **Client** sends input image(s) via base64 or URL in `samConfig`
+2. **main.py** decodes images into PIL Image objects
+3. **Backend** receives `input_images` list and `strength` parameter
+4. **SDCppBackend**: Saves input image to temp file, passes via `-r <path> --strength <value>`
+5. **PyTorchBackend**: Uses `StableDiffusionImg2ImgPipeline` with PIL images directly
+
+### Strength Parameter
+
+- `0.0`: No denoising (output = input)
+- `0.75`: Default - good balance of editing and preservation
+- `1.0`: Full denoising (ignores input image)
+
+For Qwen Image Edit models, strength controls how much the edit instruction modifies the image.
 
 ## Performance Expectations
 

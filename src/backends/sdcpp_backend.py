@@ -423,7 +423,7 @@ class SDCppBackend(BaseBackend):
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=30 * 60,  # 30 minute timeout
+                timeout=120 * 60,  # 2 hour timeout (large models need time to load)
                 check=False  # Don't raise on non-zero exit
             )
         
@@ -444,9 +444,9 @@ class SDCppBackend(BaseBackend):
             stdout = result.stdout.decode('utf-8', errors='replace')
             stderr = result.stderr.decode('utf-8', errors='replace')
             if stdout:
-                logger.info(f"sd-cli stdout: {stdout[:500]}")
+                logger.info(f"sd-cli stdout: {stdout[:2000]}")
             if stderr:
-                logger.info(f"sd-cli stderr: {stderr[:500]}")
+                logger.info(f"sd-cli stderr: {stderr[:2000]}")
             
             # Check exit code
             if result.returncode != 0:
@@ -500,8 +500,8 @@ class SDCppBackend(BaseBackend):
             return ([output_path], metadata)
         
         except subprocess.TimeoutExpired:
-            logger.error(f"sd-cli timed out after 30 minutes")
-            raise RuntimeError("Image generation timed out (30 minutes)")
+            logger.error(f"sd-cli timed out after 2 hours")
+            raise RuntimeError("Image generation timed out (2 hours)")
         
         except Exception as e:
             logger.error(f"sd-cli execution failed: {e}")
@@ -667,7 +667,6 @@ class SDCppBackend(BaseBackend):
         except RuntimeError:
             return False
     
-    @staticmethod
     def _load_model_config(self, model_path: Path) -> Optional[Dict[str, Any]]:
         """
         Load model-specific configuration from a YAML file alongside the model.
