@@ -220,6 +220,49 @@ class GalleryManager:
                 return True
             return False
     
+    def _filter_accessible(
+        self,
+        api_key_id: Optional[str] = None,
+        is_admin: bool = False,
+        include_public: bool = True,
+        include_private: bool = True,
+        tags: Optional[List[str]] = None,
+        search: Optional[str] = None,
+    ) -> List[ImageRecord]:
+        """Return all accessible images matching filters, sorted newest first.
+
+        Must be called while holding self._lock.
+        """
+        accessible = []
+
+        for image in self._images.values():
+            if image.is_public and image.is_expired():
+                continue
+            if not image.is_accessible_by(api_key_id, is_admin):
+                continue
+
+            is_own_image = api_key_id and image.owner_api_key_id == api_key_id
+
+            if image.is_public and not include_public:
+                if not is_own_image:
+                    continue
+            if not image.is_public and not include_private:
+                continue
+
+            if tags:
+                image_tags = set(image.tags or [])
+                if not all(tag in image_tags for tag in tags):
+                    continue
+
+            if search:
+                if search.lower() not in image.prompt.lower():
+                    continue
+
+            accessible.append(image)
+
+        accessible.sort(key=lambda x: x.created_at, reverse=True)
+        return accessible
+
     def list_images(
         self,
         api_key_id: Optional[str] = None,
@@ -241,53 +284,44 @@ class GalleryManager:
             include_private: Include private images (only owner's)
             tags: Filter by tags (images must have ALL specified tags)
             search: Search prompt text (case-insensitive)
-            limit: Maximum number of images to return
+            limit: Maximum number of images to return (0 = return all)
             offset: Offset for pagination
         
         Returns:
             List of accessible images, sorted by created_at (newest first)
         """
         with self._lock:
-            accessible = []
-            
-            for image in self._images.values():
-                # Skip expired public images
-                if image.is_public and image.is_expired():
-                    continue
-                
-                # Check access
-                if not image.is_accessible_by(api_key_id, is_admin):
-                    continue
-                
-                # Filter by public/private preference
-                is_own_image = api_key_id and image.owner_api_key_id == api_key_id
-                
-                if image.is_public and not include_public:
-                    if not is_own_image:  # Always include own images
-                        continue
-                
-                if not image.is_public and not include_private:
-                    continue
-                
-                # Filter by tags (must have ALL specified tags)
-                if tags:
-                    image_tags = set(image.tags or [])
-                    if not all(tag in image_tags for tag in tags):
-                        continue
-                
-                # Filter by search query (case-insensitive prompt search)
-                if search:
-                    search_lower = search.lower()
-                    if search_lower not in image.prompt.lower():
-                        continue
-                
-                accessible.append(image)
-            
-            # Sort by newest first
-            accessible.sort(key=lambda x: x.created_at, reverse=True)
-            
-            # Apply pagination
-            return accessible[offset:offset + limit]
+            accessible = self._filter_accessible(
+                api_key_id=api_key_id,
+                is_admin=is_admin,
+                include_public=include_public,
+                include_private=include_private,
+                tags=tags,
+                search=search,
+            )
+            if limit > 0:
+                return accessible[offset:offset + limit]
+            return accessible[offset:]
+
+    def count_images(
+        self,
+        api_key_id: Optional[str] = None,
+        is_admin: bool = False,
+        include_public: bool = True,
+        include_private: bool = True,
+        tags: Optional[List[str]] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        """Return total count of accessible images matching filters."""
+        with self._lock:
+            return len(self._filter_accessible(
+                api_key_id=api_key_id,
+                is_admin=is_admin,
+                include_public=include_public,
+                include_private=include_private,
+                tags=tags,
+                search=search,
+            ))
     
     def cleanup_expired(self, images_dir: Path) -> int:
         """

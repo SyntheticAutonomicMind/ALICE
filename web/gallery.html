@@ -732,6 +732,8 @@
                 <p>Loading gallery...</p>
             </div>
         </div>
+        
+
     </main>
     
     <!-- Image Viewer with Sidebar -->
@@ -771,10 +773,16 @@
     
     <script src="/web/app.js"></script>
     <script>
-        let currentImages = [];
-        let filteredImages = [];
+        let currentImages = [];       // All images loaded so far
+        let filteredImages = [];       // After client-side filters
         let currentViewerIndex = -1;
-        let visualImageOrder = []; // Track visual order from gallery
+        let visualImageOrder = [];
+        let galleryPageSize = 100;     // From admin config
+        let galleryOffset = 0;         // Server pagination offset
+        let galleryTotal = 0;          // Total images on server
+        let isLoadingMore = false;     // Prevent concurrent loads
+        let hasMoreImages = true;      // More pages available
+        let allModelsSet = new Set();  // Models seen across pages
         
         // Get visual order of images from gallery DOM
         function updateVisualImageOrder() {
@@ -786,28 +794,21 @@
             });
         }
         
-        // Load gallery
+        // Load gallery (initial load or filter reset)
         async function loadGallery() {
             const gallery = document.getElementById('gallery');
             gallery.innerHTML = '<div class="loading-container"><div class="spinner"></div><p>Loading gallery...</p></div>';
             
+            // Reset pagination state
+            currentImages = [];
+            filteredImages = [];
+            galleryOffset = 0;
+            galleryTotal = 0;
+            hasMoreImages = true;
+            allModelsSet = new Set();
+            
             try {
-                const { API, Toast } = window.SDAPI;
-                const response = await API.fetch('/v1/gallery');
-                
-                if (!response || !response.data) {
-                    throw new Error('Invalid response from server');
-                }
-                
-                currentImages = response.data;
-                applyFilters();
-                
-                // Populate model filter
-                const models = [...new Set(currentImages.map(img => img.model))];
-                const modelFilter = document.getElementById('filter-model');
-                modelFilter.innerHTML = '<option value="">All Models</option>' +
-                    models.map(model => `<option value="${model}">${model}</option>`).join('');
-                
+                await fetchPage();
             } catch (error) {
                 console.error('Failed to load gallery:', error);
                 gallery.innerHTML = `
@@ -823,45 +824,259 @@
             }
         }
         
-        // Apply filters and render
-        function applyFilters() {
-            const modelFilter = document.getElementById('filter-model').value;
-            const privacyFilter = document.getElementById('filter-privacy').value;
-            const sortFilter = document.getElementById('filter-sort').value;
-            const searchQuery = document.getElementById('search-prompt').value.toLowerCase();
-            const tagsInput = document.getElementById('filter-tags').value.toLowerCase();
-            const tagFilters = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
-            
-            // Filter
-            filteredImages = currentImages.filter(img => {
-                if (modelFilter && img.model !== modelFilter) return false;
-                if (privacyFilter === 'private' && img.isPublic) return false;
-                if (privacyFilter === 'public' && !img.isPublic) return false;
-                if (searchQuery && !img.prompt.toLowerCase().includes(searchQuery)) return false;
-                // Tag filtering: image must have ALL specified tags
-                if (tagFilters.length > 0) {
-                    const imageTags = (img.tags || []).map(t => t.toLowerCase());
-                    if (!tagFilters.every(t => imageTags.includes(t))) return false;
+        // Build query params for server-side filters
+        function buildGalleryParams() {
+            var params = 'limit=' + (galleryPageSize > 0 ? galleryPageSize : 0);
+            params += '&offset=' + galleryOffset;
+            var pf = document.getElementById('filter-privacy').value;
+            if (pf === 'private') params += '&include_public=false';
+            else if (pf === 'public') params += '&include_private=false';
+            var sq = document.getElementById('search-prompt').value.trim();
+            if (sq) params += '&search=' + encodeURIComponent(sq);
+            var ti = document.getElementById('filter-tags').value.trim();
+            if (ti) params += '&tags=' + encodeURIComponent(ti);
+            return params;
+        }
+        
+        // Fetch one page of images from server
+        async function fetchPage() {
+            if (isLoadingMore) return;
+            if (!hasMoreImages && galleryOffset > 0) return;
+            isLoadingMore = true;
+            try {
+                var params = buildGalleryParams();
+                var response = await window.SDAPI.API.fetch('/v1/gallery?' + params);
+                if (!response || !response.data) throw new Error('Invalid response');
+                galleryTotal = response.total;
+                var newImages = response.data;
+                currentImages = currentImages.concat(newImages);
+                galleryOffset += newImages.length;
+                var effectiveLimit = galleryPageSize > 0 ? galleryPageSize : 0;
+                if (effectiveLimit === 0 || newImages.length < effectiveLimit || galleryOffset >= galleryTotal) {
+                    hasMoreImages = false;
                 }
+                newImages.forEach(function(img) { allModelsSet.add(img.model); });
+                updateModelDropdown();
+                if (galleryOffset === newImages.length) {
+                    // Initial load - full render
+                    applyFilters();
+                } else {
+                    // Load more - append only new images
+                    appendImages(newImages);
+                }
+            } finally {
+                isLoadingMore = false;
+            }
+        }
+        
+        // Update model filter dropdown
+        function updateModelDropdown() {
+            var mf = document.getElementById('filter-model');
+            var cv = mf.value;
+            var models = Array.from(allModelsSet).sort();
+            mf.innerHTML = '<option value="">All Models</option>';
+            models.forEach(function(m) {
+                var opt = document.createElement('option');
+                opt.value = m; opt.textContent = m;
+                if (m === cv) opt.selected = true;
+                mf.appendChild(opt);
+            });
+        }
+        
+        // Load more images (button click)
+        async function loadMoreImages() {
+            var btn = document.getElementById('load-more-btn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+            try {
+                await fetchPage();
+            } catch (e) {
+                console.error('Failed to load more:', e);
+                if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+            }
+        }
+        
+        // Update gallery count and Load More button
+        function updateGalleryStatus() {
+            var count = document.getElementById('gallery-count');
+            if (hasMoreImages && galleryTotal > 0) {
+                count.textContent = filteredImages.length + ' of ' + galleryTotal + ' images';
+            } else {
+                count.textContent = filteredImages.length + ' image' + (filteredImages.length !== 1 ? 's' : '');
+            }
+            // Ensure Load More container exists
+            var lmc = document.getElementById('load-more-container');
+            if (!lmc) {
+                lmc = document.createElement('div');
+                lmc.id = 'load-more-container';
+                lmc.style.cssText = 'text-align:center; padding:2rem 0;';
+                var btn = document.createElement('button');
+                btn.id = 'load-more-btn';
+                btn.className = 'btn btn-primary';
+                btn.style.cssText = 'padding:0.75rem 2rem; font-size:1rem;';
+                btn.onclick = loadMoreImages;
+                lmc.appendChild(btn);
+                // Insert after gallery container in the DOM
+                var gallery = document.getElementById('gallery');
+                gallery.parentNode.insertBefore(lmc, gallery.nextSibling);
+            }
+            var lmb = document.getElementById('load-more-btn');
+            if (hasMoreImages && galleryPageSize > 0) {
+                var remaining = galleryTotal - galleryOffset;
+                lmb.disabled = false;
+                lmb.textContent = 'Load More (' + remaining + ' remaining)';
+                lmc.style.display = 'block';
+            } else {
+                lmc.style.display = 'none';
+            }
+        }
+        
+        // Append new images to gallery without full re-render
+        function appendImages(newImages) {
+            var gallery = document.getElementById('gallery');
+            var modelFilter = document.getElementById('filter-model').value;
+            
+            // Filter new images (client-side model filter)
+            var filtered = newImages.filter(function(img) {
+                if (modelFilter && img.model !== modelFilter) return false;
                 return true;
             });
             
-            // Sort
-            if (sortFilter === 'newest') {
-                filteredImages.sort((a, b) => new Date(b.createdAt * 1000) - new Date(a.createdAt * 1000));
-            } else {
-                filteredImages.sort((a, b) => new Date(a.createdAt * 1000) - new Date(b.createdAt * 1000));
+            // Also add to filteredImages array
+            filteredImages = filteredImages.concat(filtered);
+            
+            // Create DOM elements
+            var fragment = document.createDocumentFragment();
+            var newElements = [];
+            filtered.forEach(function(img) {
+                var modelName = img.model.replace('sd/', '').substring(0, 20);
+                var div = document.createElement('div');
+                div.className = 'gallery-item';
+                div.setAttribute('data-image-id', img.id);
+                div.onclick = function() { openViewerByImageId(img.id); };
+                div.innerHTML = '<img src="' + img.url + '" alt="' + escapeHtml(img.prompt).substring(0, 100) + '" loading="lazy">' +
+                    '<div class="gallery-overlay">' +
+                    '<div class="overlay-top">' +
+                    '<span class="privacy-badge ' + (img.isPublic ? 'public' : 'private') + '">' + (img.isPublic ? 'Public' : 'Private') + '</span>' +
+                    '<span class="model-badge" title="' + escapeHtml(img.model) + '">' + escapeHtml(modelName) + '</span>' +
+                    '</div>' +
+                    '<div class="overlay-actions">' +
+                    '<button class="overlay-btn" onclick="event.stopPropagation(); regenerateImage(\'' + img.id + '\')" title="Regenerate"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button>' +
+                    '<button class="overlay-btn" onclick="event.stopPropagation(); downloadImage(\'' + img.url + '\', \'' + img.id + '\')" title="Download"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg></button>' +
+                    (img.isOwner ? '<button class="overlay-btn danger" onclick="event.stopPropagation(); confirmDelete(\'' + img.id + '\')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>' : '') +
+                    '</div></div>';
+                fragment.appendChild(div);
+                newElements.push(div);
+            });
+            
+            // Append to gallery
+            gallery.appendChild(fragment);
+            
+            // Update button state function
+            function updateLoadMoreButton() {
+                updateGalleryStatus();
             }
             
-            renderGallery();
+            // Re-initialize Masonry with all items (existing + new)
+            if (window.Masonry) {
+                // Freeze gallery dimensions to prevent layout shift during re-init
+                var currentHeight = gallery.offsetHeight;
+                var existingItems = gallery.querySelectorAll('.gallery-item');
+                var savedPositions = [];
+                existingItems.forEach(function(item) {
+                    savedPositions.push({
+                        el: item,
+                        top: item.style.top,
+                        left: item.style.left,
+                        position: item.style.position
+                    });
+                });
+                // Freeze gallery container dimensions
+                gallery.style.minHeight = currentHeight + 'px';
+                gallery.style.height = currentHeight + 'px';
+                var currentWidth = gallery.style.width;
+                var currentPosition = gallery.style.position;
+                
+                // Destroy existing Masonry instance
+                if (window.galleryMasonry) {
+                    window.galleryMasonry.destroy();
+                    window.galleryMasonry = null;
+                }
+                
+                // Restore gallery container and item positions to prevent visual shift
+                gallery.style.position = currentPosition || 'relative';
+                gallery.style.width = currentWidth;
+                gallery.style.height = currentHeight + 'px';
+                savedPositions.forEach(function(sp) {
+                    sp.el.style.position = sp.position || 'absolute';
+                    sp.el.style.top = sp.top;
+                    sp.el.style.left = sp.left;
+                });
+                // Wait for NEW images to load, then re-init Masonry
+                var newImgs = [];
+                newElements.forEach(function(el) {
+                    var img = el.querySelector('img');
+                    if (img) newImgs.push(img);
+                });
+                var loaded = 0;
+                var masonryDone = false;
+                function reinitMasonry() {
+                    if (masonryDone) return;
+                    masonryDone = true;
+                    gallery.style.minHeight = '';
+                    gallery.style.height = '';
+                    initMasonry(gallery);
+                    updateLoadMoreButton();
+                }
+                function onImgReady() {
+                    loaded++;
+                    if (loaded >= newImgs.length) reinitMasonry();
+                }
+                newImgs.forEach(function(img) {
+                    if (img.complete) { loaded++; }
+                    else {
+                        img.addEventListener('load', onImgReady, { once: true });
+                        img.addEventListener('error', onImgReady, { once: true });
+                    }
+                });
+                if (loaded >= newImgs.length) reinitMasonry();
+                setTimeout(reinitMasonry, 3000);
+            } else {
+                updateLoadMoreButton();
+            }
+            
         }
         
+        // Apply client-side filters (model + sort only)
+        function applyFilters() {
+            var modelFilter = document.getElementById('filter-model').value;
+            var sortFilter = document.getElementById('filter-sort').value;
+            filteredImages = currentImages.filter(function(img) {
+                if (modelFilter && img.model !== modelFilter) return false;
+                return true;
+            });
+            if (sortFilter === 'newest') {
+                filteredImages.sort(function(a, b) { return b.createdAt - a.createdAt; });
+            } else {
+                filteredImages.sort(function(a, b) { return a.createdAt - b.createdAt; });
+            }
+            renderGallery();
+            updateGalleryStatus();
+        }
+        
+        // Server-side filter changed - full reset and re-fetch
+        function onServerFilterChanged() {
+            loadGallery();
+        }
         // Render gallery
         function renderGallery() {
             const gallery = document.getElementById('gallery');
             const count = document.getElementById('gallery-count');
             
-            count.textContent = `${filteredImages.length} image${filteredImages.length !== 1 ? 's' : ''}`;
+            if (hasMoreImages && galleryTotal > 0) {
+                count.textContent = filteredImages.length + ' of ' + galleryTotal + ' images';
+            } else {
+                count.textContent = filteredImages.length + ' image' + (filteredImages.length !== 1 ? 's' : '');
+            }
             
             if (filteredImages.length === 0) {
                 gallery.innerHTML = `
@@ -986,6 +1201,11 @@
             // Store instance for window resize and update visual order
             window.galleryMasonry = msnry;
             updateVisualImageOrder();
+            
+            // After layout, update visual order and ensure button is positioned
+            msnry.on('layoutComplete', function() {
+                updateVisualImageOrder();
+            });
             
             // Re-layout after a short delay to catch images that loaded after initial layout
             setTimeout(() => {
@@ -1257,11 +1477,44 @@
             
             try {
                 const { API, Toast } = window.SDAPI;
-                await API.fetch(`/v1/gallery/${imageId}`, { method: 'DELETE' });
+                await API.fetch('/v1/gallery/' + imageId, { method: 'DELETE' });
                 
                 Toast.success('Image deleted successfully');
-                closeViewer();
-                await loadGallery();
+                
+                // Find position in viewer before removing
+                var viewerWasOpen = document.getElementById('viewer').classList.contains('active');
+                var viewerIdx = currentViewerIndex;
+                
+                // Remove from local data (avoid full reload)
+                currentImages = currentImages.filter(function(img) { return img.id !== imageId; });
+                filteredImages = filteredImages.filter(function(img) { return img.id !== imageId; });
+                visualImageOrder = visualImageOrder.filter(function(img) { return img && img.id !== imageId; });
+                galleryTotal = Math.max(0, galleryTotal - 1);
+                
+                // Remove from gallery DOM
+                var galleryItem = document.querySelector('.gallery-item[data-image-id="' + imageId + '"]');
+                if (galleryItem && window.galleryMasonry) {
+                    window.galleryMasonry.remove(galleryItem);
+                    window.galleryMasonry.layout();
+                } else if (galleryItem) {
+                    galleryItem.remove();
+                }
+                
+                // Update count and Load More button
+                updateGalleryStatus();
+                
+                // If viewer was open, show next image instead of closing
+                if (viewerWasOpen) {
+                    if (filteredImages.length === 0) {
+                        closeViewer();
+                    } else {
+                        // Stay at same index (which now points to next image), or go back one
+                        var newIdx = Math.min(viewerIdx, filteredImages.length - 1);
+                        openViewer(newIdx, true);
+                    }
+                }
+                
+                updateVisualImageOrder();
             } catch (error) {
                 window.SDAPI.Toast.error('Failed to delete image: ' + error.message);
             }
@@ -1347,11 +1600,13 @@
         }
         
         // Filter listeners
+        // Client-side only (no re-fetch)
         document.getElementById('filter-model').addEventListener('change', applyFilters);
-        document.getElementById('filter-privacy').addEventListener('change', applyFilters);
         document.getElementById('filter-sort').addEventListener('change', applyFilters);
-        document.getElementById('search-prompt').addEventListener('input', debounce(applyFilters, 300));
-        document.getElementById('filter-tags').addEventListener('input', debounce(applyFilters, 300));
+        // Server-side filters (trigger full re-fetch)
+        document.getElementById('filter-privacy').addEventListener('change', onServerFilterChanged);
+        document.getElementById('search-prompt').addEventListener('input', debounce(onServerFilterChanged, 500));
+        document.getElementById('filter-tags').addEventListener('input', debounce(onServerFilterChanged, 500));
         
         // Debounce helper
         function debounce(func, wait) {
@@ -1426,6 +1681,13 @@
                 document.body.classList.add('is-admin');
             }
             
+            // Fetch configured page size before loading gallery
+            try {
+                var cfg = await window.SDAPI.API.fetch('/v1/gallery/config');
+                if (cfg && typeof cfg.page_size === 'number') galleryPageSize = cfg.page_size;
+            } catch (e) {
+                console.warn('Could not fetch gallery config:', e);
+            }
             await loadGallery();
         });
     </script>

@@ -55,6 +55,7 @@ build/
 # CLIO AI Assistant
 .clio/logs/
 .clio/sessions/
+.clio/snapshots/
 .clio/memory/
 .clio/*.json
 data/

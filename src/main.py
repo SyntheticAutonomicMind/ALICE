@@ -1651,7 +1651,17 @@ async def list_gallery_images(
         offset=offset
     )
     
-    logger.debug("Gallery returning %d images", len(images))
+    # Get total count for pagination (same filters, no limit/offset)
+    total_count = gallery_manager.count_images(
+        api_key_id=api_key_id,
+        is_admin=is_admin,
+        include_public=include_public,
+        include_private=include_private,
+        tags=tag_filter,
+        search=search,
+    )
+    
+    logger.debug("Gallery returning %d images (total=%d)", len(images), total_count)
     
     # Build response using request's host header for correct external access
     request_host = request.headers.get("host", f"{config.server.host}:{config.server.port}")
@@ -1687,7 +1697,7 @@ async def list_gallery_images(
     
     return GalleryListResponse(
         data=data,
-        total=len(images),  # TODO: Get actual total count
+        total=total_count,
         limit=limit,
         offset=offset
     )
