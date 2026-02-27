@@ -251,29 +251,20 @@ tail -f /var/log/alice/alice.log     # Both
 
 ## Architecture
 
-```
-┌─────────────────────────┐
-│   Client Application    │
-│   (SAM, Scripts, etc.)  │
-└────────────┬────────────┘
-             │ HTTP POST /v1/chat/completions
-             │ {"model": "sd/...", "messages": [...]}
-             ▼
-┌─────────────────────────┐
-│   ALICE Server (FastAPI)│
-├─────────────────────────┤
-│ • Model Registry        │ Scans ./models directory
-│ • Generator Engine      │ PyTorch + diffusers pipeline
-│ • Web Management UI     │ Dashboard and controls
-│ • Image Storage         │ Gallery with privacy
-│ • Authentication        │ API key + session management
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│   GPU/Accelerator       │
-│  CUDA/ROCm/MPS/CPU      │
-└─────────────────────────┘
+```mermaid
+flowchart TD
+    Client["Client Application<br/>(SAM, Scripts, etc.)"]
+    Client -->|"HTTP POST /v1/chat/completions<br/>{model: sd/..., messages: [...]}"| Server
+
+    subgraph Server["ALICE Server (FastAPI)"]
+        Registry["Model Registry<br/>Scans ./models directory"]
+        Generator["Generator Engine<br/>PyTorch + diffusers pipeline"]
+        WebUI["Web Management UI<br/>Dashboard and controls"]
+        Gallery["Image Storage<br/>Gallery with privacy"]
+        Auth["Authentication<br/>API key + session management"]
+    end
+
+    Server --> GPU["GPU / Accelerator<br/>CUDA · ROCm · MPS · CPU"]
 ```
 
 ### Key Components
@@ -795,8 +786,8 @@ ALICE is a small open source project with no marketing budget. If it's been usef
 
 **License:** GPL-3.0 - See [LICENSE](LICENSE) for details
 
-**Created by:** Andrew Wyatt (Fewtarius)
-**Website:** [syntheticautonomicmind.org](https://www.syntheticautonomicmind.org)
+**Created by:** Andrew Wyatt (Fewtarius)  
+**Website:** [syntheticautonomicmind.org](https://www.syntheticautonomicmind.org)  
 **Repository:** [github.com/SyntheticAutonomicMind/ALICE](https://github.com/SyntheticAutonomicMind/ALICE)
 
 **Built with open source:**
