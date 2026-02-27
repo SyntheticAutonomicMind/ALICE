@@ -18,13 +18,13 @@ A remote Stable Diffusion service built for privacy, performance, and simplicity
 
 ## Why ALICE?
 
-Most AI image generation is cloud-dependent, privacy-invasive, and subscription-heavy. ALICE changes that.
+I built ALICE for fun. I wanted to generate images on my own hardware without paying per-image or uploading my prompts to someone else's server. It started as a weekend project and turned into a full image generation platform.
 
-Built as part of the Synthetic Autonomic Mind ecosystem, ALICE gives you complete control over image generation:
+ALICE gives you complete control over image generation:
 - **Your GPU, Your Data** - Everything runs locally. Images never leave your machine unless you share them.
 - **Built for Integration** - Designed as the image engine for SAM, but works with any client via the OpenAI-compatible API.
 - **Fast & Flexible** - Model caching, batch processing, and support for any Stable Diffusion model (SD 1.5, SDXL, FLUX, and more).
-- **Production Ready** - Daemon deployment, authentication, privacy controls, and comprehensive monitoring.
+- **Runs Anywhere** - Daemon deployment with authentication and privacy controls. Works on NVIDIA, AMD (including Steam Deck), and Apple Silicon.
 
 ---
 
@@ -48,7 +48,7 @@ Use the OpenAI-compatible API (`/v1/chat/completions`) from SAM, custom clients,
 ### **Real-Time Monitoring**
 Dashboard shows GPU usage, memory status, generation history, and system metrics. Monitor multiple models and track performance trends.
 
-### **Scale with Confidence**
+### **Handles Load Gracefully**
 Max concurrent generation limits, request queuing, and graceful error handling ensure stable performance under load.
 
 ---
@@ -104,13 +104,13 @@ Get a glimpse of ALICE's web interface and capabilities:
 - Works with any client that understands the standard
 - Lightweight and embeddable
 
-**Enterprise Ready**
-- Authentication and API key management
+**Authentication & Multi-User**
+- API key management
 - User role system (admin, user)
 - Comprehensive audit logging
 - Graceful degradation and error handling
 
-**No External Dependencies**
+**Self-Contained**
 - Single repository with everything included
 - Works offline completely
 - Minimal system footprint
@@ -773,15 +773,33 @@ All generated images follow a privacy-first model:
 
 ---
 
+## Part of the Ecosystem
+
+ALICE is part of [Synthetic Autonomic Mind](https://github.com/SyntheticAutonomicMind) - a family of open source AI tools:
+
+- **[SAM](https://github.com/SyntheticAutonomicMind/SAM)** - Native macOS AI assistant. SAM can use ALICE as an image generation provider.
+- **[CLIO](https://github.com/SyntheticAutonomicMind/CLIO)** - AI code assistant for the terminal. Runs on macOS and Linux.
+- **[SAM-Web](https://github.com/SyntheticAutonomicMind/SAM-web)** - Access SAM from iPad, iPhone, or any browser.
+
+All three tools share the same commitment to privacy and local-first operation. ALICE also works standalone - use the web interface or call the API from any client.
+
+---
+
+## Spread the Word
+
+ALICE is a small open source project with no marketing budget. If it's been useful to you, the best way to help is to tell someone about it - a blog post, a tweet, a recommendation to a colleague, or a star on GitHub. Word of mouth is how projects like this grow.
+
+---
+
 ## License & Credits
 
-**License:** GNU General Public License v3.0 ([GPL-3.0](LICENSE))
+**License:** GPL-3.0 - See [LICENSE](LICENSE) for details
 
-**Part of:** [Synthetic Autonomic Mind](https://github.com/SyntheticAutonomicMind)
+**Created by:** Andrew Wyatt (Fewtarius)
+**Website:** [syntheticautonomicmind.org](https://www.syntheticautonomicmind.org)
+**Repository:** [github.com/SyntheticAutonomicMind/ALICE](https://github.com/SyntheticAutonomicMind/ALICE)
 
-**Built by:** Andrew Wyatt (Fewtarius) with AI-assisted development
-
-ALICE stands on the shoulders of giants:
+**Built with open source:**
 - [Stable Diffusion](https://github.com/CompVis/stable-diffusion)
 - [diffusers](https://github.com/huggingface/diffusers)
 - [FastAPI](https://github.com/tiangolo/fastapi)
