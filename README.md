@@ -28,7 +28,82 @@ ALICE gives you complete control over image generation:
 
 ---
 
-## What You Can Do with ALICE
+## Quick Install
+
+Pick your platform below.
+
+### macOS (SAM integration)
+
+ALICE runs as a user service - no `sudo` required. Apple Silicon Macs (M1/M2/M3/M4) get GPU-accelerated generation via Metal (MPS). Intel Macs run CPU-only.
+
+**Prerequisites:** [Homebrew](https://brew.sh) and Python 3.10+
+
+```bash
+# Install Homebrew if you don't have it
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install Python 3.10+
+brew install python
+```
+
+**Install ALICE:**
+
+```bash
+git clone https://github.com/SyntheticAutonomicMind/ALICE.git && cd ALICE
+
+# Background service (recommended - starts automatically at login):
+./scripts/install_macos.sh
+
+# Or install without the background service (start manually):
+./scripts/install_macos.sh --manual
+```
+
+The installer sets up a Python venv, installs PyTorch for your architecture, and (in service mode) registers a user LaunchAgent at `~/Library/LaunchAgents/com.alice.plist` that starts ALICE automatically at login.
+
+**Service management:**
+
+```bash
+launchctl start com.alice          # Start
+launchctl stop com.alice           # Stop
+launchctl unload ~/Library/LaunchAgents/com.alice.plist  # Disable auto-start
+tail -f ~/Library/Logs/alice/alice.log                   # Logs
+```
+
+**Manual start (if installed with --manual):**
+
+```bash
+cd ~/Library/"Application Support"/alice
+ALICE_CONFIG=~/.config/alice/config.yaml venv/bin/python -m src.main
+```
+
+**Connect to SAM:**
+
+In SAM go to **Settings > Image Generation** and set the server URL to `http://localhost:8080`. ALICE auto-discovers models placed in `~/Library/Application Support/alice/data/models`.
+
+For a full macOS setup guide including troubleshooting, see [docs/MACOS-DEPLOYMENT.md](docs/MACOS-DEPLOYMENT.md).
+
+---
+
+### Linux (one-liner)
+
+```bash
+TAG="$(curl -s https://api.github.com/repos/SyntheticAutonomicMind/ALICE/releases/latest | python3 -c "import sys,json;print(json.load(sys.stdin)['tag_name'])")"
+VERSION="${TAG#v}"
+curl -sL "https://github.com/SyntheticAutonomicMind/ALICE/releases/download/${TAG}/alice-${VERSION}.tar.gz" | tar xz && cd alice-* && sudo ./scripts/install.sh
+```
+
+Installs as a systemd service to `/opt/alice`. Detects AMD (ROCm), NVIDIA (CUDA), and CPU-only automatically.
+
+### Docker
+
+```bash
+git clone https://github.com/SyntheticAutonomicMind/ALICE.git && cd ALICE
+make docker-up-cuda   # NVIDIA
+make docker-up-rocm   # AMD
+make docker-up        # CPU only
+```
+
+---
 
 ### **Generate Custom Images**
 Create unique images from text descriptions with full parameter control. Choose from multiple Stable Diffusion models, adjust quality settings, and save your favorite generations.

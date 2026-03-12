@@ -3,9 +3,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 Andrew Wyatt (Fewtarius)
 #
 # ALICE Installation Script
-# Installs ALICE as a systemd service on Linux or launchd service on macOS
+# Installs ALICE as a systemd service on Linux or a user LaunchAgent on macOS
 #
-# Usage: sudo ./install.sh [--uninstall]
+# Linux usage:  sudo ./install.sh [--uninstall]
+# macOS usage:  ./install.sh [--uninstall]
 
 set -e
 
@@ -15,16 +16,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Configuration
 APP_NAME="alice"
-INSTALL_DIR="/opt/${APP_NAME}"
-CONFIG_DIR="/etc/${APP_NAME}"
-DATA_DIR="/var/lib/${APP_NAME}"
-LOG_DIR="/var/log/${APP_NAME}"
-SERVICE_USER="${APP_NAME}"
-SERVICE_GROUP="${APP_NAME}"
 
-# Detect OS
+# Detect OS first so we can set platform-appropriate paths
 detect_os() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
         OS="macos"
@@ -35,6 +29,27 @@ detect_os() {
         exit 1
     fi
 }
+
+detect_os
+
+# Platform-specific paths
+if [[ "$OS" == "macos" ]]; then
+    # macOS: user-local installation (no root required)
+    INSTALL_DIR="${HOME}/Library/Application Support/${APP_NAME}"
+    CONFIG_DIR="${HOME}/.config/${APP_NAME}"
+    DATA_DIR="${HOME}/Library/Application Support/${APP_NAME}/data"
+    LOG_DIR="${HOME}/Library/Logs/${APP_NAME}"
+    SERVICE_USER="$(whoami)"
+    SERVICE_GROUP="staff"
+else
+    # Linux: system-wide installation (requires root)
+    INSTALL_DIR="/opt/${APP_NAME}"
+    CONFIG_DIR="/etc/${APP_NAME}"
+    DATA_DIR="/var/lib/${APP_NAME}"
+    LOG_DIR="/var/log/${APP_NAME}"
+    SERVICE_USER="${APP_NAME}"
+    SERVICE_GROUP="${APP_NAME}"
+fi
 
 # Check if running as root
 check_root() {
@@ -68,8 +83,8 @@ create_user() {
             print_warning "User ${SERVICE_USER} already exists"
         fi
     elif [[ "$OS" == "macos" ]]; then
-        # On macOS, we'll run as the current user's admin group
-        print_warning "macOS: Service will run as current user"
+        # On macOS, service runs as the current user via LaunchAgent
+        print_status "macOS: Service will run as current user ($(whoami))"
     fi
 }
 
@@ -166,27 +181,42 @@ create_venv() {
     print_status "Installing Python dependencies"
     "${INSTALL_DIR}/venv/bin/pip" install --upgrade pip
     
-    # Detect GPU type and install appropriate PyTorch
-    GPU_TYPE="cpu"
-    if lspci 2>/dev/null | grep -iq "vga.*amd\|vga.*ati"; then
-        print_status "AMD GPU detected - installing PyTorch with ROCm support"
-        GPU_TYPE="amd"
-        
-        # Check for gfx1103 (Phoenix APU)
-        if lspci 2>/dev/null | grep -i "phoenix"; then
-            print_status "Phoenix APU (gfx1103) detected - using TheRock nightlies"
-            "${INSTALL_DIR}/venv/bin/pip" install --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ --pre torch torchaudio torchvision
+    # Detect platform and install appropriate PyTorch
+    if [[ "$OS" == "macos" ]]; then
+        # macOS: Apple Silicon uses MPS acceleration, Intel uses CPU
+        ARCH="$(uname -m)"
+        if [[ "$ARCH" == "arm64" ]]; then
+            print_status "Apple Silicon (arm64) detected - installing PyTorch with MPS support"
+            GPU_TYPE="mps"
+            "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio
         else
-            # Standard ROCm installation
-            "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+            print_status "Intel Mac detected - installing CPU PyTorch (no GPU acceleration)"
+            GPU_TYPE="cpu"
+            "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
         fi
-    elif lspci 2>/dev/null | grep -iq "vga.*nvidia"; then
-        print_status "NVIDIA GPU detected - installing PyTorch with CUDA support"
-        GPU_TYPE="nvidia"
-        "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio
     else
-        print_warning "No supported GPU detected - installing CPU-only PyTorch"
-        "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        # Linux: detect GPU via lspci
+        GPU_TYPE="cpu"
+        if lspci 2>/dev/null | grep -iq "vga.*amd\|vga.*ati"; then
+            print_status "AMD GPU detected - installing PyTorch with ROCm support"
+            GPU_TYPE="amd"
+            
+            # Check for gfx1103 (Phoenix APU)
+            if lspci 2>/dev/null | grep -i "phoenix"; then
+                print_status "Phoenix APU (gfx1103) detected - using TheRock nightlies"
+                "${INSTALL_DIR}/venv/bin/pip" install --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ --pre torch torchaudio torchvision
+            else
+                # Standard ROCm installation
+                "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+            fi
+        elif lspci 2>/dev/null | grep -iq "vga.*nvidia"; then
+            print_status "NVIDIA GPU detected - installing PyTorch with CUDA support"
+            GPU_TYPE="nvidia"
+            "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio
+        else
+            print_warning "No supported GPU detected - installing CPU-only PyTorch"
+            "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        fi
     fi
     
     # Install remaining dependencies (excluding torch packages from requirements.txt)
@@ -254,11 +284,14 @@ install_systemd_service() {
     print_status "Service installed. Start with: systemctl start ${APP_NAME}"
 }
 
-# Install launchd service (macOS)
+# Install launchd user service (macOS)
 install_launchd_service() {
-    print_status "Installing launchd service"
+    print_status "Installing launchd user service (LaunchAgent)"
     
-    PLIST_PATH="/Library/LaunchDaemons/com.alice.plist"
+    LAUNCH_AGENT_DIR="${HOME}/Library/LaunchAgents"
+    PLIST_PATH="${LAUNCH_AGENT_DIR}/com.alice.plist"
+    
+    mkdir -p "${LAUNCH_AGENT_DIR}"
     
     cat > "${PLIST_PATH}" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -301,7 +334,13 @@ EOF
     
     chmod 644 "${PLIST_PATH}"
     
-    print_status "Service installed. Start with: sudo launchctl load ${PLIST_PATH}"
+    # Load the LaunchAgent for the current user session (no sudo required)
+    launchctl load "${PLIST_PATH}" 2>/dev/null || true
+    
+    print_status "LaunchAgent installed and loaded"
+    print_status "  Start:   launchctl start com.alice"
+    print_status "  Stop:    launchctl stop com.alice"
+    print_status "  Disable: launchctl unload ${PLIST_PATH}"
 }
 
 # Uninstall function
@@ -318,7 +357,7 @@ uninstall() {
         # Remove user
         userdel "${SERVICE_USER}" 2>/dev/null || true
     elif [[ "$OS" == "macos" ]]; then
-        PLIST_PATH="/Library/LaunchDaemons/com.alice.plist"
+        PLIST_PATH="${HOME}/Library/LaunchAgents/com.alice.plist"
         launchctl unload "${PLIST_PATH}" 2>/dev/null || true
         rm -f "${PLIST_PATH}"
     fi
@@ -365,7 +404,9 @@ install() {
     create_directories
     install_files
     create_venv
-    build_sdcpp  # Build Vulkan backend
+    if [[ "$OS" == "linux" ]]; then
+        build_sdcpp  # Vulkan backend (Linux only)
+    fi
     
     if [[ "$OS" == "linux" ]]; then
         install_systemd_service
@@ -384,25 +425,34 @@ install() {
         echo "  4. Check status: sudo systemctl status ${APP_NAME}"
         echo "  5. View logs: sudo journalctl -u ${APP_NAME} -f"
     elif [[ "$OS" == "macos" ]]; then
-        echo "  3. Start the service: sudo launchctl load /Library/LaunchDaemons/com.alice.plist"
+        echo "  3. Service is already running via LaunchAgent"
+        echo "     Stop:  launchctl stop com.alice"
+        echo "     Start: launchctl start com.alice"
         echo "  4. Check logs: tail -f ${LOG_DIR}/alice.log"
     fi
     echo ""
     echo "Web interface will be available at: http://localhost:8080/web/"
     echo "API documentation at: http://localhost:8080/docs"
     echo ""
-    echo "Backends installed:"
-    echo "  - PyTorch (ROCm/CUDA/CPU)"
-    echo "  - stable-diffusion.cpp (Vulkan - universal AMD support)"
+    if [[ "$OS" == "linux" ]]; then
+        echo "Backends installed:"
+        echo "  - PyTorch (ROCm/CUDA/CPU)"
+        echo "  - stable-diffusion.cpp (Vulkan - universal AMD support)"
+    else
+        echo "Backend installed:"
+        echo "  - PyTorch (Apple MPS / CPU)"
+    fi
 }
 
-# Parse arguments
-detect_os
-
+# Entry point - detect_os already called at top of script
 if [[ "$1" == "--uninstall" ]]; then
-    check_root
+    if [[ "$OS" == "linux" ]]; then
+        check_root
+    fi
     uninstall
 else
-    check_root
+    if [[ "$OS" == "linux" ]]; then
+        check_root
+    fi
     install
 fi
