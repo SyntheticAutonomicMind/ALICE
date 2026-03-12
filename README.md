@@ -3,9 +3,9 @@
 
 # ALICE - Artificial Latent Image Composition Engine
 
-**Generate beautiful AI images locally. No subscriptions, no cloud uploads, no limits.**
+**Local AI image generation for SAM - and anyone else who wants private, unlimited image generation on their own hardware.**
 
-A remote Stable Diffusion service built for privacy, performance, and simplicity. Integrate with SAM, use the web interface, or call the OpenAI-compatible API directly.
+ALICE is a Stable Diffusion service that runs on your Mac (or Linux machine). SAM uses it to generate images: you describe what you want, SAM asks ALICE, and ALICE produces the image locally using your GPU. No subscription, no cloud upload, no per-image cost.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -16,21 +16,28 @@ A remote Stable Diffusion service built for privacy, performance, and simplicity
 
 ---
 
-## Why ALICE?
+## What ALICE does
 
-I built ALICE for fun. I wanted to generate images on my own hardware without paying per-image or uploading my prompts to someone else's server. It started as a weekend project and turned into a full image generation platform.
+ALICE is the image generation engine behind SAM's "generate an image" capability. When you ask SAM to create an image, ALICE does the work:
 
-ALICE gives you complete control over image generation:
-- **Your GPU, Your Data** - Everything runs locally. Images never leave your machine unless you share them.
-- **Built for Integration** - Designed as the image engine for SAM, but works with any client via the OpenAI-compatible API.
-- **Fast & Flexible** - Model caching, batch processing, and support for any Stable Diffusion model (SD 1.5, SDXL, FLUX, and more).
-- **Runs Anywhere** - Daemon deployment with authentication and privacy controls. Works on NVIDIA, AMD (including Steam Deck), and Apple Silicon.
+1. SAM sends your description to ALICE
+2. ALICE generates the image on your machine using your GPU
+3. SAM displays the result
+
+Everything happens locally. Your prompts and images never leave your hardware.
+
+**Works on:**
+- Apple Silicon Macs (M1/M2/M3/M4) - GPU accelerated via Metal
+- Intel Macs - CPU only (slower, but functional)
+- Linux with NVIDIA or AMD GPU
+
+You can also use ALICE directly through its own web interface at `http://localhost:8080/web/`, or connect it to any client that supports the OpenAI image API.
 
 ---
 
 ## Quick Install
 
-Pick your platform below.
+ALICE requires two things to work: the software (installed below) and at least one Stable Diffusion model. Models are the AI files that actually generate images - you'll need to download one separately after installing ALICE. The [Getting Models](#getting-models) section below walks you through it.
 
 ### macOS (SAM integration)
 
@@ -58,7 +65,7 @@ git clone https://github.com/SyntheticAutonomicMind/ALICE.git && cd ALICE
 ./scripts/install_macos.sh --manual
 ```
 
-The installer sets up a Python venv, installs PyTorch for your architecture, and (in service mode) registers a user LaunchAgent at `~/Library/LaunchAgents/com.alice.plist` that starts ALICE automatically at login.
+The installer detects your Mac's architecture, installs PyTorch with the right backend (MPS for Apple Silicon, CPU for Intel), and sets up the service. It runs entirely as your user account.
 
 **Service management:**
 
@@ -78,7 +85,11 @@ ALICE_CONFIG=~/.config/alice/config.yaml venv/bin/python -m src.main
 
 **Connect to SAM:**
 
-In SAM go to **Settings > Image Generation** and set the server URL to `http://localhost:8080`. ALICE auto-discovers models placed in `~/Library/Application Support/alice/data/models`.
+1. Make sure ALICE is running - open `http://localhost:8080/health` in a browser to check
+2. In SAM go to **Settings > Image Generation**
+3. Set the server URL to `http://localhost:8080`
+4. Download a model (see [Getting Models](#getting-models) below)
+5. You're ready - ask SAM to generate an image
 
 For a full macOS setup guide including troubleshooting, see [docs/MACOS-DEPLOYMENT.md](docs/MACOS-DEPLOYMENT.md).
 
@@ -105,26 +116,44 @@ make docker-up        # CPU only
 
 ---
 
-### **Generate Custom Images**
-Create unique images from text descriptions with full parameter control. Choose from multiple Stable Diffusion models, adjust quality settings, and save your favorite generations.
+## Getting Models
 
-### **Manage Your Models**
-Download models directly from CivitAI and HuggingFace. ALICE automatically detects model types (SD 1.5, SDXL, FLUX) and manages model caching for instant retrieval.
+ALICE needs at least one Stable Diffusion model to generate images. A model is a large file (2-10GB) that contains the AI's learned knowledge about images. ALICE does not ship with models - you download them separately.
 
-### **Private Gallery**
-All your generated images are private by default. Make images public with optional expiration (1-168 hours), and manage your collection with intuitive controls.
+### Recommended for most users: SDXL
 
-### **Privacy Controls**
-Fine-grained privacy settings for every image. Admins can manage user access, and all API calls are authenticated with API key support.
+SDXL produces high-quality images at 1024x1024. It requires about 6-8GB of memory (unified memory on Apple Silicon).
 
-### **Integration Ready**
-Use the OpenAI-compatible API (`/v1/chat/completions`) from SAM, custom clients, or scripts. Get the same image generation power everywhere.
+- **[Juggernaut XL](https://civitai.com/models/133005)** - Photorealistic, great all-rounder
+- **[DreamShaper XL](https://civitai.com/models/112902)** - Versatile, handles artistic styles well
+- **[RealVisXL](https://civitai.com/models/139562)** - Realistic portraits and scenes
 
-### **Real-Time Monitoring**
-Dashboard shows GPU usage, memory status, generation history, and system metrics. Monitor multiple models and track performance trends.
+### Good for Macs with 8GB or less unified memory: SD 1.5
 
-### **Handles Load Gracefully**
-Max concurrent generation limits, request queuing, and graceful error handling ensure stable performance under load.
+SD 1.5 models are smaller (2-4GB) and work well on lower-memory systems. Native resolution is 512x512.
+
+- **[Realistic Vision](https://civitai.com/models/4201)** - Photorealistic
+- **[DreamShaper](https://civitai.com/models/4384)** - General purpose
+- **[Deliberate](https://civitai.com/models/4823)** - Detailed and flexible
+
+### How to download
+
+**Option 1 - ALICE web interface (easiest)**
+
+Open `http://localhost:8080/web/` and go to the **Download** tab. Search for a model by name on CivitAI or HuggingFace and click Download. ALICE handles the rest.
+
+**Option 2 - Download manually**
+
+Download a `.safetensors` file from [CivitAI](https://civitai.com) or [HuggingFace](https://huggingface.co) and place it in:
+
+- **macOS:** `~/Library/Application Support/alice/data/models/`
+- **Linux:** `/var/lib/alice/models/` (system install) or `~/.local/share/alice/models/` (SteamOS)
+
+ALICE auto-discovers models on startup and when you refresh the model list.
+
+### After downloading
+
+In the ALICE web interface at `http://localhost:8080/web/`, go to the **Models** tab and click **Refresh** to pick up the new model. It will then appear in SAM's image generation settings automatically.
 
 ---
 
@@ -238,47 +267,7 @@ Get a glimpse of ALICE's web interface and capabilities:
 
 ## Quick Start
 
-### Development Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/SyntheticAutonomicMind/ALICE.git
-cd alice
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install PyTorch (choose your platform below)
-# For NVIDIA CUDA:
-pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
-
-# For AMD ROCm:
-pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/rocm6.2
-
-# For CPU only:
-pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
-
-# For macOS (Apple Silicon):
-pip install torch==2.6.0 torchvision==0.21.0
-
-# Install remaining dependencies
-pip install -r requirements.txt
-
-# Create required directories
-mkdir -p models images logs
-
-# Add a Stable Diffusion model to ./models
-# (Download from Hugging Face, CivitAI, or similar)
-
-# Start the server
-python -m src.main
-
-# Open in browser
-open http://localhost:8080/web/
-```
-
-**For detailed PyTorch installation, see [PYTORCH_INSTALL.md](PYTORCH_INSTALL.md).**
+> **Just want to use ALICE with SAM?** Start at [Quick Install](#quick-install) above and use the installer script for your platform. This section is for running ALICE from source for development.
 
 ### Production Deployment (SteamOS/Steam Deck)
 
@@ -315,12 +304,13 @@ sudo ./scripts/install.sh
 
 # Start the service
 sudo systemctl start alice           # Linux
-sudo launchctl load /Library/LaunchDaemons/com.alice.plist  # macOS
 
 # Check status
 sudo systemctl status alice          # Linux
 tail -f /var/log/alice/alice.log     # Both
 ```
+
+> **macOS users:** Use `./scripts/install_macos.sh` instead - it installs as your user account without `sudo` and is the recommended method. See [Quick Install](#quick-install).
 
 ---
 
@@ -684,6 +674,7 @@ alice/
 │   └── fonts/                    # Local fonts (no CDN)
 ├── scripts/                      # Deployment and utility scripts
 │   ├── install.sh                # System-wide installation
+│   ├── install_macos.sh          # macOS user installation (recommended for Mac)
 │   ├── install_steamos.sh        # SteamOS/Steam Deck installation
 │   └── detect_amd_gpu.sh         # AMD GPU detection
 ├── tests/                        # Unit and integration tests
@@ -691,7 +682,8 @@ alice/
 ├── docs/                         # Documentation
 │   ├── ARCHITECTURE.md           # System architecture
 │   ├── IMPLEMENTATION_GUIDE.md   # Development guide
-│   └── AMD-DEPLOYMENT-GUIDE.md   # AMD/ROCm setup
+│   ├── AMD-DEPLOYMENT-GUIDE.md   # AMD/ROCm setup
+│   └── MACOS-DEPLOYMENT.md       # macOS setup guide
 ├── data/                         # Runtime data (created on startup)
 │   ├── auth/                     # API keys and sessions
 │   └── gallery.json              # Image metadata
@@ -773,6 +765,8 @@ tail -f logs/alice.log                    # Development
 tail -f /var/log/alice/alice.log          # System-wide
 journalctl --user -u alice -f             # SteamOS user service
 ```
+
+For macOS service installs: `tail -f ~/Library/Logs/alice/alice.log`
 
 **Verify Python:**
 ```bash
