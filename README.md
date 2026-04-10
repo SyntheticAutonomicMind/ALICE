@@ -839,6 +839,7 @@ ALICE is part of [Synthetic Autonomic Mind](https://github.com/SyntheticAutonomi
 
 - **[SAM](https://github.com/SyntheticAutonomicMind/SAM)** - Native macOS AI assistant. SAM can use ALICE as an image generation provider.
 - **[CLIO](https://github.com/SyntheticAutonomicMind/CLIO)** - AI code assistant for the terminal. Runs on macOS and Linux.
+- **[MIRA](https://github.com/SyntheticAutonomicMind/MIRA)** - Native graphical terminal for CLIO. Runs on macOS, Linux, and Windows.
 - **[SAM-Web](https://github.com/SyntheticAutonomicMind/SAM-web)** - Access SAM from iPad, iPhone, or any browser.
 
 All three tools share the same commitment to privacy and local-first operation. ALICE also works standalone - use the web interface or call the API from any client.
