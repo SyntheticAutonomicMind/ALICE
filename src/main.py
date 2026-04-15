@@ -362,10 +362,19 @@ app = FastAPI(
 )
 
 # CORS middleware - MUST be added before any routes
+_default_cors_origins = [
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8080",
+]
+_cors_env = os.environ.get("ALICE_CORS_ORIGINS", "")
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()] if _cors_env else _default_cors_origins
+_cors_is_wildcard = _cors_origins == ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=not _cors_is_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1597,7 +1606,12 @@ async def serve_image(
         )
     
     # Serve the file
-    image_path = config.storage.images_directory / filename
+    if ".." in filename:
+        raise HTTPException(status_code=403, detail="Invalid filename")
+    image_path = (config.storage.images_directory / filename).resolve()
+    images_root = config.storage.images_directory.resolve()
+    if not str(image_path).startswith(str(images_root) + os.sep) and image_path != images_root:
+        raise HTTPException(status_code=403, detail="Access denied")
     if not image_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found")
     
