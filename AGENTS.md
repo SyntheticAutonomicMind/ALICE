@@ -171,7 +171,7 @@ FastAPI Application (src/main.py)
 - `src/schemas.py` - Pydantic schemas (includes img2img fields)
 - `config.yaml` - Configuration file
 - `Makefile` - Build, run, update, Docker, and dist commands
-- `release.sh` - Release automation script
+- `scripts/release.sh` - Release automation script
 - `requirements.txt` - Python dependencies
 - `Dockerfile` - Container build (CPU/CUDA)
 - `Dockerfile.rocm` - Container build (AMD ROCm)
@@ -728,8 +728,11 @@ All other files import from `__init__.py`:
 **Use the release script:**
 
 ```bash
-# Syntax: ./release.sh YYYYMMDD.RELEASE
-./release.sh 20260223.1
+# Syntax: make release VERSION=YYYYMMDD.RELEASE
+make release VERSION=20260223.1
+
+# Or directly:
+./scripts/release.sh 20260223.1
 ```
 
 **What the script does:**

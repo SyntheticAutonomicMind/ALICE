@@ -1,7 +1,7 @@
 # ALICE Makefile
 # Build, run, test, and deployment commands for ALICE service
 
-.PHONY: install run test clean lint dev setup-dirs update check-update docker docker-cuda docker-rocm
+.PHONY: install run test clean lint dev setup-dirs update check-update docker docker-cuda docker-rocm release
 
 VENV = venv
 PYTHON = $(VENV)/bin/python
@@ -155,6 +155,14 @@ clean-dist:
 version:
 	@echo "ALICE $(VERSION)"
 
+# Create a release (tag + push)
+# Usage: make release VERSION=YYYYMMDD.N
+release:
+ifeq ($(origin VERSION),file)
+	$(error Usage: make release VERSION=YYYYMMDD.N)
+endif
+	./scripts/release.sh $(VERSION)
+
 # ==========================================
 # Cleanup
 # ==========================================
@@ -191,6 +199,7 @@ help:
 	@echo "    make test           - Run tests"
 	@echo "    make lint           - Run linter"
 	@echo "    make version        - Show current version"
+	@echo "    make release        - Create a release (VERSION=YYYYMMDD.N)"
 	@echo ""
 	@echo "  Updates:"
 	@echo "    make check-update   - Check for available updates"
