@@ -296,6 +296,17 @@ results = await asyncio.gather(
 
 ---
 
+## Model Selection
+
+**Use MiniMax for all sub-agents:**
+```
+agent_operations(operation: "spawn", task: "...", working_dir: "./ALICE", model: "minimax/minimax-m2.7")
+```
+
+MiniMax-M2.7 via MiniMax is the recommended default for all standard tasks: investigation, QA, implementation, code review, refactoring, documentation.
+
+---
+
 ## Testing
 
 **Before Committing:**
