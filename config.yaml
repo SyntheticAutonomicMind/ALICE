@@ -46,7 +46,7 @@ generation:
   vae_decode_cpu: true  # CRITICAL: Decode VAE on CPU (required for SDXL on AMD gfx1103 to prevent GPU hang)
   
   # Performance optimization settings (PyTorch 2.0+) (PyTorch backend only)
-  enable_torch_compile: true  # Enable torch.compile for 30-50% speedup (first run slower due to compilation)
+  enable_torch_compile: false  # Disable by default - requires C compiler (not available on SteamOS)
   torch_compile_mode: reduce-overhead  # 'default', 'reduce-overhead', or 'max-autotune'
 
 storage:

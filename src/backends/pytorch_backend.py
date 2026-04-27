@@ -634,8 +634,11 @@ class PyTorchBackend(BaseBackend):
                     if stats:
                         return stats
                         
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError) as e:
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
             logger.debug("rocm-smi failed, trying sysfs fallback: %s", e)
+        except Exception as e:
+            # Catch JSONDecodeError and other parsing errors (json may not be imported if rocm-smi not found)
+            logger.debug("rocm-smi parsing failed, trying sysfs fallback: %s", e)
         
         # Fallback to sysfs (/sys/class/drm)
         try:
@@ -753,7 +756,10 @@ class PyTorchBackend(BaseBackend):
         if self.enable_torch_compile and not self._unet_compiled:
             try:
                 import torch
-                if hasattr(torch, 'compile'):
+                import shutil
+                if not shutil.which("g++") and not shutil.which("gcc") and not shutil.which("cc"):
+                    logger.warning("torch.compile skipped: no C/C++ compiler found (install gcc/g++ or disable torch.compile)")
+                elif hasattr(torch, 'compile'):
                     logger.info("Compiling UNet with torch.compile (mode=%s). First run will be slower...", self.torch_compile_mode)
                     self._pipeline.unet = torch.compile(
                         self._pipeline.unet,
@@ -1241,9 +1247,31 @@ class PyTorchBackend(BaseBackend):
                                     # CompelForSDXL returns a LabelledConditioning object with:
                                     #   .embeds, .pooled_embeds, .negative_embeds, .negative_pooled_embeds
                                     logger.debug("Encoding prompts with CompelForSDXL")
+                                    
+                                    # Ensure text encoders are on the correct device before calling Compel.
+                                    # With CPU offload or after model swaps, text encoders may be on CPU
+                                    # while Compel sends token IDs to the target device.
+                                    target_device = torch.device(self._device)
+                                    if hasattr(self._pipeline, 'text_encoder') and self._pipeline.text_encoder is not None:
+                                        te_device = next(self._pipeline.text_encoder.parameters()).device
+                                        if te_device != target_device:
+                                            logger.debug("Moving text_encoder from %s to %s", te_device, target_device)
+                                            self._pipeline.text_encoder = self._pipeline.text_encoder.to(target_device)
+                                    if hasattr(self._pipeline, 'text_encoder_2') and self._pipeline.text_encoder_2 is not None:
+                                        te2_device = next(self._pipeline.text_encoder_2.parameters()).device
+                                        if te2_device != target_device:
+                                            logger.debug("Moving text_encoder_2 from %s to %s", te2_device, target_device)
+                                            self._pipeline.text_encoder_2 = self._pipeline.text_encoder_2.to(target_device)
+                                    
+                                    # Use empty string for negative prompt if not provided.
+                                    # CompelForSDXL returns None for negative_embeds when negative_prompt
+                                    # is None, which causes AttributeError on .to(device). Using "" forces
+                                    # proper negative embedding generation.
+                                    compel_negative = negative_prompt if negative_prompt else ""
+                                    
                                     result = self._compel(
                                         main_prompt=prompt,
-                                        negative_prompt=negative_prompt if negative_prompt else None
+                                        negative_prompt=compel_negative
                                     )
                                     
                                     logger.debug("Embedding shapes: embeds=%s, pooled=%s", 
@@ -1265,7 +1293,11 @@ class PyTorchBackend(BaseBackend):
                                     logger.info("CompelForSDXL encoding complete - long prompts fully supported")
                                 except Exception as e:
                                     logger.error("CompelForSDXL encoding failed: %s. Falling back to standard prompts.", e, exc_info=True)
-                                    # Keep original prompt/negative_prompt in pipeline_kwargs
+                                    # Clean up any partially-set embeddings to prevent
+                                    # "Cannot forward both prompt and prompt_embeds" errors
+                                    for key in ["prompt_embeds", "negative_prompt_embeds",
+                                                "pooled_prompt_embeds", "negative_pooled_prompt_embeds"]:
+                                        pipeline_kwargs.pop(key, None)
                             
                             # Add cancellation callback if token provided
                             if cancellation_token is not None:
