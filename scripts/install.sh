@@ -158,6 +158,13 @@ install_files() {
             sed -i "s|auth_directory: .*auth|auth_directory: ${DATA_DIR}/data/auth|g" "${CONFIG_DIR}/config.yaml"
             sed -i "s|database_path: .*model_cache.db|database_path: ${DATA_DIR}/data/model_cache.db|g" "${CONFIG_DIR}/config.yaml"
             sed -i "s|file: .*alice.log|file: ${LOG_DIR}/alice.log|g" "${CONFIG_DIR}/config.yaml"
+            
+            # Override port if SteamOS (port 8080 used by steamwebhelper, 8090 may conflict)
+            if grep -q "steamos" /etc/os-release 2>/dev/null; then
+                print_status "SteamOS detected - setting port to 9090 (avoiding steamwebhelper on 8080)"
+                sed -i "s|port: 8090|port: 9090|g" "${CONFIG_DIR}/config.yaml"
+            fi
+            
             chown "${SERVICE_USER}:${SERVICE_GROUP}" "${CONFIG_DIR}/config.yaml"
         elif [[ "$OS" == "macos" ]]; then
             sed -i '' "s|directory: .*models|directory: ${DATA_DIR}/models|g" "${CONFIG_DIR}/config.yaml"
@@ -203,8 +210,22 @@ create_venv() {
             
             # Check for gfx1103 (Phoenix APU)
             if lspci 2>/dev/null | grep -i "phoenix"; then
-                print_status "Phoenix APU (gfx1103) detected - using TheRock nightlies"
+                print_status "Phoenix APU (gfx1103) detected - using TheRock ROCm nightly builds"
+                print_status "Installing from gfx110X-all nightly index (required for gfx1103 support)"
                 "${INSTALL_DIR}/venv/bin/pip" install --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ --pre torch torchaudio torchvision
+                
+                # CRITICAL WORKAROUND: Fix torchvision::nms operator bug in TheRock gfx110X builds
+                # The gfx110X-all nightly builds have a broken torchvision package where the
+                # torchvision::nms operator is not properly registered, causing import failures.
+                # This patches the _meta_registrations.py file to comment out the broken decorators.
+                print_status "Applying torchvision::nms workaround for gfx110X builds..."
+                local torchvision_meta="${INSTALL_DIR}/venv/lib/python*/site-packages/torchvision/_meta_registrations.py"
+                if ls $torchvision_meta 2>/dev/null; then
+                    sed -i '163,175s/^/#/' ${INSTALL_DIR}/venv/lib/python*/site-packages/torchvision/_meta_registrations.py
+                    print_status "Torchvision patch applied successfully"
+                else
+                    print_warning "Could not find torchvision _meta_registrations.py - patch skipped"
+                fi
             else
                 # Standard ROCm installation
                 "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
@@ -278,10 +299,20 @@ install_systemd_service() {
     # Install main service
     cp "${SOURCE_DIR}/${APP_NAME}.service" /etc/systemd/system/
     
-    systemctl daemon-reload
-    systemctl enable "${APP_NAME}"
+    # Override health check port if SteamOS uses non-default port
+    if grep -q "steamos" /etc/os-release 2>/dev/null; then
+        local config_port=$(grep "port:" "${CONFIG_DIR}/config.yaml" | head -1 | awk '{print $2}')
+        if [[ -n "$config_port" && "$config_port" != "8090" ]]; then
+            sed -i "s|localhost:8090|localhost:${config_port}|g" "/etc/systemd/system/${APP_NAME}.service"
+        fi
+    fi
     
-    print_status "Service installed. Start with: systemctl start ${APP_NAME}"
+    systemctl daemon-reload
+    # Service is installed but NOT enabled by default
+    # To enable: sudo systemctl enable alice
+    # To start: sudo systemctl start alice
+    
+    print_status "Service installed (disabled by default). Start with: systemctl start ${APP_NAME}"
 }
 
 # Install launchd user service (macOS)

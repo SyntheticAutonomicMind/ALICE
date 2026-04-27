@@ -18,7 +18,7 @@ pydantic-settings==2.1.0
 git+https://github.com/huggingface/diffusers
 transformers==4.57.3
 accelerate==1.12.0
-safetensors==0.7.0
+safetensors>=0.7.0
 
 # Prompt weighting and long prompts - MATCHED TO SAM
 compel==2.3.1
@@ -33,7 +33,8 @@ pyyaml==6.0.3
 aiofiles==23.2.1
 
 # Async HTTP client (for download manager)
-aiohttp==3.9.1
+# 3.9.x has no pre-built wheel for Python 3.13 - use 3.11+ for binary wheels
+aiohttp>=3.9.1
 
 # Multipart form data (for file uploads)
 python-multipart==0.0.6
