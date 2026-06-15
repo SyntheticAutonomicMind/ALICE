@@ -48,7 +48,7 @@ generation:
   # Performance optimization settings (PyTorch 2.0+) (PyTorch backend only)
   # Note: SDXL models are auto-fallback to mode='default' when this is 'reduce-overhead'
   # (Inductor raises 'CantSplit' on the 2560-dim bottleneck under CUDA graphs).
-  enable_torch_compile: false  # Disable by default - requires C compiler (not available on SteamOS)
+  enable_torch_compile: true   # Enable torch.compile for 30-50% speedup (auto-falls-back to mode=default for SDXL to avoid CantSplit on 2560-dim bottleneck)
   torch_compile_mode: reduce-overhead  # 'default', 'reduce-overhead', or 'max-autotune'
   #   default - safest, works with all models and dynamic shapes
   #   reduce-overhead - uses CUDA graphs (fastest, but fails on SDXL/AMD gfx1103)
