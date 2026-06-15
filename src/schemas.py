@@ -393,7 +393,7 @@ class GalleryImageInfo(BaseModel):
     id: str = Field(..., description="Image ID")
     filename: str = Field(..., description="Image filename")
     url: str = Field(..., description="Image URL")
-    thumbnail_url: Optional[str] = Field(default=None, alias="thumbnailUrl", description="Thumbnail URL")
+    thumbnail_url: Optional[str] = Field(default=None, alias="thumbnailUrl", description="Reserved for future thumbnail generation. Currently always None.")
     is_public: bool = Field(..., alias="isPublic", description="Public visibility")
     created_at: float = Field(..., alias="createdAt", description="Creation timestamp")
     expires_at: Optional[float] = Field(default=None, alias="expiresAt", description="Expiration timestamp")

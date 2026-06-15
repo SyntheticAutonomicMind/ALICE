@@ -1689,7 +1689,7 @@ async def list_gallery_images(
             id=img.id,
             filename=img.filename,
             url=f"{protocol}://{request_host}/images/{img.filename}",
-            thumbnail_url=None,  # TODO: Generate thumbnails
+            thumbnail_url=None,  # Reserved for future thumbnail generation
             is_public=img.is_public,
             created_at=img.created_at,
             expires_at=img.expires_at,

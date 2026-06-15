@@ -232,16 +232,39 @@ def get_backend(
 generation:
   # Backend selection
   backend: "auto"  # "pytorch", "sdcpp", or "auto" (detect best)
-  
+
   # PyTorch-specific settings (ignored if backend=sdcpp)
   device_map: null
   force_float32: false
   enable_torch_compile: false
-  
+
   # SDCpp-specific settings (ignored if backend=pytorch)
   sdcpp_binary: null  # Path to sd binary (auto-detect if null)
   sdcpp_threads: 8    # CPU threads for Vulkan
 ```
+
+### torch.compile Configuration
+
+`torch.compile` wraps the UNet in an Inductor-compiled kernel for 30-50% speedup after warmup.
+It is disabled by default because it requires a C/C++ compiler (gcc/g++/cc).
+
+**Modes** (`torch_compile_mode`):
+
+| Mode | What it does | Tradeoffs |
+|------|--------------|-----------|
+| `default` | Standard Inductor compilation. | Works with all models and dynamic shapes. No CUDA graphs. |
+| `reduce-overhead` | Adds CUDA graphs. | Fastest steady-state. Fails on SDXL (`CantSplit` on 2560-dim bottleneck) and on AMD gfx1103 (no CUDA graphs). |
+| `max-autotune` | Aggressive Triton autotuning. | Slowest warmup, fastest inference. Requires Triton. |
+
+**Known incompatibilities:**
+
+- **SDXL + `reduce-overhead`**: Inductor cannot split SDXL's 2560-dim bottleneck kernel for CUDA graph capture, raising `CantSplit: ... not divisible by 2...`. ALICE auto-detects this and falls back to `default` mode with a warning. To silence the warning, set `torch_compile_mode: default` in config.yaml.
+- **AMD gfx1103 (Phoenix1) + `reduce-overhead`**: ROCm does not support CUDA graphs. Compilation fails.
+- **No C compiler**: torch.compile is silently skipped with a warning.
+
+**Error handling:** If torch.compile raises a known Inductor failure (CantSplit, dynamo, etc.) during model load, ALICE logs a clear error with the recommended fix and continues without compilation rather than failing the whole load.
+
+**Environment requirements:** gcc/g++ (Linux), Xcode CLT (macOS), or MSVC (Windows).
 
 ## SDCppBackend Implementation Strategy
 

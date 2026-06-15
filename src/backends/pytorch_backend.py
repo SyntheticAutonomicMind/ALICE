@@ -760,15 +760,44 @@ class PyTorchBackend(BaseBackend):
                 if not shutil.which("g++") and not shutil.which("gcc") and not shutil.which("cc"):
                     logger.warning("torch.compile skipped: no C/C++ compiler found (install gcc/g++ or disable torch.compile)")
                 elif hasattr(torch, 'compile'):
-                    logger.info("Compiling UNet with torch.compile (mode=%s). First run will be slower...", self.torch_compile_mode)
-                    self._pipeline.unet = torch.compile(
-                        self._pipeline.unet,
-                        mode=self.torch_compile_mode,
-                        fullgraph=False,  # Allow graph breaks for compatibility
-                    )
-                    self._unet_compiled = True
-                    optimizations_applied.append(f"torch_compile({self.torch_compile_mode})")
-                    logger.info("UNet compilation complete. Subsequent generations will be faster.")
+                    # SDXL's UNet produces kernels that torch._inductor cannot split for CUDA graph
+                    # capture under 'reduce-overhead' mode (raises CantSplit on the 2560-dim bottleneck).
+                    # Auto-fallback to 'default' mode to avoid the failure.
+                    effective_mode = self.torch_compile_mode
+                    if self._current_model_type == "sdxl" and effective_mode == "reduce-overhead":
+                        logger.warning(
+                            "torch_compile_mode='reduce-overhead' is incompatible with SDXL models "
+                            "(Inductor raises 'CantSplit' on the 2560-dim bottleneck). "
+                            "Auto-fallback to mode='default' for this model. "
+                            "Set torch_compile_mode='default' in config.yaml to silence this warning."
+                        )
+                        effective_mode = "default"
+
+                    logger.info("Compiling UNet with torch.compile (mode=%s). First run will be slower...", effective_mode)
+                    try:
+                        self._pipeline.unet = torch.compile(
+                            self._pipeline.unet,
+                            mode=effective_mode,
+                            fullgraph=False,  # Allow graph breaks for compatibility
+                        )
+                    except Exception as compile_error:
+                        # Map known Inductor failures to a friendly message and proceed
+                        # without torch.compile rather than failing the whole model load.
+                        error_msg = str(compile_error)
+                        if "CantSplit" in error_msg or "Inductor" in error_msg or "torch._dynamo" in error_msg:
+                            logger.error(
+                                "torch.compile failed: %s. "
+                                "Common cause: SDXL + reduce-overhead mode. "
+                                "Fix: set torch_compile_mode='default' or enable_torch_compile=false in config.yaml. "
+                                "Continuing without torch.compile for this model.",
+                                error_msg.split("\n", 1)[0]  # First line only
+                            )
+                        else:
+                            logger.warning("Could not compile UNet: %s", error_msg)
+                    else:
+                        self._unet_compiled = True
+                        optimizations_applied.append(f"torch_compile({effective_mode})")
+                        logger.info("UNet compilation complete. Subsequent generations will be faster.")
                 else:
                     logger.warning("torch.compile not available (requires PyTorch 2.0+)")
             except Exception as e:

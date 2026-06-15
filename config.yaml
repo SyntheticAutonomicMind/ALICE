@@ -46,8 +46,13 @@ generation:
   vae_decode_cpu: true  # CRITICAL: Decode VAE on CPU (required for SDXL on AMD gfx1103 to prevent GPU hang)
   
   # Performance optimization settings (PyTorch 2.0+) (PyTorch backend only)
+  # Note: SDXL models are auto-fallback to mode='default' when this is 'reduce-overhead'
+  # (Inductor raises 'CantSplit' on the 2560-dim bottleneck under CUDA graphs).
   enable_torch_compile: false  # Disable by default - requires C compiler (not available on SteamOS)
   torch_compile_mode: reduce-overhead  # 'default', 'reduce-overhead', or 'max-autotune'
+  #   default - safest, works with all models and dynamic shapes
+  #   reduce-overhead - uses CUDA graphs (fastest, but fails on SDXL/AMD gfx1103)
+  #   max-autotune - aggressive autotuning, requires Triton
 
 storage:
   images_directory: /home/deck/ALICE.data/images
