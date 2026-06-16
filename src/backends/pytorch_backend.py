@@ -471,6 +471,7 @@ class PyTorchBackend(BaseBackend):
         self._is_single_file_sdxl: bool = False  # Track if loaded model is single-file SDXL (needs extra memory opts)
         self._compel: Optional[CompelForSDXL] = None  # CompelForSDXL instance for long prompt support
         self._unet_compiled: bool = False  # Track if UNet has been compiled
+        self._original_unet: Optional[Any] = None  # Eager UNet kept for runtime Inductor fallback
         
         # Concurrency control
         self._model_lock: asyncio.Lock = asyncio.Lock()  # Protects model loading operations
@@ -774,6 +775,10 @@ class PyTorchBackend(BaseBackend):
                         effective_mode = "default"
 
                     logger.info("Compiling UNet with torch.compile (mode=%s). First run will be slower...", effective_mode)
+                    # Preserve eager UNet for runtime Inductor fallback. SDXL's 2560-dim bottleneck
+                    # can trigger CantSplit during Inductor's codegen on first execution, not at
+                    # compile-wrap time. If that happens, we restore the eager UNet and retry.
+                    self._original_unet = self._pipeline.unet
                     try:
                         self._pipeline.unet = torch.compile(
                             self._pipeline.unet,
@@ -1342,7 +1347,32 @@ class PyTorchBackend(BaseBackend):
                                 pipeline_kwargs["callback_on_step_end"] = cancellation_callback
                                 logger.debug("Added cancellation callback to pipeline")
                             
-                            result = self._pipeline(**pipeline_kwargs)
+                            try:
+                                result = self._pipeline(**pipeline_kwargs)
+                            except Exception as unet_error:
+                                # Runtime Inductor fallback: if the compiled UNet fails during
+                                # codegen (e.g. CantSplit on SDXL's 2560-dim bottleneck), swap
+                                # back to the eager UNet and retry. Compile speedup is preserved
+                                # for all subsequent generations on shapes Inductor handles.
+                                error_msg = str(unet_error)
+                                inductor_failure = (
+                                    "CantSplit" in error_msg
+                                    or "Inductor" in error_msg
+                                    or "torch._inductor" in error_msg
+                                )
+                                if inductor_failure and self._original_unet is not None:
+                                    logger.error(
+                                        "torch.compile failed at runtime (%s). "
+                                        "Falling back to eager UNet for this generation. "
+                                        "Subsequent runs will retry compilation; this is a "
+                                        "known Inductor limitation on SDXL bottleneck shapes.",
+                                        error_msg.split("\n", 1)[0]
+                                    )
+                                    self._pipeline.unet = self._original_unet
+                                    self._unet_compiled = False
+                                    result = self._pipeline(**pipeline_kwargs)
+                                else:
+                                    raise
                         
                         # Decode VAE on CPU if enabled (fixes GPU hang on AMD gfx1103)
                         if self.vae_decode_cpu:
