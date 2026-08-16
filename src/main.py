@@ -1214,21 +1214,24 @@ async def chat_completions(
     cancellation_registry = get_cancellation_registry()
     cancellation_token = cancellation_registry.create_token(request_id)
     
-    # Start background task to monitor client connection
-    async def monitor_client_disconnect():
-        """Monitor for client disconnect and trigger cancellation."""
-        try:
-            while True:
-                if await http_request.is_disconnected():
-                    logger.info("Client disconnected, cancelling request: %s", request_id)
-                    cancellation_token.cancel()
-                    break
-                await asyncio.sleep(0.5)  # Check every 500ms
-        except Exception as e:
-            logger.debug("Disconnect monitor error (expected on completion): %s", e)
+    # Check if client disconnect should cancel generation (configurable via config/env)
+    cancel_on_disconnect = getattr(config.generation, "cancel_on_disconnect", False)
+    monitor_task = None
     
-    # Start monitor task (will be cancelled when request completes)
-    monitor_task = asyncio.create_task(monitor_client_disconnect())
+    if cancel_on_disconnect:
+        async def monitor_client_disconnect():
+            """Monitor for client disconnect and trigger cancellation."""
+            try:
+                while True:
+                    if await http_request.is_disconnected():
+                        logger.info("Client disconnected, cancelling request: %s", request_id)
+                        cancellation_token.cancel()
+                        break
+                    await asyncio.sleep(0.5)  # Check every 500ms
+            except Exception as e:
+                logger.debug("Disconnect monitor error (expected on completion): %s", e)
+        
+        monitor_task = asyncio.create_task(monitor_client_disconnect())
     
     try:
         # Extract prompt from messages
@@ -1408,58 +1411,79 @@ async def chat_completions(
             else:
                 logger.info("Prepared %d input image(s) for img2img generation", len(input_images))
         
-        # Generate image(s)
-        image_paths, metadata = await generator.generate(
-            model_path=Path(model_info.path),
-            prompt=prompt,
-            negative_prompt=gen_negative_prompt or "",
-            steps=gen_steps,
-            guidance_scale=gen_guidance_scale,
-            width=gen_width,
-            height=gen_height,
-            seed=gen_seed,
-            scheduler=gen_scheduler,
-            num_images=gen_num_images or 1,
-            lora_paths=lora_paths if lora_paths else None,
-            lora_scales=lora_scales,
-            cancellation_token=cancellation_token,
-            input_images=input_images,
-            strength=gen_strength,
-        )
-        
-        # Build image URLs and record in gallery
+        # Build host and protocol for gallery records
         request_host = http_request.headers.get("host", f"{config.server.host}:{config.server.port}")
         protocol = http_request.headers.get("x-forwarded-proto", "http")
-        
-        image_urls = []
-        for image_path in image_paths:
-            image_url = f"{protocol}://{request_host}/images/{image_path.name}"
-            image_urls.append(image_url)
-            
-            # Record each image in gallery
-            # If auth is not required, make images public by default
-            image_is_public = not config.server.require_auth
-            image_id = image_path.stem
-            image_record = ImageRecord(
-                id=image_id,
-                filename=image_path.name,
-                owner_api_key_id=current_user.id if current_user else None,
-                is_public=image_is_public,
+
+        # Define internal generation & gallery worker function
+        async def _generate_and_save_to_gallery():
+            image_paths, metadata = await generator.generate(
+                model_path=Path(model_info.path),
                 prompt=prompt,
-                negative_prompt=metadata.get("negative_prompt", ""),
-                model=model_info.name,
-                steps=metadata["steps"],
-                guidance_scale=metadata["guidance_scale"],
-                width=metadata["width"],
-                height=metadata["height"],
-                seed=metadata.get("seed"),
-                scheduler=metadata["scheduler"],
-                generation_time=metadata.get("generation_time"),
-                loras=metadata.get("loras"),
-                lora_scales=metadata.get("lora_scales"),
+                negative_prompt=gen_negative_prompt or "",
+                steps=gen_steps,
+                guidance_scale=gen_guidance_scale,
+                width=gen_width,
+                height=gen_height,
+                seed=gen_seed,
+                scheduler=gen_scheduler,
+                num_images=gen_num_images or 1,
+                lora_paths=lora_paths if lora_paths else None,
+                lora_scales=lora_scales,
+                cancellation_token=cancellation_token,
+                input_images=input_images,
+                strength=gen_strength,
             )
-            gallery_manager.add_image(image_record)
-        
+
+            # Build image URLs and record in gallery
+            image_urls = []
+            for image_path in image_paths:
+                image_url = f"{protocol}://{request_host}/images/{image_path.name}"
+                image_urls.append(image_url)
+                
+                # Record each image in gallery
+                # If auth is not required, make images public by default
+                image_is_public = not config.server.require_auth
+                image_id = image_path.stem
+                image_record = ImageRecord(
+                    id=image_id,
+                    filename=image_path.name,
+                    owner_api_key_id=current_user.id if current_user else None,
+                    is_public=image_is_public,
+                    prompt=prompt,
+                    negative_prompt=metadata.get("negative_prompt", ""),
+                    model=model_info.name,
+                    steps=metadata["steps"],
+                    guidance_scale=metadata["guidance_scale"],
+                    width=metadata["width"],
+                    height=metadata["height"],
+                    seed=metadata.get("seed"),
+                    scheduler=metadata["scheduler"],
+                    generation_time=metadata.get("generation_time"),
+                    loras=metadata.get("loras"),
+                    lora_scales=metadata.get("lora_scales"),
+                )
+                gallery_manager.add_image(image_record)
+                logger.info("Successfully recorded image in gallery: %s (public=%s)", image_id, image_is_public)
+
+            return image_paths, image_urls, metadata
+
+        # Execute generation: if cancel_on_disconnect is False, wrap with asyncio.shield()
+        # so that background completion and gallery saving are guaranteed.
+        generation_task = asyncio.create_task(_generate_and_save_to_gallery())
+        try:
+            if cancel_on_disconnect:
+                image_paths, image_urls, metadata = await generation_task
+            else:
+                image_paths, image_urls, metadata = await asyncio.shield(generation_task)
+        except asyncio.CancelledError:
+            if not cancel_on_disconnect:
+                logger.warning(
+                    "Client connection disconnected for request %s. Shielded task %s continues in background to save image to gallery.",
+                    request_id, generation_task
+                )
+            raise
+
         # Build response content
         num_generated = len(image_urls)
         response_content = f"{num_generated} image{'s' if num_generated > 1 else ''} generated successfully."
@@ -1503,13 +1527,19 @@ async def chat_completions(
             )
         )
         
+    except asyncio.CancelledError:
+        if not cancel_on_disconnect:
+            logger.info("Request %s HTTP connection cancelled; background generation remains shielded and will finish saving.", request_id)
+        raise
     except CancellationError as e:
-        # Request was cancelled - return 499 (Client Closed Request)
-        logger.info("Request cancelled: %s", request_id)
+        # Request was explicitly cancelled - return 499 (Client Closed Request)
+        logger.info("Request explicitly cancelled: %s", request_id)
         raise HTTPException(
             status_code=499,
             detail="Request cancelled by client"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Generation failed: %s", e)
         raise HTTPException(
@@ -1517,8 +1547,7 @@ async def chat_completions(
             detail=f"Image generation failed: {str(e)}"
         )
     finally:
-        # Always cleanup: cancel monitor task and unregister token
-        if not monitor_task.done():
+        if monitor_task and not monitor_task.done():
             monitor_task.cancel()
             try:
                 await monitor_task

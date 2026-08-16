@@ -76,6 +76,11 @@ class GenerationConfig(BaseModel):
     circular: bool = Field(default=False, description="Enable circular padding for seamless/tiling images (Vulkan only)")
     # Flash attention - uses COOPMAT1 on AMD, faster AND uses less memory
     enable_flash_attention: bool = Field(default=True, description="Enable flash attention in diffusion model (Vulkan only - faster AND lower memory on AMD with COOPMAT1)")
+    # Disconnect handling
+    cancel_on_disconnect: bool = Field(
+        default_factory=lambda: os.environ.get("ALICE_CANCEL_ON_DISCONNECT", "false").lower() in ("true", "1", "yes"),
+        description="Cancel generation if client disconnects before completion (default: False to allow background completion and gallery saving)"
+    )
 
 
 class StorageConfig(BaseModel):
