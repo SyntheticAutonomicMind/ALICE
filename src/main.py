@@ -99,6 +99,7 @@ model_cache_service: Optional[ModelCacheService] = None
 auth_manager: Optional[AuthManager] = None
 gallery_manager: Optional[GalleryManager] = None
 _startup_time: Optional[float] = None
+_background_tasks: set[asyncio.Task] = set()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1215,7 +1216,7 @@ async def chat_completions(
     cancellation_token = cancellation_registry.create_token(request_id)
     
     # Check if client disconnect should cancel generation (configurable via config/env)
-    cancel_on_disconnect = getattr(config.generation, "cancel_on_disconnect", False)
+    cancel_on_disconnect = config.generation.cancel_on_disconnect
     monitor_task = None
     
     if cancel_on_disconnect:
@@ -1469,8 +1470,12 @@ async def chat_completions(
             return image_paths, image_urls, metadata
 
         # Execute generation: if cancel_on_disconnect is False, wrap with asyncio.shield()
-        # so that background completion and gallery saving are guaranteed.
+        # and retain a strong task reference to prevent GC during detached background completion.
         generation_task = asyncio.create_task(_generate_and_save_to_gallery())
+        if not cancel_on_disconnect:
+            _background_tasks.add(generation_task)
+            generation_task.add_done_callback(_background_tasks.discard)
+
         try:
             if cancel_on_disconnect:
                 image_paths, image_urls, metadata = await generation_task
@@ -1539,6 +1544,7 @@ async def chat_completions(
             detail="Request cancelled by client"
         )
     except HTTPException:
+        # Re-raise explicit HTTPExceptions so they are not wrapped into a generic 500 error below
         raise
     except Exception as e:
         logger.exception("Generation failed: %s", e)

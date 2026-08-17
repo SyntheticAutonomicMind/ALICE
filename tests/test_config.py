@@ -167,3 +167,62 @@ server:
         # Default values should still be set
         assert config.server.host == "0.0.0.0"
         assert config.generation.default_steps == 25
+
+
+def test_config_cancel_on_disconnect_default(monkeypatch):
+    """Test cancel_on_disconnect defaults to False."""
+    monkeypatch.delenv("ALICE_CANCEL_ON_DISCONNECT", raising=False)
+    from src.config import GenerationConfig
+    gen = GenerationConfig()
+    assert gen.cancel_on_disconnect is False
+
+
+@pytest.mark.parametrize("env_val,expected", [
+    ("true", True),
+    ("1", True),
+    ("yes", True),
+    ("TRUE", True),
+    ("True", True),
+    ("false", False),
+    ("0", False),
+    ("no", False),
+    ("FALSE", False),
+])
+def test_config_cancel_on_disconnect_env_var(monkeypatch, env_val, expected):
+    """Test cancel_on_disconnect overridden by ALICE_CANCEL_ON_DISCONNECT env var."""
+    from src.config import GenerationConfig
+    monkeypatch.setenv("ALICE_CANCEL_ON_DISCONNECT", env_val)
+    gen = GenerationConfig()
+    assert gen.cancel_on_disconnect is expected
+
+
+def test_config_cancel_on_disconnect_yaml(monkeypatch, tmp_path):
+    """Test cancel_on_disconnect loads from YAML configuration."""
+    monkeypatch.delenv("ALICE_CANCEL_ON_DISCONNECT", raising=False)
+    from src.config import load_config
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("generation:\n  cancel_on_disconnect: true\n", encoding="utf-8")
+
+    config = load_config(config_file)
+    assert config.generation.cancel_on_disconnect is True
+
+
+def test_config_migration_sync():
+    """Test that get_default_config in config_migration stays in sync with GenerationConfig."""
+    from src.config import GenerationConfig
+    from src.config_migration import get_default_config
+
+    defaults = get_default_config()
+    gen_defaults = defaults.get("generation", {})
+
+    # Verify cancel_on_disconnect specifically
+    assert "cancel_on_disconnect" in gen_defaults
+    assert gen_defaults["cancel_on_disconnect"] is False
+
+    # Invariant: every field in GenerationConfig must exist in migration defaults
+    model_fields = getattr(GenerationConfig, "model_fields", None) or getattr(GenerationConfig, "__fields__", {})
+    missing_fields = set(model_fields.keys()) - set(gen_defaults.keys())
+    assert not missing_fields, f"Missing fields in config_migration.py get_default_config(): {missing_fields}"
+
+

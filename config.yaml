@@ -53,6 +53,9 @@ generation:
   #   default - safest, works with all models and dynamic shapes
   #   reduce-overhead - uses CUDA graphs (fastest, but fails on SDXL/AMD gfx1103)
   #   max-autotune - aggressive autotuning, requires Triton
+  
+  # Disconnect handling
+  cancel_on_disconnect: false  # Cancel generation if client disconnects before completion (default: false to allow background completion and gallery saving)
 
 storage:
   images_directory: /home/deck/ALICE.data/images
