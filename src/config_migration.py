@@ -90,6 +90,7 @@ def get_default_config() -> Dict[str, Any]:
             "vae_conv_direct": True,
             "circular": False,
             "enable_flash_attention": True,
+            "cancel_on_disconnect": False,
         },
         "storage": {
             "images_directory": "./images",

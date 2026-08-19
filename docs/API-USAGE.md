@@ -286,6 +286,7 @@ console.log(result.choices[0].message.image_urls[0]);
 5. `guidance_scale` can be set to `0.0` for SD Turbo and similar models
 6. The actual generation parameters used are returned in the response `metadata`
 7. Check server logs for debugging: `sudo journalctl -u alice.service -f`
+8. **Client Disconnects**: By default (`cancel_on_disconnect: false`), if a client disconnects or backgrounds mid-generation, ALICE finishes the generation task in the background and saves the generated image to the gallery. If configured with `cancel_on_disconnect: true` (or `ALICE_CANCEL_ON_DISCONNECT=true`), client disconnect immediately aborts GPU inference and returns status code `499`.
 
 ### Troubleshooting
 

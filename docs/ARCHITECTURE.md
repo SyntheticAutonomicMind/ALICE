@@ -529,6 +529,7 @@ generation:
   default_scheduler: dpm++_sde_karras
   max_concurrent: 1
   request_timeout: 300
+  cancel_on_disconnect: false  # When false (default), generation completes and saves to gallery even if client disconnects
 
 storage:
   images_directory: /var/lib/alice/images
