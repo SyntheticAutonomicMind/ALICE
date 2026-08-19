@@ -191,10 +191,10 @@ class SDCppBackend(BaseBackend):
         self._current_model = str(model_path)
         logger.info(f"Model path set: {model_path.name}")
     
-    async def unload_model(self) -> None:
+    async def unload_model(self, model_path: Optional[Path] = None) -> None:
         """
         Unload model (no-op for sd.cpp).
-        
+
         sd.cpp doesn't keep models in memory between requests.
         """
         self._current_model = None
@@ -652,6 +652,11 @@ class SDCppBackend(BaseBackend):
         # sd.cpp doesn't keep models in memory, so technically never "loaded"
         # But we return True if we have a current model path set
         return self._current_model is not None
+
+    @property
+    def loaded_models(self) -> List[str]:
+        """Get list of cached model paths (sd.cpp loads per-request)."""
+        return [self._current_model] if self._current_model else []
     
     @staticmethod
     def is_available() -> bool:

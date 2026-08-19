@@ -57,6 +57,10 @@ class BaseBackend(ABC):
         """
         Load a model into memory.
         
+        If the model is already cached, this is a no-op.
+        If the model cache is full, least-recently-used models may be evicted
+        based on VRAM availability and cache limits.
+        
         Args:
             model_path: Path to model file or directory
             
@@ -67,11 +71,12 @@ class BaseBackend(ABC):
         pass
     
     @abstractmethod
-    async def unload_model(self) -> None:
+    async def unload_model(self, model_path: Optional[Path] = None) -> None:
         """
-        Unload current model from memory.
+        Unload model(s) from memory.
         
-        Called when switching models or shutting down.
+        Args:
+            model_path: Specific model to unload. If None, unloads ALL cached models.
         """
         pass
     
@@ -160,10 +165,10 @@ class BaseBackend(ABC):
     @abstractmethod
     def current_model(self) -> Optional[str]:
         """
-        Get currently loaded model path.
+        Get currently active model path (most recently used).
         
         Returns:
-            Path string of loaded model, or None if no model loaded
+            Path string of active model, or None if no model loaded
         """
         pass
     
@@ -171,10 +176,21 @@ class BaseBackend(ABC):
     @abstractmethod
     def is_model_loaded(self) -> bool:
         """
-        Check if a model is currently loaded.
+        Check if any model is currently loaded.
         
         Returns:
-            True if model loaded, False otherwise
+            True if at least one model is loaded, False otherwise
+        """
+        pass
+    
+    @property
+    @abstractmethod
+    def loaded_models(self) -> List[str]:
+        """
+        Get list of all cached model paths (most recently used first).
+        
+        Returns:
+            List of model path strings currently in the cache
         """
         pass
     

@@ -14,6 +14,8 @@ import logging
 import os
 import time
 import uuid
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, Type, List, TYPE_CHECKING
 
@@ -28,6 +30,26 @@ if TYPE_CHECKING:
     from compel import CompelForSDXL
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _CachedModel:
+    """Holds a cached model's pipeline and associated per-model state.
+
+    When a model is loaded into the cache, all its state (pipeline,
+    CompelForSDXL instance, compiled UNet, etc.) is stored here.
+    The "active" instance variables on PyTorchBackend are kept in sync
+    with whichever _CachedModel is currently most-recently-used.
+    """
+    pipeline: Any
+    model_path: Path
+    model_type: str
+    device_map_active: bool
+    is_single_file_sdxl: bool
+    compel: Optional[Any] = None
+    unet_compiled: bool = False
+    original_unet: Optional[Any] = None
+    loaded_at: float = field(default_factory=time.time)
 
 # AMD ROCm gfx1103 (Phoenix APU) compatibility settings
 # CRITICAL: MIOPEN_DEBUG_FIND_ALL=0 prevents GPU hangs during MIOpen solver search
@@ -414,6 +436,8 @@ class PyTorchBackend(BaseBackend):
         enable_torch_compile: bool = False,
         torch_compile_mode: str = "reduce-overhead",
         max_concurrent_generations: int = 1,
+        max_cached_models: int = 2,
+        vram_evict_threshold_gb: float = 2.0,
     ):
         """
         Initialize generator service.
@@ -437,6 +461,9 @@ class PyTorchBackend(BaseBackend):
             vae_decode_cpu: Decode VAE on CPU (fixes GPU hang on AMD gfx1103)
             enable_torch_compile: Enable torch.compile for UNet (PyTorch 2.0+)
             torch_compile_mode: Torch compile mode ('default', 'reduce-overhead', 'max-autotune')
+            max_concurrent_generations: Maximum concurrent generation requests
+            max_cached_models: Maximum models to keep in GPU memory simultaneously (LRU eviction)
+            vram_evict_threshold_gb: Free VRAM (GB) below which cached models are evicted (0=disabled)
         """
         self.images_dir = Path(images_dir)
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -463,21 +490,29 @@ class PyTorchBackend(BaseBackend):
         self.enable_torch_compile = enable_torch_compile
         self.torch_compile_mode = torch_compile_mode
         
-        # Model caching
-        self._pipeline: Optional[Any] = None
-        self._current_model: Optional[str] = None
+        # Model caching - multi-model LRU cache
+        # self._pipeline and friends are the "active" model's state, kept in sync
+        # with the most-recently-used entry in self._model_cache
+        self._pipeline: Optional[Any] = None  # Active pipeline (MRU cached model)
+        self._current_model: Optional[str] = None  # Active model path
         self._current_model_path: Optional[Path] = None
         self._device_map_active: bool = False  # Track if device_map was applied to current model
         self._is_single_file_sdxl: bool = False  # Track if loaded model is single-file SDXL (needs extra memory opts)
         self._compel: Optional[CompelForSDXL] = None  # CompelForSDXL instance for long prompt support
         self._unet_compiled: bool = False  # Track if UNet has been compiled
         self._original_unet: Optional[Any] = None  # Eager UNet kept for runtime Inductor fallback
+        self._current_model_type: Optional[str] = None  # For Qwen support later
+        
+        # Multi-model LRU cache: str(model_path) -> _CachedModel
+        # OrderedDict maintains insertion order; move_to_end() marks as MRU
+        self._model_cache: "OrderedDict[str, _CachedModel]" = OrderedDict()
+        self._max_cached_models: int = max_cached_models
+        self._vram_evict_threshold_gb: float = vram_evict_threshold_gb
         
         # Concurrency control
         self._model_lock: asyncio.Lock = asyncio.Lock()  # Protects model loading operations
         self._generation_semaphore: asyncio.Semaphore = asyncio.Semaphore(max_concurrent_generations)
         self._max_concurrent = max_concurrent_generations
-        self._current_model_type: Optional[str] = None  # For Qwen support later
         
         # Request queue tracking
         self._pending_requests: int = 0  # Track number of queued requests
@@ -517,13 +552,18 @@ class PyTorchBackend(BaseBackend):
     
     @property
     def current_model(self) -> Optional[str]:
-        """Get currently loaded model path."""
+        """Get currently active model path (most recently used)."""
         return self._current_model
     
     @property
     def is_model_loaded(self) -> bool:
-        """Check if a model is currently loaded."""
-        return self._pipeline is not None
+        """Check if any model is currently loaded (cached)."""
+        return len(self._model_cache) > 0
+    
+    @property
+    def loaded_models(self) -> List[str]:
+        """Get list of all cached model paths (most recently used first)."""
+        return list(reversed(self._model_cache.keys()))
     
     def get_queue_depth(self) -> int:
         """Get current number of pending generation requests."""
@@ -811,61 +851,210 @@ class PyTorchBackend(BaseBackend):
         if optimizations_applied:
             logger.info("Memory optimizations enabled: %s", ", ".join(optimizations_applied))
     
+    def _get_free_vram_bytes(self) -> Optional[int]:
+        """Get free VRAM in bytes.
+        
+        Returns None if not on GPU or unable to determine.
+        """
+        if self._device != "cuda":
+            return None
+        try:
+            free, _total = torch.cuda.mem_get_info()
+            return free
+        except Exception:
+            pass
+        # Fallback: try rocm-smi for ROCm
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["rocm-smi", "--showmeminfo", "vram", "--JSON"],
+                capture_output=True, text=True, timeout=2
+            )
+            if result.returncode == 0:
+                import json
+                data = json.loads(result.stdout)
+                gpu_data = data.get("card0") or next(iter(data.values()), {})
+                vram_total = gpu_data.get("VRAM Total Memory (B)", 0)
+                vram_used = gpu_data.get("VRAM Total Used Memory (B)", 0)
+                return int(vram_total) - int(vram_used)
+        except Exception:
+            pass
+        # Fallback: sysfs
+        try:
+            drm_path = Path("/sys/class/drm")
+            for card_dir in sorted(drm_path.glob("card*")):
+                device_dir = card_dir / "device"
+                vendor_file = device_dir / "vendor"
+                if vendor_file.exists() and vendor_file.read_text().strip() == "0x1002":
+                    mem_used = (device_dir / "mem_info_vram_used")
+                    mem_total = (device_dir / "mem_info_vram_total")
+                    if mem_used.exists() and mem_total.exists():
+                        return int(mem_total.read_text().strip()) - int(mem_used.read_text().strip())
+        except Exception:
+            pass
+        return None
+    
+    def _should_evict_vram(self) -> bool:
+        """Check if free VRAM is below the eviction threshold."""
+        if self._vram_evict_threshold_gb <= 0:
+            return False
+        free = self._get_free_vram_bytes()
+        if free is None:
+            return False
+        threshold_bytes = int(self._vram_evict_threshold_gb * (1024 ** 3))
+        return free < threshold_bytes
+    
+    def _evict_lru(self, count: int = 1) -> int:
+        """Evict least-recently-used models from the cache.
+        
+        Args:
+            count: Number of LRU models to evict (may evict fewer if cache is smaller)
+        
+        Returns:
+            Number of models actually evicted
+        """
+        evicted = 0
+        for _ in range(min(count, len(self._model_cache))):
+            # OrderedDict: first item is LRU
+            lru_key, lru_model = self._model_cache.popitem(last=False)
+            logger.info("Evicting LRU cached model: %s", lru_model.model_path.name)
+            
+            # Clean up the evicted model's resources
+            del lru_model.pipeline
+            if lru_model.compel is not None:
+                del lru_model.compel
+                lru_model.compel = None
+            
+            evicted += 1
+        
+        if evicted > 0 and self._device == "cuda":
+            torch.cuda.empty_cache()
+        
+        # If we evicted the active model, set a new active one
+        if self._current_model not in self._model_cache and len(self._model_cache) > 0:
+            self._set_active(next(reversed(self._model_cache)))
+        elif self._current_model not in self._model_cache:
+            self._pipeline = None
+            self._current_model = None
+            self._current_model_path = None
+            self._current_model_type = None
+            self._device_map_active = False
+            self._is_single_file_sdxl = False
+            self._compel = None
+            self._unet_compiled = False
+            self._original_unet = None
+        
+        return evicted
+    
+    def _set_active(self, model_key: str) -> None:
+        """Set the active model state from the cache.
+        
+        Copies the cached model's fields to the active instance variables
+        so that generate_image() and _apply_memory_optimizations() work
+        with the most-recently-used model.
+        """
+        cached = self._model_cache[model_key]
+        self._pipeline = cached.pipeline
+        self._current_model = model_key
+        self._current_model_path = cached.model_path
+        self._current_model_type = cached.model_type
+        self._device_map_active = cached.device_map_active
+        self._is_single_file_sdxl = cached.is_single_file_sdxl
+        self._compel = cached.compel
+        self._unet_compiled = cached.unet_compiled
+        self._original_unet = cached.original_unet
+    
+    def _sync_active_to_cache(self, model_key: str) -> None:
+        """Sync active instance variables back to the cached model entry.
+        
+        Called after _apply_memory_optimizations() and CompelForSDXL initialization,
+        which may have modified _unet_compiled, _original_unet, and _compel.
+        """
+        cached = self._model_cache[model_key]
+        cached.compel = self._compel
+        cached.unet_compiled = self._unet_compiled
+        cached.original_unet = self._original_unet
+        cached.loaded_at = time.time()
+
     async def load_model(self, model_path: Path) -> None:
         """
         Load a model into memory.
-        
-        If a different model is already loaded, it will be unloaded first.
+
+        If the model is already cached, this is a fast no-op (just marks it
+        as most-recently-used). If the model cache is full or VRAM is low,
+        least-recently-used models are evicted before loading.
+
         Uses model_lock to ensure only one model load happens at a time.
-        
+
         Args:
             model_path: Path to model file or directory
         """
         model_path = Path(model_path)
         model_key = str(model_path)
-        
-        # Check if already loaded (fast path - no lock needed for read)
-        if self._current_model == model_key and self._pipeline is not None:
-            logger.debug("Model already loaded: %s", model_key)
+
+        # Fast path (no lock needed for read): check if already cached
+        if model_key in self._model_cache:
+            # Move to MRU position
+            self._model_cache.move_to_end(model_key)
+            self._set_active(model_key)
+            logger.debug("Model already cached: %s", model_key)
             return
-        
+
+        # Slow path: need to load from disk
         # Use model_lock to serialize model loading across all requests
-        # This ensures only ONE request can be loading a model at a time
         async with self._model_lock:
             # Check again inside lock (another request might have loaded it)
-            if self._current_model == model_key and self._pipeline is not None:
-                logger.debug("Model already loaded by concurrent request: %s", model_key)
+            if model_key in self._model_cache:
+                self._model_cache.move_to_end(model_key)
+                self._set_active(model_key)
+                logger.debug("Model already cached by concurrent request: %s", model_key)
                 return
-            
-            logger.info("Loading model: current=%s, requested=%s", self._current_model, model_key)
-            
-            # Unload current model if different
-            if self._pipeline is not None and self._current_model != model_key:
-                await self._unload_model_internal()
-            
+
+            logger.info("Loading model: cache_size=%d, max=%d, requested=%s",
+                        len(self._model_cache), self._max_cached_models, model_key)
+
+            # Evict LRU models if cache is at capacity
+            if len(self._model_cache) >= self._max_cached_models:
+                logger.info("Cache full (%d/%d), evicting LRU model", len(self._model_cache), self._max_cached_models)
+                self._evict_lru(1)
+
+            # Additional VRAM-based eviction: if free VRAM is below threshold,
+            # evict more LRU models to make room
+            while self._should_evict_vram() and len(self._model_cache) > 0:
+                logger.info("VRAM below threshold (%.1f GB), evicting LRU model", self._vram_evict_threshold_gb)
+                evicted = self._evict_lru(1)
+                if evicted == 0:
+                    break
+                # Stop evicting if we'd go below 1 cached model
+                if len(self._model_cache) == 0:
+                    break
+
             # Load model in thread pool
             logger.info("Loading model in thread pool: %s", model_path)
             loop = asyncio.get_event_loop()
             pipeline, model_type, device_map_applied, is_single_file_sdxl = await loop.run_in_executor(
-                None, 
+                None,
                 self._load_model_blocking,
                 model_path
             )
-            
-            # Update state with loaded model
-            self._pipeline = pipeline
-            self._current_model = model_key
-            self._current_model_path = model_path
-            self._current_model_type = model_type
-            self._device_map_active = device_map_applied
-            self._is_single_file_sdxl = is_single_file_sdxl
-            self._compel = None
-            self._unet_compiled = False
-            
-            # Apply optimizations
+
+            # Create cached model entry
+            cached = _CachedModel(
+                pipeline=pipeline,
+                model_path=model_path,
+                model_type=model_type,
+                device_map_active=device_map_applied,
+                is_single_file_sdxl=is_single_file_sdxl,
+            )
+            self._model_cache[model_key] = cached
+
+            # Set as active model
+            self._set_active(model_key)
+
+            # Apply optimizations (may modify _unet_compiled, _original_unet)
             self._apply_memory_optimizations()
-            
-            # Initialize Compel for SDXL if needed
+
+            # Initialize CompelForSDXL for SDXL if needed (may set _compel)
             if self._current_model_type == "sdxl":
                 try:
                     from compel import CompelForSDXL
@@ -873,8 +1062,12 @@ class PyTorchBackend(BaseBackend):
                     logger.info("Initialized CompelForSDXL for long prompt support (device=%s)", self._device)
                 except Exception as e:
                     logger.warning("Failed to initialize CompelForSDXL: %s", e)
-            
-            logger.info("Model loaded successfully: %s", model_key)
+
+            # Sync post-optimization state back to cache
+            self._sync_active_to_cache(model_key)
+
+            logger.info("Model loaded and cached: %s (cache_size=%d/%d)",
+                        model_key, len(self._model_cache), self._max_cached_models)
     
     def _load_model_blocking(self, model_path: Path) -> Tuple[Any, str, bool, bool]:
         """
@@ -1017,35 +1210,81 @@ class PyTorchBackend(BaseBackend):
             logger.error("Failed to load model: %s", e)
             raise
     async def _unload_model_internal(self) -> None:
-        """Unload current model without acquiring lock (for internal use when lock already held)."""
-        if self._pipeline is None:
+        """Unload all cached models without acquiring lock (internal use when lock already held)."""
+        if len(self._model_cache) == 0:
             return
-        
-        logger.info("Unloading model: %s", self._current_model)
-        
-        # Clear CompelForSDXL instance (holds references to text encoders)
-        if self._compel is not None:
-            del self._compel
-            self._compel = None
-        
-        del self._pipeline
+
+        logger.info("Unloading %d cached model(s)", len(self._model_cache))
+
+        # Clear all cached models
+        for model_key, cached in self._model_cache.items():
+            if cached.compel is not None:
+                del cached.compel
+                cached.compel = None
+            del cached.pipeline
+
+        self._model_cache.clear()
+
+        # Reset active model state
         self._pipeline = None
         self._current_model = None
         self._current_model_path = None
         self._current_model_type = None
         self._device_map_active = False
         self._is_single_file_sdxl = False
-        
+        self._compel = None
+        self._unet_compiled = False
+        self._original_unet = None
+
         # Clear GPU cache
         if self._device == "cuda":
             torch.cuda.empty_cache()
-        
-        logger.info("Model unloaded")
+
+        logger.info("All models unloaded")
     
-    async def unload_model(self) -> None:
-        """Unload the currently loaded model (public API, acquires lock)."""
+    async def unload_model(self, model_path: Optional[Path] = None) -> None:
+        """
+        Unload model(s) from memory (public API, acquires lock).
+
+        Args:
+            model_path: Specific cached model to evict. If None, unloads ALL cached models.
+        """
         async with self._model_lock:
-            await self._unload_model_internal()
+            if model_path is None:
+                await self._unload_model_internal()
+                return
+
+            # Per-model eviction: remove only the requested cached entry
+            target_key = str(Path(model_path))
+            if target_key not in self._model_cache:
+                logger.debug("Model not in cache, nothing to evict: %s", target_key)
+                return
+
+            logger.info("Evicting cached model: %s", Path(model_path).name)
+            cached = self._model_cache.pop(target_key)
+            if cached.compel is not None:
+                del cached.compel
+                cached.compel = None
+            del cached.pipeline
+
+            if self._device == "cuda":
+                torch.cuda.empty_cache()
+
+            # If we evicted the active model, point active state at another cached model
+            # or reset it to None if the cache is empty.
+            if self._current_model == target_key:
+                if len(self._model_cache) > 0:
+                    self._set_active(next(reversed(self._model_cache)))
+                else:
+                    self._pipeline = None
+                    self._current_model = None
+                    self._current_model_path = None
+                    self._current_model_type = None
+                    self._device_map_active = False
+                    self._is_single_file_sdxl = False
+                    self._compel = None
+                    self._unet_compiled = False
+                    self._original_unet = None
     
     async def generate_image(
         self,

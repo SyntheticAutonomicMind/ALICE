@@ -151,6 +151,8 @@ async def lifespan(app: FastAPI):
         circular=config.generation.circular,
         enable_flash_attention=config.generation.enable_flash_attention,
         max_concurrent_generations=config.generation.max_concurrent,
+        max_cached_models=config.generation.max_cached_models,
+        vram_evict_threshold_gb=config.generation.vram_evict_threshold_gb,
     )
     download_manager = DownloadManager(
         models_dir=config.models.directory,
@@ -910,7 +912,7 @@ async def health_check():
         status="ok",
         gpu_available=gpu_info["gpu_available"],
         gpu_stats_available=gpu_info.get("stats_available", False),
-        models_loaded=1 if generator.is_model_loaded else 0,
+        models_loaded=len(generator.loaded_models) if generator else 0,
         version=__version__,
         uptime_seconds=uptime,
         backend=active_backend,
@@ -972,6 +974,53 @@ async def list_models(access: AccessLevel = Depends(require_access_level(AccessL
             for model in models
         ]
     )
+
+
+@app.get("/v1/models/cached")
+async def get_cached_models(access: AccessLevel = Depends(require_access_level(AccessLevel.USER))):
+    """
+    List models currently cached in GPU memory.
+
+    Returns models in most-recently-used order. Models are cached
+    automatically when loaded for generation. Least-recently-used
+    models are evicted when the cache is full or VRAM is low.
+    """
+    if generator is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    cached = generator.loaded_models
+    return {
+        "cached_models": cached,
+        "count": len(cached),
+        "max_cached": config.generation.max_cached_models if config else 2,
+        "current_model": generator.current_model,
+    }
+
+
+@app.post("/v1/models/{model_id}/evict")
+async def evict_cached_model(
+    model_id: str,
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ADMIN))
+):
+    """
+    Evict a specific model from the GPU cache.
+
+    Requires admin privileges. The model file remains on disk;
+    only the in-memory copy is removed.
+    """
+    if generator is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    model = model_registry.get_model(model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+
+    model_path = str(model.path)
+    if model_path not in generator.loaded_models:
+        return {"status": "ok", "message": "Model was not cached"}
+
+    await generator.unload_model(Path(model_path))
+    return {"status": "ok", "evicted": model_id}
 
 
 @app.post("/v1/models/refresh")
@@ -1156,8 +1205,10 @@ async def delete_model(
         raise HTTPException(status_code=503, detail="Service not ready")
     
     # Unload model first if it's loaded
-    if generator and generator._current_model and generator._current_model == model_registry.get_model_path(model_id):
-        generator.unload_model()
+    if generator:
+        model_path = str(model_registry.get_model_path(model_id))
+        if model_path in (generator.loaded_models or []):
+            await generator.unload_model(Path(model_path))
     
     success = model_registry.delete_model(model_id)
     if not success:
@@ -1581,7 +1632,7 @@ async def get_metrics():
         gpu_utilization=gpu_info.get("utilization", 0.0),
         gpu_memory_used=gpu_info.get("memory_used", "0 GB"),
         gpu_memory_total=gpu_info.get("memory_total", "0 GB"),
-        models_loaded=1 if generator.is_model_loaded else 0,
+        models_loaded=len(generator.loaded_models) if generator else 0,
         total_generations=generator.total_generations,
         avg_generation_time=generator.get_average_generation_time()
     )

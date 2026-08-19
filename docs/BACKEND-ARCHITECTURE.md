@@ -87,12 +87,12 @@ class BaseBackend(ABC):
     
     @abstractmethod
     async def load_model(self, model_path: Path) -> None:
-        """Load a model into memory."""
+        """Load a model into memory (cached)."""
         pass
     
     @abstractmethod
-    async def unload_model(self) -> None:
-        """Unload current model from memory."""
+    async def unload_model(self, model_path: Optional[Path] = None) -> None:
+        """Unload model(s). None unloads all cached models."""
         pass
     
     @abstractmethod
@@ -134,13 +134,19 @@ class BaseBackend(ABC):
     @property
     @abstractmethod
     def current_model(self) -> Optional[str]:
-        """Get currently loaded model path."""
+        """Get currently active model path (most recently used)."""
         pass
     
     @property
     @abstractmethod
     def is_model_loaded(self) -> bool:
-        """Check if a model is loaded."""
+        """Check if any model is loaded."""
+        pass
+    
+    @property
+    @abstractmethod
+    def loaded_models(self) -> List[str]:
+        """Get list of all cached model paths (most recently used first)."""
         pass
     
     @staticmethod

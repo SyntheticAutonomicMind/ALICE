@@ -76,11 +76,14 @@ class GenerationConfig(BaseModel):
     circular: bool = Field(default=False, description="Enable circular padding for seamless/tiling images (Vulkan only)")
     # Flash attention - uses COOPMAT1 on AMD, faster AND uses less memory
     enable_flash_attention: bool = Field(default=True, description="Enable flash attention in diffusion model (Vulkan only - faster AND lower memory on AMD with COOPMAT1)")
-    # Disconnect handling
+# Disconnect handling
     cancel_on_disconnect: bool = Field(
         default_factory=lambda: os.environ.get("ALICE_CANCEL_ON_DISCONNECT", "false").lower() in ("true", "1", "yes"),
         description="Cancel generation if client disconnects before completion (default: False to allow background completion and gallery saving)"
     )
+    # Multi-model caching (PyTorch backend only)
+    max_cached_models: int = Field(default=2, ge=1, le=16, description="Maximum number of models to keep in GPU memory simultaneously (PyTorch backend only). When limit is reached, least-recently-used model is evicted.")
+    vram_evict_threshold_gb: float = Field(default=2.0, ge=0.0, description="Minimum free VRAM in GB before evicting cached models (PyTorch backend only). Set to 0 to disable VRAM-based eviction (relies on max_cached_models only).")
 
 
 class StorageConfig(BaseModel):

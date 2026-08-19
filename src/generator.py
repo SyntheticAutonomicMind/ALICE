@@ -58,6 +58,8 @@ class GeneratorService:
         circular: bool = False,
         enable_flash_attention: bool = True,  # Default True - faster AND lower memory with COOPMAT1
         max_concurrent_generations: int = 1,
+        max_cached_models: int = 2,
+        vram_evict_threshold_gb: float = 2.0,
     ):
         """
         Initialize generator service with backend.
@@ -113,6 +115,8 @@ class GeneratorService:
             circular=circular,
             enable_flash_attention=enable_flash_attention,
             max_concurrent_generations=max_concurrent_generations,
+            max_cached_models=max_cached_models,
+            vram_evict_threshold_gb=vram_evict_threshold_gb,
         )
         
         logger.info("Generator initialized with backend: %s", self._backend.get_backend_name())
@@ -121,9 +125,14 @@ class GeneratorService:
         """Load a model into memory."""
         await self._backend.load_model(model_path)
     
-    async def unload_model(self) -> None:
-        """Unload current model from memory."""
-        await self._backend.unload_model()
+    async def unload_model(self, model_path: Optional[Path] = None) -> None:
+        """Unload model(s) from memory. None unloads all cached models."""
+        await self._backend.unload_model(model_path)
+    
+    @property
+    def loaded_models(self) -> List[str]:
+        """Get list of all cached model paths (most recently used first)."""
+        return self._backend.loaded_models
     
     async def generate_image(
         self,

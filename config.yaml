@@ -54,8 +54,14 @@ generation:
   #   reduce-overhead - uses CUDA graphs (fastest, but fails on SDXL/AMD gfx1103)
   #   max-autotune - aggressive autotuning, requires Triton
   
-  # Disconnect handling
+# Disconnect handling
   cancel_on_disconnect: false  # Cancel generation if client disconnects before completion (default: false to allow background completion and gallery saving)
+
+  # Multi-model caching (PyTorch backend only)
+  # Keeps multiple models loaded in VRAM simultaneously to avoid unload/reload
+  # cycles when switching between models. VRAM-aware LRU eviction prevents OOM.
+  max_cached_models: 3  # Max models to keep in GPU memory (LRU eviction when exceeded)
+  vram_evict_threshold_gb: 2.0  # Free VRAM (GB) below which cached models are evicted (0=disabled, rely on max_cached_models only)
 
 storage:
   images_directory: /home/deck/ALICE.data/images
