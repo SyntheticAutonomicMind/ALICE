@@ -41,3 +41,11 @@ python-multipart==0.0.6
 
 # System monitoring - MATCHED TO SAM
 psutil==7.1.3
+
+# Audio generation (Stable Audio Open 1.0 and compatible diffusion-audio models)
+# No version pins: these packages must coexist with the platform-specific
+# PyTorch stack (ROCm on AMD, CUDA on NVIDIA, CPU on macOS).  torchaudio
+# ships binary wheels for all three; stable-audio-tools pins torch loosely.
+einops
+torchaudio
+stable-audio-tools

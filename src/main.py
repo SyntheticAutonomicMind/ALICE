@@ -41,6 +41,10 @@ from .cancellation import get_cancellation_registry, CancellationError
 from .updater import init_update_manager, shutdown_update_manager, get_update_manager
 from .config_migration import migrate_config
 from . import __version__
+from .backends.audio_backend import (
+    AudioBackend,
+    register_eviction_callback as register_audio_eviction_callback,
+)
 from .schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -77,6 +81,10 @@ from .schemas import (
     UpdateImagePrivacyRequest,
     UpdateImageTagsRequest,
     GalleryStatsResponse,
+    AudioGenerationRequest,
+    AudioGenerationResponse,
+    AudioModelInfo,
+    AudioModelsListResponse,
 )
 
 # Setup logging
@@ -98,13 +106,14 @@ download_manager: Optional[DownloadManager] = None
 model_cache_service: Optional[ModelCacheService] = None
 auth_manager: Optional[AuthManager] = None
 gallery_manager: Optional[GalleryManager] = None
+audio_backend: Optional[AudioBackend] = None
 _startup_time: Optional[float] = None
 _background_tasks: set[asyncio.Task] = set()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup and shutdown."""
-    global model_registry, generator, download_manager, model_cache_service, auth_manager, gallery_manager, _startup_time
+    global model_registry, generator, download_manager, model_cache_service, auth_manager, gallery_manager, audio_backend, _startup_time
     
     logger.info("ALICE starting up...")
     _startup_time = time.time()
@@ -199,12 +208,39 @@ async def lifespan(app: FastAPI):
     gallery_manager = GalleryManager(
         storage_path=config.storage.gallery_file
     )
+
+    # Audio backend (Stable Audio Open 1.0 etc.).  Only constructed when
+    # enabled in config and the dependencies import cleanly.  Otherwise
+    # we leave `audio_backend = None` and the routes return 503.
+    if config.audio.enabled:
+        if AudioBackend.is_available():
+            audio_backend = AudioBackend(
+                config=config,
+                output_dir=config.storage.audio_directory,
+                max_concurrent=config.audio.max_concurrent,
+            )
+            # Let the image generator evict us when it needs the GPU.
+            async def _evict_audio_for_image() -> None:
+                if audio_backend is not None:
+                    await audio_backend.unload()
+            register_audio_eviction_callback(_evict_audio_for_image)
+            logger.info("Audio backend initialised (output: %s)", config.storage.audio_directory)
+        else:
+            audio_backend = None
+            logger.warning(
+                "Audio generation requested but stable-audio-tools/torchaudio "
+                "are not importable. Install dependencies and restart."
+            )
+    else:
+        audio_backend = None
+        logger.info("Audio generation disabled in config (audio.enabled=false)")
     
     # Start download manager
     await download_manager.start()
     
     # Ensure directories exist
     config.storage.images_directory.mkdir(parents=True, exist_ok=True)
+    config.storage.audio_directory.mkdir(parents=True, exist_ok=True)
     config.models.directory.mkdir(parents=True, exist_ok=True)
     
     # NOTE: /images/ endpoint is defined below with authentication
@@ -340,14 +376,21 @@ async def lifespan(app: FastAPI):
     # Stop download manager
     if download_manager:
         await download_manager.stop()
-    
+
     # Stop update manager
     await shutdown_update_manager()
-    
+
     # Unload model
     if generator and generator.is_model_loaded:
         await generator.unload_model()
-    
+
+    # Unload audio model so we don't leave weights in VRAM across restarts
+    if audio_backend is not None:
+        try:
+            await audio_backend.unload()
+        except Exception as exc:  # pragma: no cover - shutdown best-effort
+            logger.debug("Audio backend unload on shutdown failed: %s", exc)
+
     logger.info("ALICE shutdown complete")
 
 
@@ -3343,12 +3386,195 @@ async def update_list_backups(
 
 
 # =============================================================================
+# AUDIO GENERATION ENDPOINTS (OpenAI /v1/audio/* compatible)
+# =============================================================================
+
+
+@app.get("/v1/audio/models", response_model=AudioModelsListResponse)
+async def list_audio_models(
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ANONYMOUS)),
+):
+    """List supported audio models and current backend status."""
+    backend = audio_backend
+    # `available` means: the backend is wired up at runtime AND config
+    # has it enabled.  The static AudioBackend.is_available() check is
+    # informative (it tells you whether the underlying library imports)
+    # but the operational gate is whether the backend instance is
+    # non-None.  Tests inject a mock backend which is itself "available"
+    # in the operational sense.
+    available = backend is not None and config.audio.enabled
+    if backend is None:
+        # Fall back to the static check so the UI can show a "library
+        # missing" hint when dependencies are not installed.
+        available = config.audio.enabled and AudioBackend.is_available()
+    models = [
+        AudioModelInfo(
+            id=m["id"],
+            repo=m["repo"],
+            name=m["name"],
+            description=m["description"],
+            max_seconds=m["max_seconds"],
+            sample_rate=m["sample_rate"],
+            license=m["license"],
+            engine=m.get("engine", "stable_audio"),
+            supports_lyrics=m.get("supports_lyrics", False),
+        )
+        for m in AudioBackend.list_supported_models()
+    ]
+    return AudioModelsListResponse(
+        models=models,
+        backend=AudioBackend.get_backend_name(),
+        available=available,
+    )
+
+
+@app.post("/v1/audio/generations", response_model=AudioGenerationResponse)
+async def create_audio_generation(
+    request: AudioGenerationRequest,
+    current_user: Any = Depends(get_current_user),
+    access: AccessLevel = Depends(require_access_level(AccessLevel.USER)),
+):
+    """
+    Generate audio from a text prompt.
+
+    OpenAI-compatible shape: a `prompt` (or `input`) string, a `model`
+    id, and optional generation knobs.  Returns a URL pointing at the
+    generated WAV file under `/v1/audio/{filename}`.
+
+    The audio backend holds the GPU lock for the duration of the call
+    and unloads the model afterwards (see `audio.unload_after_generate`)
+    so the next image generation resumes immediately.
+    """
+    if audio_backend is None:
+        if not config.audio.enabled:
+            raise HTTPException(status_code=503, detail="Audio generation disabled in config")
+        raise HTTPException(
+            status_code=503,
+            detail="Audio backend unavailable. Install stable-audio-tools and torchaudio.",
+        )
+
+    # OpenAI uses `input` for the prompt text in /v1/audio/speech.
+    # Accept either, preferring `prompt` when both are present.
+    prompt = request.prompt or request.input
+    if not prompt or not prompt.strip():
+        raise HTTPException(status_code=400, detail="Field 'prompt' (or 'input') is required")
+
+    model_id = request.model or config.audio.default_model
+    seconds = request.seconds if request.seconds is not None else config.audio.default_seconds
+    steps = request.steps if request.steps is not None else config.audio.default_steps
+    cfg_scale = request.cfg_scale if request.cfg_scale is not None else config.audio.default_cfg_scale
+
+    request_id = f"audio-{uuid.uuid4().hex[:12]}"
+    logger.info(
+        "[%s] audio generation request: model=%s seconds=%s steps=%s user=%s",
+        request_id, model_id, seconds, steps, getattr(current_user, "id", "?"),
+    )
+
+    cancellation_registry = get_cancellation_registry()
+    cancellation_token = cancellation_registry.create_token(request_id)
+    cancellation_check = lambda: cancellation_token.is_cancelled()
+
+    try:
+        start = time.time()
+        result = await asyncio.wait_for(
+            audio_backend.generate(
+                prompt=prompt,
+                model_id=model_id,
+                seconds=seconds,
+                steps=steps,
+                cfg_scale=cfg_scale,
+                seed=request.seed,
+                lyrics=request.lyrics or "",
+                unload_after_generate=config.audio.unload_after_generate,
+                request_id=request_id,
+                cancellation_check=cancellation_check,
+            ),
+            timeout=config.audio.request_timeout_seconds,
+        )
+        elapsed = time.time() - start
+        return AudioGenerationResponse(
+            url=result.url,
+            model=result.model,
+            duration_seconds=result.duration_seconds,
+            sample_rate=result.sample_rate,
+            seed=result.seed,
+            steps=result.steps,
+            cfg_scale=result.cfg_scale,
+            prompt=result.prompt,
+            generation_time_seconds=elapsed,
+            size_bytes=result.size_bytes,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Audio generation timed out")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        if "cancelled" in str(exc).lower():
+            raise HTTPException(status_code=499, detail="Audio generation cancelled")
+        logger.exception("Audio generation failed")
+        raise HTTPException(status_code=500, detail=f"Audio generation failed: {exc}")
+    except Exception as exc:
+        logger.exception("Audio generation failed")
+        raise HTTPException(status_code=500, detail=f"Audio generation failed: {exc}")
+    finally:
+        try:
+            cancellation_registry.discard(request_id)
+        except Exception:
+            pass
+
+
+@app.get("/v1/audio/stats")
+async def get_audio_stats(
+    access: AccessLevel = Depends(require_access_level(AccessLevel.USER)),
+):
+    """Backend state for diagnostics / admin panel."""
+    if audio_backend is None:
+        return {
+            "available": AudioBackend.is_available(),
+            "enabled": config.audio.enabled,
+            "backend": AudioBackend.get_backend_name(),
+            "model_loaded": False,
+            "model_repo": None,
+            "n_models_supported": len(AudioBackend.list_supported_models()),
+        }
+    return audio_backend.stats()
+
+
+@app.get("/v1/audio/{filename}")
+async def get_audio_file(
+    filename: str,
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ANONYMOUS)),
+):
+    """
+    Serve a generated WAV file.  Path-traversal protected: only
+    basename, only files inside the configured audio directory.
+    """
+    # Strip any path components; refuse anything that smells like traversal.
+    safe_name = Path(filename).name
+    if not safe_name or safe_name != filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    audio_path = (config.storage.audio_directory / safe_name).resolve()
+    audio_root = config.storage.audio_directory.resolve()
+    try:
+        audio_path.relative_to(audio_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    if not audio_path.exists() or not audio_path.is_file():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    media_type = "audio/wav" if safe_name.lower().endswith(".wav") else "application/octet-stream"
+    return FileResponse(audio_path, media_type=media_type, filename=safe_name)
+
+
+# =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
         "src.main:app",
         host=config.server.host,

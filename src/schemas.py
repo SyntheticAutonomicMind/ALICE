@@ -8,7 +8,7 @@ OpenAI-compatible request/response models for the API.
 These MUST match the formats expected by SAM clients.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import Any, List, Optional, Dict
 from pydantic import BaseModel, Field, ConfigDict
 from . import __version__
 
@@ -449,4 +449,79 @@ class GalleryStatsResponse(BaseModel):
     expired: int = Field(..., description="Expired images")
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+# ----------------------------------------------------------------------------
+# Audio generation (OpenAI /v1/audio/generations compatible)
+# ----------------------------------------------------------------------------
+
+
+class AudioGenerationRequest(BaseModel):
+    """
+    Request body for POST /v1/audio/generations.
+
+    Field names follow the OpenAI audio API so existing clients that
+    already speak to tts-1 / gpt-4o-mini-tts can reuse their request
+    shape with minimal changes.  Anything we don't use (response_format,
+    voice, etc.) is accepted and ignored to stay forward-compatible.
+    """
+    prompt: Optional[str] = Field(default=None, max_length=4000, description="Text prompt describing the audio (music description for MiniMax-Music3)")
+    model: str = Field(default="stable-audio-open-1.0", description="Audio model id (see /v1/audio/models)")
+    seconds: Optional[int] = Field(default=None, ge=1, le=360, description="Clip length in seconds; clamped to model max")
+    steps: Optional[int] = Field(default=None, ge=1, le=500, description="Diffusion/flow-matching steps (model-specific)")
+    cfg_scale: Optional[float] = Field(default=None, ge=0.0, le=20.0, description="Classifier-free guidance scale (Stable Audio only; MiniMax-Music3 ignores it)", alias="cfg_scale")
+    seed: Optional[int] = Field(default=None, ge=0, description="Reproducibility seed")
+    response_format: Optional[str] = Field(default="url", description="'url' (default) or 'b64_json'")
+    # Lyrics with optional [verse]/[chorus] structure tags.  Only used by
+    # MiniMax-Music3; Stable Audio Open 1.0 ignores this field.
+    lyrics: Optional[str] = Field(default=None, max_length=8000, description="Lyrics to sing (MiniMax-Music3 only); empty for instrumental")
+    # OpenAI compat fields that we accept but ignore for music generation
+    voice: Optional[str] = Field(default=None, description="Ignored; accepted for OpenAI API shape compatibility")
+    input: Optional[str] = Field(default=None, description="Alias for `prompt` to match OpenAI's /v1/audio/speech and /v1/audio/generations shapes")
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @property
+    def effective_prompt(self) -> Optional[str]:
+        """Resolve the prompt from every field the spec allows."""
+        return self.prompt or self.input
+
+    def model_post_init(self, __context: Any) -> None:
+        """Cross-field validation: at least one of prompt/input must be set."""
+        if not self.effective_prompt or not self.effective_prompt.strip():
+            raise ValueError("Either 'prompt' or 'input' must be a non-empty string")
+
+
+class AudioGenerationResponse(BaseModel):
+    """Response for POST /v1/audio/generations (URL form)."""
+    url: str = Field(..., description="URL or relative path to the generated audio file")
+    model: str = Field(..., description="Audio model id that produced the file")
+    duration_seconds: float = Field(..., description="Length of the generated clip in seconds")
+    sample_rate: int = Field(..., description="Sample rate of the WAV file in Hz")
+    seed: int = Field(..., description="Seed used for the generation")
+    steps: int = Field(..., description="Diffusion steps used")
+    cfg_scale: float = Field(..., description="Classifier-free guidance scale used")
+    prompt: str = Field(..., description="Prompt used for the generation")
+    generation_time_seconds: float = Field(..., description="Wall-clock time spent in the generation call")
+    size_bytes: int = Field(..., description="Size of the generated WAV file on disk in bytes")
+
+
+class AudioModelInfo(BaseModel):
+    """Metadata for one supported audio model."""
+    id: str = Field(..., description="Stable API id (e.g. 'stable-audio-open-1.0')")
+    repo: str = Field(..., description="HuggingFace repo id")
+    name: str = Field(..., description="Human-readable name")
+    description: str = Field(..., description="One-paragraph description")
+    max_seconds: int = Field(..., description="Maximum clip length the model supports")
+    sample_rate: int = Field(..., description="Native sample rate in Hz")
+    license: str = Field(..., description="Upstream license name")
+    engine: str = Field(default="stable_audio", description="Backend engine kind: 'stable_audio' or 'minimax_music3'")
+    supports_lyrics: bool = Field(default=False, description="Whether this model accepts lyrics (MiniMax-Music3 only)")
+
+
+class AudioModelsListResponse(BaseModel):
+    """Response for GET /v1/audio/models."""
+    models: List[AudioModelInfo] = Field(default_factory=list, description="List of supported audio models")
+    backend: str = Field(..., description="Audio backend name")
+    available: bool = Field(..., description="Whether the audio backend is usable on this host")
 

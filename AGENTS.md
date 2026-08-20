@@ -148,6 +148,7 @@ FastAPI Application (src/main.py)
 | `tests/` | Unit and integration tests |
 | `models/` | Stable Diffusion models (gitignored) |
 | `images/` | Generated images (gitignored) |
+| `audio/` | Generated audio files (gitignored) |
 | `data/` | Database and metadata (gitignored) |
 | `logs/` | Application logs (gitignored) |
 | `venv/` | Python virtual environment (gitignored) |
@@ -162,13 +163,14 @@ FastAPI Application (src/main.py)
 - `src/__init__.py` - **Version single source of truth** (`__version__`)
 - `src/updater.py` - Self-update system (GitHub Releases integration)
 - `src/config_migration.py` - Config migration for cross-version upgrades
+- `src/audio_engine.py` - Audio inference wrappers: `ALICEAudioEngine` (Stable Audio Open 1.0) and `MiniMaxMusic3Engine` (MiniMax-Music3 via diffusers modular pipeline). Shared device routing.
 - `src/backends/pytorch_backend.py` - PyTorch generation backend (text2img + img2img)
 - `src/backends/sdcpp_backend.py` - sd.cpp Vulkan backend (text2img + img2img, GGUF models)
 - `src/model_registry.py` - Model scanning (.safetensors, .gguf, diffusers directories)
 - `src/downloader.py` - Model download manager
 - `src/model_cache.py` - Model caching system
 - `src/auth.py` - Authentication and authorization
-- `src/schemas.py` - Pydantic schemas (includes img2img fields)
+- `src/schemas.py` - Pydantic schemas (includes img2img fields and audio generation)
 - `config.yaml` - Configuration file
 - `Makefile` - Build, run, update, Docker, and dist commands
 - `scripts/release.sh` - Release automation script
@@ -293,6 +295,7 @@ results = await asyncio.gather(
 | `src/backends/base.py` | Abstract backend interface |
 | `src/backends/pytorch_backend.py` | PyTorch/Diffusers backend |
 | `src/backends/sdcpp_backend.py` | sd.cpp Vulkan backend |
+| `src/backends/audio_backend.py` | Audio generation backend (Stable Audio Open 1.0 + MiniMax-Music3) |
 
 ---
 

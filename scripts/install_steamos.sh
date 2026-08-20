@@ -80,6 +80,30 @@ install_alice() {
             "${ALICE_DIR}/venv/bin/pip" install \
                 --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ \
                 torch torchaudio torchvision
+        elif [[ "$gfx_arch" == "gfx1151" ]]; then
+            # Strix Halo (Ryzen AI Max 300 series, e.g. 8060S Graphics).
+            # The gfx110X-all wheel index does NOT include gfx1151 kernels;
+            # using it on Strix Halo results in hipErrorInvalidImage on the
+            # first GPU op.  The dedicated gfx1151 wheel index is required.
+            # The rocm-sdk-libraries-gfx1151 package has to be installed
+            # explicitly because the gfx1151 torch wheel is built for it.
+            log_info "Installing PyTorch with TheRock ROCm support for Strix Halo (gfx1151)..."
+            log_info "RDNA 3.5 wheels (Radeon 8060S, Ryzen AI Max+ 395, etc.)"
+            "${ALICE_DIR}/venv/bin/pip" install \
+                --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ \
+                --no-deps \
+                torch torchaudio torchvision
+            # The gfx1151 wheel doesn't pull the ROCm runtime libraries via
+            # pip's dependency resolver (it's a different layout), so install
+            # them explicitly.  Pin to the matching 7.13 wheel so torch's
+            # expected ROCm version matches what is actually on disk.
+            "${ALICE_DIR}/venv/bin/pip" install \
+                --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ \
+                --no-deps \
+                "rocm-sdk-libraries-gfx1151==7.13.0a20260501"
+            # transformers 5.x is needed so diffusers modular_pipelines can
+            # import get_cached_repo_tree from huggingface_hub.
+            "${ALICE_DIR}/venv/bin/pip" install --no-deps "transformers>=5.0" huggingface-hub
         elif [[ "$gfx_arch" == "gfx90c" ]]; then
             # Cezanne/Renoir APUs (Ryzen 5000/4000 series)
             # These APUs need special handling similar to gfx1103:
@@ -114,7 +138,9 @@ install_alice() {
     # Install other dependencies with exact tested versions
     log_info "Installing remaining dependencies..."
     "${ALICE_DIR}/venv/bin/pip" install \
-        diffusers==0.35.2 \
+        # diffusers: use the latest git main so MiniMax-Music3 (diffusers PR
+        # #14456) is importable.  Pinned releases are otherwise too old.
+        "diffusers @ git+https://github.com/huggingface/diffusers" \
         transformers==4.57.3 \
         accelerate==1.12.0 \
         safetensors==0.7.0 \

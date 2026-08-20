@@ -58,3 +58,9 @@ data/
 # CLIO (managed automatically)
 .clio/*
 !.clio/instructions.md
+
+# Audio engine files (gitignored audio output)
+audio/
+config.*.bak
+.alice-backups/
+

@@ -95,6 +95,7 @@ class StorageConfig(BaseModel):
     retention_days: int = Field(default=7, ge=1, description="Image retention period in days")
     public_image_expiration_hours: int = Field(default=168, ge=1, description="Default expiration for public images (hours)")
     gallery_page_size: int = Field(default=100, ge=0, description="Number of images to display per page in gallery (use 0 for all)")
+    audio_directory: Path = Field(default=Path("./audio"), description="Generated audio files directory")
 
 
 class LoggingConfig(BaseModel):
@@ -115,6 +116,27 @@ class ModelCacheConfig(BaseModel):
     huggingface_limit: int = Field(default=10000, ge=100, description="Max models to fetch from HuggingFace")
 
 
+class AudioConfig(BaseModel):
+    """Audio generation configuration.  See docs/AUDIO-GENERATION.md."""
+    enabled: bool = Field(default=True, description="Enable /v1/audio/* endpoints")
+    # Defaults when request omits them
+    default_model: str = Field(default="stable-audio-open-1.0", description="Default model id when client doesn't pick one")
+    default_seconds: int = Field(default=30, ge=1, le=300, description="Default clip length in seconds")
+    default_steps: int = Field(default=100, ge=1, le=500, description="Default diffusion steps")
+    default_cfg_scale: float = Field(default=7.0, ge=0.0, le=20.0, description="Default classifier-free guidance scale")
+    # Concurrency + VRAM behaviour
+    max_concurrent: int = Field(default=1, ge=1, le=8, description="Maximum concurrent audio generations")
+    unload_after_generate: bool = Field(
+        default=True,
+        description="Drop the audio model after each generation so image generation can resume without manual eviction.  Disable if you plan to chain many audio requests and want to amortise load cost.",
+    )
+    request_timeout_seconds: int = Field(default=300, ge=30, le=3600, description="Per-request timeout for audio generation")
+    # Hardware knobs (mirror the image generation flags so we don't
+    # surprise users on the same hardware).
+    force_fp32: bool = Field(default=False, description="Force float32 (rare; required for some AMD APUs)")
+    vae_decode_cpu: bool = Field(default=False, description="Decode VAE on CPU (AMD gfx1103 workaround)")
+
+
 class Config(BaseModel):
     """Main configuration container."""
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -123,6 +145,7 @@ class Config(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     model_cache: ModelCacheConfig = Field(default_factory=ModelCacheConfig)
+    audio: AudioConfig = Field(default_factory=AudioConfig)
 
 
 def load_config(path: Optional[str] = None) -> Config:
@@ -154,7 +177,8 @@ def load_config(path: Optional[str] = None) -> Config:
                 generation=GenerationConfig(**data.get("generation", {})),
                 storage=StorageConfig(**data.get("storage", {})),
                 logging=LoggingConfig(**data.get("logging", {})),
-                model_cache=ModelCacheConfig(**data.get("model_cache", {}))
+                model_cache=ModelCacheConfig(**data.get("model_cache", {})),
+                audio=AudioConfig(**data.get("audio", {}))
             )
         except Exception as e:
             logger.warning("Failed to load config file: %s. Using defaults.", e)

@@ -23,9 +23,10 @@ ALICE is part of [Synthetic Autonomic Mind](https://github.com/SyntheticAutonomi
 ## What You Can Do With ALICE
 
 - **Generate images locally** - Stable Diffusion runs on your hardware. No subscription, no cloud uploads, no per-image cost.
+- **Generate music and sound effects** - Stable Audio Open 1.0 (47s of stereo audio from a text prompt) and MiniMax Music 3 (up to 6-minute songs with lyrics and music description) both share the same GPU as image generation.
 - **Standalone web interface** - Browse, generate, and manage images at `http://localhost:8080/web/`. No other software needed.
 - **Use with SAM** - SAM connects to ALICE for image generation. Ask SAM to create an image and ALICE handles it.
-- **OpenAI-compatible API** - Any client that speaks the OpenAI image API can use ALICE. Generate images, list models, manage galleries - all via REST.
+- **OpenAI-compatible API** - Any client that speaks the OpenAI image or audio API can use ALICE. Generate images, list models, manage galleries, generate audio - all via REST.
 - **Browse and download models** - Search CivitAI and HuggingFace from ALICE's web interface. One-click download.
 - **Private by default** - Generated images are private. Share selectively with time-based expiration.
 - **Works on your hardware** - NVIDIA (CUDA), AMD (ROCm, including Steam Deck), Apple Silicon (Metal), or CPU fallback.
@@ -182,12 +183,25 @@ ALICE auto-discovers models on startup. In the web interface, go to **Models > R
 
 ## Supported Models
 
+### Image Models
 - **Stable Diffusion 1.5** - 512x512 native resolution
 - **Stable Diffusion 2.x** - 768x768 native resolution
 - **SDXL** - 1024x1024 native resolution
 - **FLUX** - High-quality model with extended capabilities
 - **Custom models** - Any Stable Diffusion variant
 - **Formats** - Diffusers directory or single `.safetensors` file
+
+### Audio Models
+- **Stable Audio Open 1.0** - 47s stereo at 44.1kHz from text prompts
+  (`stabilityai/stable-audio-open-1.0`)
+- **MiniMax Music 3** - up to 6-minute full songs with lyrics and
+  structured music description. Powered by a Qwen3-8B AR language
+  model + flow-matching transformer + DAC vocoder at 44.1kHz.
+  Slow (~25x realtime) on consumer hardware but produces complete
+  songs.
+
+[See docs/AUDIO-GENERATION.md for the full audio configuration and
+ROCm notes.](docs/AUDIO-GENERATION.md)
 
 ---
 
@@ -224,6 +238,7 @@ Key dependencies: PyTorch 2.6.0, diffusers 0.35.2, FastAPI 0.104.1. See [require
 |----------|-----------------|
 | [macOS Deployment](docs/MACOS-DEPLOYMENT.md) | Full macOS setup and troubleshooting |
 | [AMD Deployment](docs/AMD-DEPLOYMENT-GUIDE.md) | AMD/ROCm setup including Steam Deck |
+| [Audio Generation](docs/AUDIO-GENERATION.md) | Stable Audio Open 1.0 setup, ROCm notes, VRAM context switching |
 | [Architecture](docs/ARCHITECTURE.md) | System design and internals |
 | [Implementation Guide](docs/IMPLEMENTATION_GUIDE.md) | Development guide |
 | [API Reference](docs/API.md) | Complete API documentation |

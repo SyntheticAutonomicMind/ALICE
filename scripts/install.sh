@@ -207,13 +207,22 @@ create_venv() {
         if lspci 2>/dev/null | grep -iq "vga.*amd\|vga.*ati"; then
             print_status "AMD GPU detected - installing PyTorch with ROCm support"
             GPU_TYPE="amd"
-            
-            # Check for gfx1103 (Phoenix APU)
-            if lspci 2>/dev/null | grep -i "phoenix"; then
-                print_status "Phoenix APU (gfx1103) detected - using TheRock ROCm nightly builds"
+
+            # Source the AMD GPU detection script so we install the correct
+            # wheel index for the actual silicon under the hood (gfx1103
+            # for Phoenix, gfx1151 for Strix Halo, gfx90c for Cezanne/Renoir,
+            # etc.).  Falls back to rocm6.2 when the detected arch isn't in
+            # the per-special-cases list below.
+            SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+            source "${SCRIPT_DIR}/detect_amd_gpu.sh"
+            local gpu_env=$(detect_amd_gpu)
+            local gfx_arch=$(echo "$gpu_env" | grep PYTORCH_ROCM_ARCH | sed 's/export PYTORCH_ROCM_ARCH=//' | tr -d '"')
+
+            if [[ "$gfx_arch" == "gfx1103" ]]; then
+                print_status "Phoenix APU (gfx1103) detected - using TheRock gfx110X-all nightly builds"
                 print_status "Installing from gfx110X-all nightly index (required for gfx1103 support)"
                 "${INSTALL_DIR}/venv/bin/pip" install --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ --pre torch torchaudio torchvision
-                
+
                 # CRITICAL WORKAROUND: Fix torchvision::nms operator bug in TheRock gfx110X builds
                 # The gfx110X-all nightly builds have a broken torchvision package where the
                 # torchvision::nms operator is not properly registered, causing import failures.
@@ -226,6 +235,20 @@ create_venv() {
                 else
                     print_warning "Could not find torchvision _meta_registrations.py - patch skipped"
                 fi
+            elif [[ "$gfx_arch" == "gfx1151" ]]; then
+                # Strix Halo (Ryzen AI Max 300 series, e.g. 8060S Graphics).
+                # Dedicated gfx1151 wheel index required - the gfx110X-all
+                # index does NOT include gfx1151 kernels and triggers
+                # hipErrorInvalidImage on first op.
+                print_status "Strix Halo (gfx1151) detected - using TheRock gfx1151 nightly builds"
+                print_status "Installing from gfx1151 nightly index (RDNA 3.5 / 8060S Graphics)"
+                "${INSTALL_DIR}/venv/bin/pip" install --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ --no-deps torch torchaudio torchvision
+                # The ROCm runtime libraries don't get pulled by the gfx1151
+                # torch wheel alone; install them explicitly at a matching version.
+                "${INSTALL_DIR}/venv/bin/pip" install --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ --no-deps "rocm-sdk-libraries-gfx1151==7.13.0a20260501"
+                # diffusers 0.40.x modular_pipelines needs huggingface_hub>=1.23
+                # and the Qwen3 tokenizer import requires transformers>=5.0.
+                "${INSTALL_DIR}/venv/bin/pip" install --no-deps "transformers>=5.0" "huggingface-hub>=1.23.0"
             else
                 # Standard ROCm installation
                 "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2

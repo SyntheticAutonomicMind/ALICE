@@ -21,17 +21,26 @@ declare -A AMD_GPU_MAP=(
     ["15bf"]="gfx1103:11.0.0"    # Phoenix1 (Ryzen 7 8840U, Ryzen 9 8945HS, etc.) - tested working
     ["15c8"]="gfx1103:11.0.0"    # Phoenix2 - use same override as Phoenix1
     ["1900"]="gfx1103:11.0.0"    # Phoenix (variant)
-    
+
     # RDNA3 - Navi 31/32/33 (RX 7000 series)
     ["744c"]="gfx1100:11.0.0"    # Navi 31 (RX 7900 XTX/XT)
     ["7480"]="gfx1100:11.0.0"    # Navi 31 (variant)
     ["745e"]="gfx1101:11.0.1"    # Navi 32 (RX 7800/7700)
     ["7470"]="gfx1102:11.0.0"    # Navi 33 (RX 7600) - use 11.0.0 for compatibility
-    
+
     # RDNA3 - Strix Point / Strix Halo (Ryzen AI 300 series)
     ["150e"]="gfx1103:11.0.0"    # Strix Point (Ryzen AI 9 HX 370, etc.)
     ["1502"]="gfx1103:11.0.0"    # Strix (variant)
-    
+
+    # RDNA3.5 - Strix Halo (Ryzen AI Max 300 series, e.g. Ryzen AI Max+ 395)
+    # Strix Halo uses gfx1151 kernels and lives behind a wheel index separate
+    # from Phoenix (gfx110X-all).  8060S / 8060S Graphics is the integrated GPU.
+    # MiniMax-Music3 and other large flow-matching models require the dedicated
+    # wheel builds; using the gfx110X-all index would silently install a build
+    # without gfx1151 kernels and trigger hipErrorInvalidImage on first op.
+    ["1586"]="gfx1151:11.5.1"    # Strix Halo (Radeon 8060S, etc.)
+    ["1587"]="gfx1151:11.5.1"    # Strix Halo (variant)
+
     # RDNA2 - Steam Deck / Van Gogh
     ["163f"]="gfx1033:10.3.3"    # Van Gogh (Steam Deck original)
     

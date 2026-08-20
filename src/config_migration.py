@@ -102,6 +102,7 @@ def get_default_config() -> Dict[str, Any]:
             "retention_days": 7,
             "public_image_expiration_hours": 168,
             "gallery_page_size": 100,
+            "audio_directory": "./audio",
         },
         "logging": {
             "level": "WARNING",
@@ -116,6 +117,18 @@ def get_default_config() -> Dict[str, Any]:
             "sync_interval_hours": 24,
             "civitai_page_limit": None,
             "huggingface_limit": 10000,
+        },
+        "audio": {
+            "enabled": True,
+            "default_model": "stable-audio-open-1.0",
+            "default_seconds": 30,
+            "default_steps": 100,
+            "default_cfg_scale": 7.0,
+            "max_concurrent": 1,
+            "unload_after_generate": True,
+            "request_timeout_seconds": 300,
+            "force_fp32": False,
+            "vae_decode_cpu": False,
         },
     }
 
