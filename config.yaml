@@ -77,6 +77,6 @@ audio:
   default_cfg_scale: 7.0
   max_concurrent: 1
   unload_after_generate: true
-  request_timeout_seconds: 300
+  request_timeout_seconds: 900
   force_fp32: false
   vae_decode_cpu: false

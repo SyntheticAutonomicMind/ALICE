@@ -3474,8 +3474,19 @@ async def create_audio_generation(
         raise HTTPException(status_code=400, detail="Field 'prompt' (or 'input') is required")
 
     model_id = request.model or config.audio.default_model
+    metadata = AudioBackend.get_model_metadata(model_id)
+
+    # Use model-specific defaults from the catalog when the request
+    # doesn't override.  This matters because Stable Audio uses 100
+    # diffusion steps but MiniMax-Music3 uses 30 flow-matching steps
+    # - sending 100 steps to MiniMax makes it ~3x slower.
     seconds = request.seconds if request.seconds is not None else config.audio.default_seconds
-    steps = request.steps if request.steps is not None else config.audio.default_steps
+    if request.steps is not None:
+        steps = request.steps
+    elif metadata is not None and metadata.get("default_steps", 0) > 0:
+        steps = int(metadata["default_steps"])
+    else:
+        steps = config.audio.default_steps
     cfg_scale = request.cfg_scale if request.cfg_scale is not None else config.audio.default_cfg_scale
 
     request_id = f"audio-{uuid.uuid4().hex[:12]}"

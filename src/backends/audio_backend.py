@@ -204,6 +204,10 @@ class AudioBackend:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Directory where model weights live (from config.models.directory).
+        # Audio backends store model files here alongside image models.
+        self.models_dir = config.models.directory
+
         self._gpu_lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(max(1, max_concurrent))
         self._engine: Optional[Any] = None
@@ -264,6 +268,43 @@ class AudioBackend:
         if engine_kind == "minimax_music3":
             return MiniMaxMusic3Engine.is_available()
         return False
+
+    def _resolve_model_path(self, model_id: str) -> Optional[Path]:
+        """
+        Resolve the local model path for a model id.
+
+        Checks three locations:
+          1. The exact path given by the catalog 'repo' field (if it
+             exists on disk - a pre-downloaded local checkout).
+          2. <models.directory>/<repo_basename>  (e.g. .../MiniMax-Music3)
+          3. <models.directory>/<model_id.replace('-','')>  (fallback)
+
+        Returns None if no local checkout exists, in which case the
+        engine falls back to downloading from the HF repo id.
+        """
+        metadata = _find_metadata(model_id)
+        if metadata is None:
+            return None
+        repo = metadata["repo"]
+
+        # 1. If the catalog already gives a local path, use it.
+        candidate = Path(repo)
+        if candidate.exists():
+            return candidate
+
+        # 2. Look under the configured models directory using the repo's
+        # basename (e.g. "MiniMaxAI/MiniMax-Music3" -> "MiniMax-Music3").
+        basename = repo.rsplit("/", 1)[-1]
+        candidate = self.models_dir / basename
+        if candidate.exists():
+            return candidate
+
+        # 3. Fallback: model_id as a directory name.
+        candidate = self.models_dir / model_id
+        if candidate.exists():
+            return candidate
+
+        return None
 
     # -- engine lifecycle ----------------------------------------------------
 
@@ -401,6 +442,11 @@ class AudioBackend:
                     # (Qwen3 AR is the bottleneck).  In both cases we
                     # push the work to a thread so the event loop stays
                     # responsive to cancellation pings.
+                    # Resolve the local model path before calling the engine.
+                    # Falls back to the HF repo id if nothing is on disk.
+                    resolved_path = self._resolve_model_path(model_id)
+                    model_location = str(resolved_path) if resolved_path is not None else metadata["repo"]
+
                     if is_minimax:
                         audio_path = await asyncio.to_thread(
                             engine.generate,
@@ -409,7 +455,7 @@ class AudioBackend:
                             audio_duration=float(seconds),
                             num_inference_steps=steps,
                             seed=seed,
-                            model_repo_or_path=metadata["repo"],
+                            model_repo_or_path=model_location,
                         )
                     else:
                         audio_path = await asyncio.to_thread(
@@ -419,7 +465,7 @@ class AudioBackend:
                             steps=steps,
                             cfg_scale=cfg_scale,
                             seed=seed,
-                            model_repo=metadata["repo"],
+                            model_repo=model_location,
                         )
 
                     if cancellation_check is not None and cancellation_check():
