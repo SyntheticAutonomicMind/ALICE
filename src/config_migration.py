@@ -126,7 +126,7 @@ def get_default_config() -> Dict[str, Any]:
             "default_cfg_scale": 7.0,
             "max_concurrent": 1,
             "unload_after_generate": True,
-            "request_timeout_seconds": 300,
+            "request_timeout_seconds": 900,
             "force_fp32": False,
             "vae_decode_cpu": False,
         },
