@@ -593,6 +593,20 @@ async def serve_prompting(alice_session: Optional[str] = Cookie(None)):
     return FileResponse(web_dir / "prompting.html", media_type="text/html")
 
 
+@app.get("/web/audio.html", response_class=HTMLResponse)
+async def serve_audio(alice_session: Optional[str] = Cookie(None)):
+    """Serve the music/audio generation page - requires authentication."""
+    web_dir = _get_web_dir()
+    if not (web_dir / "audio.html").exists():
+        raise HTTPException(status_code=404, detail="Page not found")
+    
+    # If server requires auth, check for valid session cookie
+    if config.server.require_auth and not _verify_web_auth_cookie(alice_session):
+        return RedirectResponse(url="/web/login.html?return=/web/audio.html", status_code=303)
+    
+    return FileResponse(web_dir / "audio.html", media_type="text/html")
+
+
 @app.get("/web/debug.html", response_class=HTMLResponse)
 async def serve_debug(alice_session: Optional[str] = Cookie(None)):
     """Serve the debug page - ALWAYS requires admin authentication."""

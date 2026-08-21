@@ -282,11 +282,48 @@ const API = {
         };
     },
     
+    // Audio
+    async listAudioModels() {
+        return this.fetch('/v1/audio/models');
+    },
+
+    async generateAudio(formData) {
+        const request = {
+            prompt: formData.prompt,
+            model: formData.model,
+        };
+        if (formData.seconds !== undefined && !isNaN(formData.seconds)) {
+            request.seconds = formData.seconds;
+        }
+        if (formData.steps !== undefined && !isNaN(formData.steps)) {
+            request.steps = formData.steps;
+        }
+        if (formData.cfg_scale !== undefined && !isNaN(formData.cfg_scale)) {
+            request.cfg_scale = formData.cfg_scale;
+        }
+        if (formData.seed !== undefined && formData.seed !== null && !isNaN(formData.seed)) {
+            request.seed = formData.seed;
+        }
+        if (formData.lyrics !== undefined && formData.lyrics !== '') {
+            request.lyrics = formData.lyrics;
+        }
+
+        const response = await this.fetch('/v1/audio/generations', {
+            method: 'POST',
+            body: JSON.stringify(request)
+        });
+        return response;
+    },
+
+    async getAudioStats() {
+        return this.fetch('/v1/audio/stats');
+    },
+
     // Authentication
     async getCurrentUser() {
         return this.fetch('/v1/auth/me');
     },
-    
+
     logout() {
         localStorage.removeItem('alice-admin-key');
         window.location.href = '/web/login.html';
