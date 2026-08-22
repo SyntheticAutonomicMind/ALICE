@@ -295,14 +295,17 @@ async def lifespan(app: FastAPI):
     # In production, /opt/alice/.cache may be root-owned and not writable
     # by the alice service user. Use the models directory's parent (which
     # is on a writable volume) instead.
+    # NOTE: This also runs at module-level in pytorch_backend.py, but we
+    # repeat it here to ensure the directory is created for non-module-path
+    # imports and to log the path for debugging.
     if "HF_HOME" not in os.environ:
         try:
             hf_cache = config.models.directory.parent / ".cache" / "huggingface"
-            if hf_cache.parent.exists():
-                os.environ["HF_HOME"] = str(hf_cache)
-                logger.info("Set HF_HOME to writable cache: %s", hf_cache)
-        except Exception:
-            pass
+            hf_cache.mkdir(parents=True, exist_ok=True)
+            os.environ["HF_HOME"] = str(hf_cache)
+            logger.info("Set HF_HOME to writable cache: %s", hf_cache)
+        except Exception as e:
+            logger.debug("Could not set HF_HOME: %s", e)
     
     # Pre-warm the first available model so the first generation request
     # doesn't wait for model load. This eliminates the latency spike on

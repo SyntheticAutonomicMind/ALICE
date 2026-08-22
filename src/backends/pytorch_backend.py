@@ -89,6 +89,19 @@ os.environ.setdefault("HF_HUB_LOG_LEVEL", "error")
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
+# Set HF_HOME before huggingface_hub is imported — it caches HF_HOME at import
+# time, so we must set it here (not in the lifespan) to take effect.
+# Default to the config models directory's parent cache path if available,
+# otherwise fall back to a user-writable location.
+if "HF_HOME" not in os.environ:
+    try:
+        from ..config import config as _alice_config
+        _hf_cache = _alice_config.models.directory.parent / ".cache" / "huggingface"
+        _hf_cache.mkdir(parents=True, exist_ok=True)
+        os.environ["HF_HOME"] = str(_hf_cache)
+    except Exception:
+        pass  # huggingface_hub will use its default (~/.cache/huggingface)
+
 # Fix deprecated PYTORCH_HIP_ALLOC_CONF -> PYTORCH_ALLOC_CONF
 # PyTorch now reads PYTORCH_ALLOC_CONF for both CUDA and HIP backends
 if "PYTORCH_HIP_ALLOC_CONF" in os.environ and "PYTORCH_ALLOC_CONF" not in os.environ:
