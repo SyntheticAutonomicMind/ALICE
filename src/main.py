@@ -292,20 +292,31 @@ async def lifespan(app: FastAPI):
     
     # Set HF_HOME to a writable cache directory to prevent permission-denied
     # warnings when huggingface_hub tries to write tree cache files and refs.
-    # In production, /opt/alice/.cache may be root-owned and not writable
-    # by the alice service user. Use the models directory's parent (which
-    # is on a writable volume) instead.
+    # The alice systemd service runs with ProtectHome=yes, which makes /home
+    # inaccessible. We try the models directory parent first, then fall back
+    # to /var/lib/alice which is listed in ReadWritePaths in the systemd unit.
     # NOTE: This also runs at module-level in pytorch_backend.py, but we
     # repeat it here to ensure the directory is created for non-module-path
     # imports and to log the path for debugging.
     if "HF_HOME" not in os.environ:
-        try:
-            hf_cache = config.models.directory.parent / ".cache" / "huggingface"
-            hf_cache.mkdir(parents=True, exist_ok=True)
-            os.environ["HF_HOME"] = str(hf_cache)
-            logger.info("Set HF_HOME to writable cache: %s", hf_cache)
-        except Exception as e:
-            logger.debug("Could not set HF_HOME: %s", e)
+        hf_candidates = [
+            config.models.directory.parent / ".cache" / "huggingface",
+            Path("/var/lib/alice/.cache/huggingface"),
+        ]
+        for hf_cache in hf_candidates:
+            try:
+                hf_cache.mkdir(parents=True, exist_ok=True)
+                if os.access(hf_cache, os.W_OK):
+                    os.environ["HF_HOME"] = str(hf_cache)
+                    logger.info("Set HF_HOME to writable cache: %s", hf_cache)
+                    break
+            except (PermissionError, OSError):
+                continue
+        if "HF_HOME" not in os.environ:
+            logger.warning(
+                "Could not set HF_HOME to a writable directory; "
+                "huggingface_hub may emit permission-denied warnings"
+            )
     
     # Pre-warm the first available model so the first generation request
     # doesn't wait for model load. This eliminates the latency spike on

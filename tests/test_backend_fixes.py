@@ -418,6 +418,14 @@ class TestPreWarming:
             "Error handling for pre-warming not found"
         )
 
+    def test_hf_home_has_fallback_to_var_lib_alice(self):
+        """HF_HOME should have a fallback to /var/lib/alice/.cache/huggingface."""
+        main_py = Path(__file__).parent.parent / "src" / "main.py"
+        source = main_py.read_text()
+        assert "/var/lib/alice/.cache/huggingface" in source, (
+            "HF_HOME fallback to /var/lib/alice/.cache/huggingface not found"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Config logging permission tests
