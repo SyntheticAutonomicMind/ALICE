@@ -24,6 +24,30 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 import aiohttp
+
+# Resolve HF_HOME BEFORE importing huggingface_hub, which caches the cache path
+# at import time.  Under systemd's ProtectHome=yes, the default ~/.cache is
+# /opt/alice/.cache (alice's HOME) which is owned by deck and not writable.
+_dl_logger = logging.getLogger(__name__)
+if "HF_HOME" not in os.environ:
+    try:
+        from .config import config as _dl_config
+        _hf_candidates = [
+            _dl_config.models.directory.parent / ".cache" / "huggingface",
+            Path("/var/lib/alice/.cache/huggingface"),
+        ]
+        for _hf_cache in _hf_candidates:
+            try:
+                _hf_cache.mkdir(parents=True, exist_ok=True)
+                if os.access(_hf_cache, os.W_OK):
+                    os.environ["HF_HOME"] = str(_hf_cache)
+                    _dl_logger.info("Set HF_HOME to writable cache: %s", _hf_cache)
+                    break
+            except (PermissionError, OSError):
+                continue
+    except Exception:
+        pass
+
 from huggingface_hub import snapshot_download, hf_hub_download
 
 logger = logging.getLogger(__name__)

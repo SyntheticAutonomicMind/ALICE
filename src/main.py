@@ -379,9 +379,12 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(cleanup_expired_images_task())
     
     # Initialize update manager for self-update capabilities
+    # Use config's data directory for backups (writable under systemd)
     try:
+        _update_data_dir = config.storage.gallery_file.parent / ".alice-backups"
         await init_update_manager(
             install_dir=Path(__file__).resolve().parent.parent,
+            data_dir=_update_data_dir,
             auto_check=True,
         )
         logger.info("Update manager initialized")

@@ -19,6 +19,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, Type, List, TYPE_CHECKING
 
+# Set TRITON_CACHE_DIR before torch import — Triton compiler caches kernels in
+# this directory.  Under systemd's ProtectHome=yes, the default ~/.triton is
+# /opt/alice/.triton (alice's HOME), which is owned by deck and not writable.
+if "TRITON_CACHE_DIR" not in os.environ:
+    for _triton_cache in (Path("/var/lib/alice/.triton"), Path("/tmp/.triton")):
+        try:
+            _triton_cache.mkdir(parents=True, exist_ok=True)
+            if os.access(_triton_cache, os.W_OK):
+                os.environ["TRITON_CACHE_DIR"] = str(_triton_cache)
+                break
+        except (PermissionError, OSError):
+            continue
+
 import torch
 from PIL import Image
 

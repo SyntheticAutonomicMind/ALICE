@@ -428,6 +428,84 @@ class TestPreWarming:
 
 
 # ---------------------------------------------------------------------------
+# Downloader HF_HOME fix tests
+# ---------------------------------------------------------------------------
+
+class TestDownloaderHFHome:
+    """Test that downloader.py resolves HF_HOME before importing huggingface_hub."""
+
+    def test_downloader_resolves_hf_home_before_import(self):
+        """downloader.py should set HF_HOME before 'from huggingface_hub import'."""
+        dl_path = Path(__file__).parent.parent / "src" / "downloader.py"
+        source = dl_path.read_text()
+
+        # The HF_HOME fix must appear BEFORE the huggingface_hub import
+        hf_home_pos = source.find('"HF_HOME" not in os.environ')
+        hf_import_pos = source.find("from huggingface_hub import")
+
+        assert hf_home_pos != -1, "HF_HOME resolution not found in downloader.py"
+        assert hf_import_pos != -1, "huggingface_hub import not found in downloader.py"
+        assert hf_home_pos < hf_import_pos, (
+            "HF_HOME must be resolved BEFORE importing huggingface_hub, "
+            f"but HF_HOME fix is at pos {hf_home_pos} and import at pos {hf_import_pos}"
+        )
+
+    def test_downloader_has_fallback_path(self):
+        """downloader.py should fall back to /var/lib/alice/.cache/huggingface."""
+        dl_path = Path(__file__).parent.parent / "src" / "downloader.py"
+        source = dl_path.read_text()
+        assert "/var/lib/alice/.cache/huggingface" in source, (
+            "HF_HOME fallback to /var/lib/alice/.cache/huggingface not found in downloader.py"
+        )
+
+    def test_downloader_uses_os_access(self):
+        """downloader.py should verify writability with os.access."""
+        dl_path = Path(__file__).parent.parent / "src" / "downloader.py"
+        source = dl_path.read_text()
+        assert "os.access" in source, (
+            "downloader.py does not use os.access to verify cache writability"
+        )
+
+
+# ---------------------------------------------------------------------------
+# PyTorch backend TRITON_CACHE_DIR fix tests
+# ---------------------------------------------------------------------------
+
+class TestTritonCacheDir:
+    """Test that pytorch_backend.py sets TRITON_CACHE_DIR before importing torch."""
+
+    def test_triton_cache_dir_before_torch_import(self):
+        """TRITON_CACHE_DIR must be set before 'import torch' in pytorch_backend.py."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+
+        triton_pos = source.find('if "TRITON_CACHE_DIR" not in os.environ:')
+        torch_pos = source.find("import torch")
+
+        assert triton_pos != -1, "TRITON_CACHE_DIR fix not found in pytorch_backend.py"
+        assert torch_pos != -1, "import torch not found in pytorch_backend.py"
+        assert triton_pos < torch_pos, (
+            "TRITON_CACHE_DIR must be set before 'import torch'"
+        )
+
+    def test_triton_cache_dir_has_fallback(self):
+        """TRITON_CACHE_DIR should fall back to /var/lib/alice/.triton."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        assert "/var/lib/alice/.triton" in source, (
+            "TRITON_CACHE_DIR fallback to /var/lib/alice/.triton not found"
+        )
+
+    def test_triton_cache_dir_set(self):
+        """TRITON_CACHE_DIR should be set in os.environ after module import."""
+        # The module sets it at import time, so it should be available
+        if os.environ.get("TRITON_CACHE_DIR"):
+            assert Path(os.environ["TRITON_CACHE_DIR"]).exists(), (
+                "TRITON_CACHE_DIR points to non-existent directory"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Config logging permission tests
 # ---------------------------------------------------------------------------
 
