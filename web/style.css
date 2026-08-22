@@ -690,6 +690,58 @@ select {
     background: var(--primary-light);
 }
 
+/* Model type badges */
+.model-type-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.6rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.model-type-badge.sd   { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+.model-type-badge.sdxl { background: rgba(6, 172, 201, 0.15); color: #06ac8a; }
+.model-type-badge.flux { background: rgba(249, 115, 22, 0.15); color: #f97316; }
+.model-type-badge.sd3  { background: rgba(168, 116, 255, 0.15); color: #a874ff; }
+.model-type-badge.audio { background: rgba(236, 72, 153, 0.15); color: #ec4899; }
+
+/* Music model type badge */
+.model-type-badge.music { background: rgba(236, 72, 153, 0.15); color: #ec4899; }
+
+/* Gallery audio items */
+.gallery-item .audio-item {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.gallery-item .audio-item audio {
+    width: 100%;
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.5rem;
+}
+
+/* Download page type badges */
+.model-card .type-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    background: var(--info-bg);
+    color: var(--info);
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
+}
+
+.model-card .type-badge.audio {
+    background: rgba(236, 72, 153, 0.15);
+    color: #ec4899;
+}
+
 /* Mobile responsiveness */
 @media (max-width: 768px) {
     nav {

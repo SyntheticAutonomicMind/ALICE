@@ -31,7 +31,7 @@ os.environ.setdefault("MKL_NUM_THREADS", str(num_cpus))
 os.environ.setdefault("OPENBLAS_NUM_THREADS", str(num_cpus))
 
 from .config import config, setup_logging
-from .model_registry import ModelRegistry
+from .model_registry import ModelRegistry, AudioModelEntry
 from .generator import GeneratorService
 from .downloader import DownloadManager
 from .model_cache import ModelCacheService
@@ -88,6 +88,8 @@ from .schemas import (
     AudioGenerationResponse,
     AudioModelInfo,
     AudioModelsListResponse,
+    InstalledAudioModelInfo,
+    InstalledAudioModelsResponse,
 )
 
 # Setup logging
@@ -544,18 +546,24 @@ async def serve_emergency_admin():
     return FileResponse(web_dir / "emergency-admin.html", media_type="text/html")
 
 
-@app.get("/web/generate.html", response_class=HTMLResponse)
-async def serve_generate(alice_session: Optional[str] = Cookie(None)):
-    """Serve the generate page - requires authentication."""
+@app.get("/web/images.html", response_class=HTMLResponse)
+async def serve_images(alice_session: Optional[str] = Cookie(None)):
+    """Serve the image generation page - requires authentication."""
     web_dir = _get_web_dir()
-    if not (web_dir / "generate.html").exists():
+    if not (web_dir / "images.html").exists():
         raise HTTPException(status_code=404, detail="Page not found")
-    
+
     # If server requires auth, check for valid session cookie
     if config.server.require_auth and not _verify_web_auth_cookie(alice_session):
-        return RedirectResponse(url="/web/login.html?return=/web/generate.html", status_code=303)
-    
-    return FileResponse(web_dir / "generate.html", media_type="text/html")
+        return RedirectResponse(url="/web/login.html?return=/web/images.html", status_code=303)
+
+    return FileResponse(web_dir / "images.html", media_type="text/html")
+
+
+@app.get("/web/generate.html", response_class=HTMLResponse)
+async def serve_generate_legacy():
+    """Redirect legacy generate.html URL to images.html."""
+    return RedirectResponse(url="/web/images.html", status_code=301)
 
 
 # Protected pages - require authentication via session cookie
@@ -1141,12 +1149,15 @@ async def refresh_models(access: AccessLevel = Depends(require_access_level(Acce
     
     models = model_registry.refresh()
     loras = model_registry.list_loras()
-    logger.info("Model registry refreshed: %d models and %d LoRAs found", len(models), len(loras))
+    audio_models = model_registry.list_audio_models()
+    logger.info("Model registry refreshed: %d models, %d audio models, and %d LoRAs found",
+                len(models), len(audio_models), len(loras))
     
     return {
         "status": "ok",
         "models_found": len(models),
-        "loras_found": len(loras)
+        "loras_found": len(loras),
+        "audio_models_found": len(audio_models)
     }
 
 
@@ -1276,6 +1287,85 @@ async def list_loras(access: AccessLevel = Depends(require_access_level(AccessLe
 async def list_loras_alias(access: AccessLevel = Depends(require_access_level(AccessLevel.ANONYMOUS))):
     """Alias for /v1/loras - list available LoRAs."""
     return await list_loras(access)
+
+
+@app.get("/v1/models/audio", response_model=InstalledAudioModelsResponse)
+async def list_audio_models_installed(
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ANONYMOUS))
+):
+    """
+    List audio (music) models installed in the models directory.
+
+    Unlike /v1/audio/models (which returns the static catalog of all
+    *supported* audio models), this endpoint returns only models that
+    have been downloaded/installed to disk, following the same pattern
+    as /v1/models for image models.
+    """
+    if model_registry is None:
+        return InstalledAudioModelsResponse(object="list", data=[], total=0)
+
+    audio_models = model_registry.list_audio_models()
+
+    # Look up catalog metadata (description, engine, max_seconds, etc.)
+    # for richer display on the models page.
+    catalog = AudioBackend.list_supported_models()
+    catalog_map = {m["id"]: m for m in catalog}
+
+    data = []
+    for aud in audio_models:
+        meta = catalog_map.get(aud.catalog_id, {})
+        data.append(InstalledAudioModelInfo(
+            id=aud.id,
+            name=meta.get("name", aud.name),
+            catalog_id=catalog_id,
+            description=meta.get("description", ""),
+            engine=meta.get("engine", aud.engine),
+            max_seconds=meta.get("max_seconds", 0),
+            sample_rate=meta.get("sample_rate", 0),
+            supports_lyrics=meta.get("supports_lyrics", False),
+            license=meta.get("license", ""),
+            size_mb=aud.size_mb,
+            created=aud.created,
+            path=aud.path,
+            installed=True,
+        ))
+
+    return InstalledAudioModelsResponse(
+        object="list",
+        data=data,
+        total=len(data),
+    )
+
+
+@app.delete("/v1/models/audio/{model_id}")
+async def delete_audio_model(
+    model_id: str,
+    access: AccessLevel = Depends(require_access_level(AccessLevel.ADMIN))
+):
+    """
+    Delete an installed audio (music) model. Requires admin privileges.
+
+    Unloads the model from the audio backend (if loaded), then removes
+    the directory from disk and the registry.
+    """
+    if model_registry is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    # Unload from audio backend if loaded
+    if audio_backend is not None:
+        entry = model_registry.get_audio_model(model_id)
+        if entry and audio_backend._engine_model_id == entry.catalog_id:
+            logger.info("Unloading audio backend model before deletion")
+            try:
+                await audio_backend.unload()
+            except Exception as exc:
+                logger.warning("Failed to unload audio model before deletion: %s", exc)
+
+    success = model_registry.delete_audio_model(model_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Audio model not found: {model_id}")
+
+    return {"status": "deleted", "model_id": model_id, "type": "audio_model"}
 
 
 # NOTE: Download cancel must come BEFORE model delete due to route priority
@@ -2495,6 +2585,39 @@ async def download_huggingface(
     }
 
 
+@app.post("/v1/models/download/audio")
+async def download_audio_model(
+    request: HuggingFaceDownloadRequest,
+    access: AccessLevel = Depends(require_access_level(AccessLevel.USER))
+):
+    """
+    Queue download of a HuggingFace audio (music) model.
+
+    Does a full repo clone (not single-file download) because audio models
+    are multi-file HF repos (e.g. MiniMax-Music3 with separate
+    transformer/, vocoder/, language_model/ subdirectories).
+
+    Returns the download task ID.
+    """
+    if download_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    task_id = await download_manager.download_audio_model(
+        model_id=request.model_id,
+        revision=request.revision,
+    )
+
+    if not task_id:
+        raise HTTPException(status_code=400, detail="Failed to queue download")
+
+    task = download_manager.get_task(task_id)
+    return {
+        "status": "queued",
+        "task_id": task_id,
+        "task": task.to_dict() if task else None
+    }
+
+
 @app.post("/v1/models/download/url")
 async def download_url(
     request: DirectDownloadRequest,
@@ -2507,16 +2630,16 @@ async def download_url(
     """
     if download_manager is None:
         raise HTTPException(status_code=503, detail="Service not ready")
-    
+
     task_id = await download_manager.download_url(
         url=request.url,
         filename=request.filename,
         is_lora=request.is_lora,
     )
-    
+
     if not task_id:
         raise HTTPException(status_code=400, detail="Failed to queue download")
-    
+
     task = download_manager.get_task(task_id)
     return {
         "status": "queued",

@@ -17,6 +17,24 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+# Known audio model directory names (case-insensitive) that the model
+# registry recognises as audio models.  This mirrors the
+# AUDIO_MODEL_CATALOG in backends/audio_backend.py and is kept in sync
+# when new audio models are added.
+_KNOWN_AUDIO_MODEL_DIRS = {
+    "stable-audio-open-1.0",  # stabilityai/stable-audio-open-1.0
+    "minimax-music-3",        # MiniMaxAI/MiniMax-Music3 (model-ID form)
+    "minimax-music3",         # alternate directory naming
+}
+
+# Maps lowercase directory names to catalog model IDs for metadata lookup.
+_AUDIO_MODEL_ID_MAP = {
+    "stable-audio-open-1.0": "stable-audio-open-1.0",
+    "minimax-music-3": "minimax-music-3",
+    "minimax-music3": "minimax-music-3",
+}
+
+
 @dataclass
 class ModelEntry:
     """Information about a registered model."""
@@ -47,6 +65,26 @@ class LoRAEntry:
         return asdict(self)
 
 
+@dataclass
+class AudioModelEntry:
+    """Information about an installed audio (music) model directory."""
+    id: str                # "audio/<catalog_id>"
+    name: str              # directory name (e.g. "MiniMax-Music3")
+    path: str              # absolute path to the model directory
+    created: int           # unix timestamp
+    size_mb: int
+    catalog_id: str = ""   # matching id in AUDIO_MODEL_CATALOG, for metadata lookup
+    engine: str = ""       # "stable_audio" or "minimax_music3"
+
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "AudioModelEntry":
+        return cls(**data)
+
+
 class ModelRegistry:
     """
     Registry for managing Stable Diffusion models.
@@ -68,6 +106,7 @@ class ModelRegistry:
         self.loras_dir = self.models_dir / "loras"
         self.registry_file = self.models_dir / ".registry.json"
         self.models: Dict[str, ModelEntry] = {}
+        self.audio_models: Dict[str, AudioModelEntry] = {}
         self.loras: Dict[str, LoRAEntry] = {}
         
         # Ensure directories exist
@@ -106,6 +145,11 @@ class ModelRegistry:
                     )
                     self.loras[entry.id] = entry
                 
+                self.audio_models = {}
+                for aud_data in data.get("audio_models", []):
+                    entry = AudioModelEntry.from_dict(aud_data)
+                    self.audio_models[entry.id] = entry
+                
                 logger.info("Loaded %d models and %d LoRAs from registry", len(self.models), len(self.loras))
             except Exception as e:
                 logger.warning("Failed to load registry: %s. Rescanning.", e)
@@ -121,13 +165,15 @@ class ModelRegistry:
                 "version": "1.1",
                 "updated": int(datetime.now().timestamp()),
                 "models": [model.to_dict() for model in self.models.values()],
-                "loras": [lora.to_dict() for lora in self.loras.values()]
+                "loras": [lora.to_dict() for lora in self.loras.values()],
+                "audio_models": [aud.to_dict() for aud in self.audio_models.values()],
             }
             
             with open(self.registry_file, "w") as f:
                 json.dump(data, f, indent=2)
             
-            logger.debug("Saved registry with %d models and %d LoRAs", len(self.models), len(self.loras))
+            logger.debug("Saved registry with %d models, %d audio models, and %d LoRAs",
+                        len(self.models), len(self.audio_models), len(self.loras))
         except Exception as e:
             logger.error("Failed to save registry: %s", e)
     
@@ -210,17 +256,28 @@ class ModelRegistry:
         
         # Clear existing entries before rescanning to remove stale models
         self.models.clear()
+        self.audio_models.clear()
         self.loras.clear()
         
         if not self.models_dir.exists():
             logger.warning("Models directory does not exist: %s", self.models_dir)
             return found_models
         
+        # Scan for audio models first so we can skip their directories
+        # during the image model scan (audio model dirs may contain .safetensors
+        # files that belong to the audio model, not standalone image checkpoints).
+        audio_dirs = self._scan_audio_models()
+        audio_dir_set = {Path(a.path) for a in audio_dirs.values()}
+        
         # Scan for .safetensors files
         for safetensors_file in self.models_dir.rglob("*.safetensors"):
             if safetensors_file.is_file():
                 # Skip files in the loras subdirectory
                 if self.loras_dir in safetensors_file.parents or safetensors_file.parent == self.loras_dir:
+                    continue
+                
+                # Skip files inside audio model directories
+                if any(audio_dir in safetensors_file.parents for audio_dir in audio_dir_set):
                     continue
                 
                 # Skip files that are components inside diffusers model directories
@@ -273,6 +330,10 @@ class ModelRegistry:
                 if self.loras_dir in gguf_file.parents or gguf_file.parent == self.loras_dir:
                     continue
                 
+                # Skip files inside audio model directories
+                if any(audio_dir in gguf_file.parents for audio_dir in audio_dir_set):
+                    continue
+                
                 # Skip auxiliary files (LLM encoders, etc.) that shouldn't be listed as models
                 # Only list files that are diffusion models - detect by name patterns
                 name_lower = gguf_file.stem.lower()
@@ -313,6 +374,12 @@ class ModelRegistry:
                 if model_dir == self.loras_dir or model_dir.name == "loras":
                     continue
                 
+                # Skip audio model directories (already scanned above)
+                if model_dir in audio_dir_set or any(
+                    aud_dir in model_dir.parents for aud_dir in audio_dir_set
+                ):
+                    continue
+                
                 model_index = model_dir / "model_index.json"
                 if model_index.exists():
                     model_id = f"{self.MODEL_PREFIX}/{model_dir.name}"
@@ -340,7 +407,8 @@ class ModelRegistry:
         # Save updated registry
         self._save_registry()
         
-        logger.info("Found %d models and %d LoRAs", len(found_models), len(self.loras))
+        logger.info("Found %d models, %d audio models, and %d LoRAs",
+                     len(found_models), len(self.audio_models), len(self.loras))
         return found_models
     
     def get_model(self, model_id: str) -> Optional[ModelEntry]:
@@ -500,6 +568,181 @@ class ModelRegistry:
         """
         return list(self.loras.values())
     
+    # ----------------------------------------------------------------------
+    # Audio model management
+    # ----------------------------------------------------------------------
+
+    def _is_audio_model_dir(self, path: Path) -> bool:
+        """Check if a top-level directory looks like an audio (music) model.
+
+        Detection uses two strategies:
+          1. Known directory names from ``_KNOWN_AUDIO_MODEL_DIRS``
+             (case-insensitive match against the catalog in
+             ``backends/audio_backend.py``).
+          2. Audio-specific structural markers: a directory that contains
+             subdirectories like ``vocoder/`` or ``condition_encoder/``
+             (MiniMax-Music3 layout) and does *not* have a
+             ``model_index.json`` (which would make it a diffusers image
+             model).
+        """
+        name_lower = path.name.lower()
+
+        if name_lower in _KNOWN_AUDIO_MODEL_DIRS:
+            return True
+
+        # Only apply marker-based detection to top-level directories
+        # inside the models directory (not nested subdirectories).
+        if path.parent == self.models_dir:
+            if (path / "model_index.json").exists():
+                return False  # diffusers image model, not audio
+            audio_markers = {"vocoder", "condition_encoder",
+                             "rvq_depth_decoder", "text_encoder"}
+            has_marker = any((path / m).is_dir() for m in audio_markers)
+            if has_marker:
+                return True
+
+        return False
+
+    def _catalog_id_for_dir(self, dir_name: str) -> str:
+        """Map a local directory name to its AUDIO_MODEL_CATALOG id.
+
+        Falls back to the lowercase directory name if no mapping is found,
+        so unknown audio model repos still get listed (just without
+        catalog metadata).
+        """
+        name_lower = dir_name.lower()
+        return _AUDIO_MODEL_ID_MAP.get(name_lower, name_lower)
+
+    def _scan_audio_models(self) -> Dict[str, AudioModelEntry]:
+        """Scan the models directory for installed audio model directories.
+
+        Populates and returns ``self.audio_models``.
+        """
+        found: Dict[str, AudioModelEntry] = {}
+
+        if not self.models_dir.exists():
+            return found
+
+        for entry in self.models_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            # Skip the LoRAs directory
+            if entry == self.loras_dir or entry.name == "loras":
+                continue
+            # Skip diffusers image model directories (handled by image scan)
+            if (entry / "model_index.json").exists():
+                continue
+            if not self._is_audio_model_dir(entry):
+                continue
+
+            catalog_id = self._catalog_id_for_dir(entry.name)
+            model_id = f"audio/{catalog_id}"
+
+            try:
+                created = int(entry.stat().st_ctime)
+            except OSError:
+                created = 0
+
+            aud_entry = AudioModelEntry(
+                id=model_id,
+                name=entry.name,
+                path=str(entry),
+                created=created,
+                size_mb=self._calculate_size(entry),
+                catalog_id=catalog_id,
+                engine="",  # filled in by the API layer from the catalog
+            )
+            found[model_id] = aud_entry
+            self.audio_models[model_id] = aud_entry
+            logger.debug("Found audio model: %s", model_id)
+
+        if found:
+            logger.info("Found %d audio models", len(found))
+        return found
+
+    def list_audio_models(self) -> List[AudioModelEntry]:
+        """
+        List all installed audio (music) models.
+
+        Returns:
+            List of audio model entries
+        """
+        return list(self.audio_models.values())
+
+    def get_audio_model(self, model_id: str) -> Optional[AudioModelEntry]:
+        """
+        Get an audio model entry by ID.
+
+        Args:
+            model_id: Audio model identifier (e.g., audio/minimax-music-3)
+
+        Returns:
+            AudioModelEntry or None if not found
+        """
+        return self.audio_models.get(model_id)
+
+    def get_audio_model_path(self, model_id: str) -> Optional[Path]:
+        """
+        Get path to an audio model by ID.
+
+        Args:
+            model_id: Audio model identifier
+
+        Returns:
+            Path to model or None if not found
+        """
+        entry = self.get_audio_model(model_id)
+        if entry:
+            return Path(entry.path)
+        return None
+
+    def delete_audio_model(self, model_id: str) -> bool:
+        """
+        Delete an audio model directory from disk and registry.
+
+        Args:
+            model_id: Audio model identifier (e.g., audio/minimax-music-3)
+
+        Returns:
+            True if deleted, False if not found
+        """
+        entry = self.audio_models.get(model_id)
+        if not entry:
+            logger.warning("Audio model not found for deletion: %s", model_id)
+            return False
+
+        model_path = Path(entry.path)
+
+        try:
+            import shutil
+            if model_path.is_dir():
+                shutil.rmtree(model_path)
+                logger.info("Deleted audio model directory: %s", model_path)
+            elif model_path.is_file():
+                model_path.unlink()
+                logger.info("Deleted audio model file: %s", model_path)
+            else:
+                logger.warning("Audio model path does not exist: %s", model_path)
+
+            del self.audio_models[model_id]
+            self._save_registry()
+            return True
+        except Exception as e:
+            logger.error("Failed to delete audio model %s: %s", model_id, e)
+            return False
+
+    def refresh_audio_models(self) -> List[AudioModelEntry]:
+        """
+        Re-scan the models directory for audio models.
+
+        Useful after a new audio model has been downloaded without a
+        full registry refresh.
+        """
+        self.audio_models.clear()
+        self._scan_audio_models()
+        self._save_registry()
+        return list(self.audio_models.values())
+    
     def refresh(self) -> List[ModelEntry]:
         """
         Refresh model registry by rescanning.
@@ -508,6 +751,7 @@ class ModelRegistry:
             List of all models after refresh
         """
         self.models.clear()
+        self.audio_models.clear()
         self.loras.clear()
         return self.scan_models()
     

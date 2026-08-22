@@ -201,7 +201,7 @@ const API = {
         });
     },
     
-    // Generate image with formData object (used by generate.html)
+    // Generate image with formData object (used by images.html)
     async generateImage(formData) {
         // Build sam_config from formData
         const sam_config = {};
@@ -232,7 +232,7 @@ const API = {
             sam_config.num_images = formData.num_images;
         }
         
-        // Handle LoRAs array format from generate.html
+        // Handle LoRAs array format from images.html
         if (formData.loras && formData.loras.length > 0) {
             sam_config.lora_paths = formData.loras.map(lora => lora.name);
             sam_config.lora_scales = formData.loras.map(lora => lora.weight);
@@ -642,7 +642,7 @@ async function requireAuth(options = {}) {
                     // Check admin access for admin-only pages
                     if (options.adminOnly && !userInfo.is_admin) {
                         Toast.error('Admin access required');
-                        window.location.href = '/web/generate.html';
+                        window.location.href = '/web/images.html';
                         return { authenticated: true, apiKey, isAdmin: false };
                     }
                     
@@ -954,7 +954,7 @@ function buildNavBar() {
     const navLinks = [
         { href: '/web/',          label: 'Dashboard',      adminOnly: true },
         { href: '/web/models.html',  label: 'Models',      adminOnly: true },
-        { href: '/web/generate.html', label: 'Generate',    adminOnly: false },
+        { href: '/web/images.html', label: 'Images',     adminOnly: false },
         { href: '/web/audio.html',    label: 'Music',       adminOnly: false },
         { href: '/web/gallery.html',  label: 'Gallery',     adminOnly: false },
         { href: '/web/prompting.html', label: 'Prompting Guide', adminOnly: false },

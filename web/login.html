@@ -206,7 +206,7 @@
                     // Use SameSite=Lax to allow cookie on redirects
                     document.cookie = `alice_session=${existingKey}; path=/; SameSite=Lax`;
                     // Redirect to intended page
-                    const returnUrl = urlParams.get('return') || '/web/generate.html';
+                    const returnUrl = urlParams.get('return') || '/web/images.html';
                     window.location.href = returnUrl;
                     return;
                 } catch (e) {
@@ -248,7 +248,7 @@
                     document.cookie = `alice_session=${key}; path=/; SameSite=Lax`;
                     Toast.success('Logged in successfully!');
                     
-                    const returnUrl = urlParams.get('return') || '/web/generate.html';
+                    const returnUrl = urlParams.get('return') || '/web/images.html';
                     window.location.href = returnUrl;
                 } catch (error) {
                     errorEl.textContent = 'Invalid API key';
@@ -458,7 +458,7 @@
                 // Set session cookie for server-side auth
                 document.cookie = `alice_session=${key}; path=/; SameSite=Lax`;
                 Toast.success('Logged in successfully!');
-                window.location.href = '/web/generate.html';
+                window.location.href = '/web/images.html';
             }
         }
         

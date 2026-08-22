@@ -732,8 +732,67 @@ class DownloadManager:
             logger.error("Failed to queue HuggingFace download: %s", e)
             return None
     
-    # =========================================================================
-    # DIRECT DOWNLOAD
+    async def download_audio_model(self, model_id: str, revision: str = "main") -> Optional[str]:
+        """
+        Queue a full HuggingFace repo clone for an audio (music) model.
+
+        Unlike ``download_huggingface`` (which looks for a single
+        ``.safetensors`` file), this always does a full ``git clone`` of
+        the repo so that multi-file audio models like MiniMax-Music3 are
+        downloaded correctly.
+
+        Args:
+            model_id: Full HuggingFace repo id (e.g. "MiniMaxAI/MiniMax-Music3")
+            revision: Git revision/branch
+
+        Returns:
+            Download task ID or None if failed
+        """
+        headers = {}
+        if self.huggingface_token:
+            headers["Authorization"] = f"Bearer {self.huggingface_token}"
+
+        try:
+            # Get model info to verify the repo exists
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{self.HUGGINGFACE_API_BASE}/models/{model_id}",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as response:
+                    if response.status != 200:
+                        logger.error("Failed to get HuggingFace audio model info: %s", response.status)
+                        return None
+                    model_info = await response.json()
+
+            model_name = model_id.split("/")[-1]
+            clone_url = f"https://huggingface.co/{model_id}"
+
+            task_id = str(uuid.uuid4())[:8]
+            task = DownloadTask(
+                id=task_id,
+                source=DownloadSource.HUGGINGFACE,
+                name=model_name,
+                url=clone_url,
+                destination=self.models_dir / model_name,
+                total_size=0,  # Unknown for git clone
+                metadata={
+                    "huggingface_id": model_id,
+                    "revision": revision,
+                    "is_audio_model": True,
+                    "clone_repo": True,
+                },
+            )
+
+            self._tasks[task_id] = task
+            await self._queue.put(task_id)
+
+            logger.info("Queued HuggingFace audio model clone: %s -> %s", model_name, task.destination)
+            return task_id
+
+        except Exception as e:
+            logger.error("Failed to queue audio model download: %s", e)
+            return None
     # =========================================================================
     
     async def download_url(

@@ -172,6 +172,32 @@ class LoRAsResponse(BaseModel):
     data: List[LoRAInfo]
 
 
+class InstalledAudioModelInfo(BaseModel):
+    """Audio (music) model installed on disk, for the models page."""
+    id: str = Field(..., description="Audio model ID (e.g., audio/minimax-music-3)")
+    name: str = Field(..., description="Human-readable name")
+    catalog_id: str = Field(..., description="Catalog model ID for generation (e.g., minimax-music-3)")
+    description: str = Field(default="", description="One-paragraph description from catalog")
+    engine: str = Field(default="", description="Backend engine: stable_audio or minimax_music3")
+    max_seconds: int = Field(default=0, alias="maxSeconds", description="Maximum clip length")
+    sample_rate: int = Field(default=0, alias="sampleRate", description="Native sample rate in Hz")
+    supports_lyrics: bool = Field(default=False, alias="supportsLyrics", description="Whether this model accepts lyrics")
+    license: str = Field(default="", description="Upstream license")
+    size_mb: int = Field(default=0, alias="sizeMb", description="Size in MB")
+    created: int = Field(..., description="Unix timestamp")
+    path: str = Field(..., description="Absolute path to the model directory")
+    installed: bool = Field(default=True, description="Whether the model is installed locally (always true for this endpoint)")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class InstalledAudioModelsResponse(BaseModel):
+    """Response listing installed audio models, for the models page."""
+    object: str = Field(default="list")
+    data: List[InstalledAudioModelInfo]
+    total: int = Field(default=0)
+
+
 class ModelsResponse(BaseModel):
     """OpenAI models list response."""
     object: str = Field(default="list")

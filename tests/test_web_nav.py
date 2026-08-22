@@ -22,7 +22,7 @@ WEB_DIR = Path(__file__).parent.parent / "web"
 # All HTML pages that should have a navigation bar
 NAV_PAGES = [
     "index.html",
-    "generate.html",
+    "images.html",
     "gallery.html",
     "download.html",
     "audio.html",

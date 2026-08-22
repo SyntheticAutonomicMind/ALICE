@@ -215,21 +215,25 @@ But the stars are calling my name"></textarea>
             let genStartTime = 0;
             let progressInterval = null;
 
-            // Load audio models
+            // Load audio models from installed models (like images.html uses /v1/models)
             async function loadAudioModels() {
                 try {
-                    const response = await API.fetch('/v1/audio/models');
+                    const response = await API.fetch('/v1/models/audio');
                     const select = document.getElementById('audio-model');
+                    const models = response.data || [];
+
                     select.innerHTML = '';
 
                     // Add default option
                     select.innerHTML += '<option value="" disabled selected>Select a model</option>';
 
-                    if (response.models && response.models.length > 0) {
-                        response.models.forEach(model => {
+                    if (models.length > 0) {
+                        models.forEach(model => {
                             const option = document.createElement('option');
-                            option.value = model.id;
-                            option.textContent = model.name;
+                            // Use catalog_id for generation (what /v1/audio/generations expects)
+                            const modelId = model.catalog_id || model.id.replace(/^audio\//, '');
+                            option.value = modelId;
+                            option.textContent = model.name || modelId;
                             option.dataset.engine = model.engine || 'stable_audio';
                             option.dataset.supportsLyrics = model.supports_lyrics || false;
                             option.dataset.maxSeconds = model.max_seconds;
@@ -237,14 +241,28 @@ But the stars are calling my name"></textarea>
                             select.appendChild(option);
                         });
 
-                        // Default to first model, or MiniMax-Music3 if available
+                        // Default to MiniMax-Music3 if available, otherwise first model
                         const minimaxOption = select.querySelector('option[value="minimax-music-3"]');
                         if (minimaxOption) {
                             select.value = 'minimax-music-3';
+                        } else {
+                            select.value = models[0].catalog_id || models[0].id.replace(/^audio\//, '');
                         }
                         updateModelInfo();
                     } else {
-                        select.innerHTML += '<option value="" disabled>No audio models available</option>';
+                        // No installed audio models - show link to download page
+                        select.innerHTML += '<option value="" disabled selected>No models installed</option>';
+                        const noModelsNotice = document.createElement('option');
+                        noModelsNotice.value = '';
+                        noModelsNotice.disabled = true;
+                        noModelsNotice.textContent = '(download from /web/download.html)';
+                        select.appendChild(noModelsNotice);
+
+                        // Show a notice below the select
+                        const modelInfoBanner = document.getElementById('model-info');
+                        const modelInfoContent = document.getElementById('model-info-content');
+                        modelInfoContent.innerHTML = '<strong>No audio models installed.</strong> Download one from the <a href="/web/download.html" style="color: var(--accent);">Download</a> page first.';
+                        modelInfoBanner.classList.remove('hidden');
                     }
                 } catch (err) {
                     console.error('Failed to load audio models:', err);

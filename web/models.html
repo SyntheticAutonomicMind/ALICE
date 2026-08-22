@@ -13,7 +13,7 @@
         <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
             <div>
                 <h1>Models</h1>
-                <p>Manage your Stable Diffusion models</p>
+                <p>Manage your image and music models</p>
             </div>
             <button id="refresh-btn" class="btn btn-secondary">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -57,6 +57,21 @@
             <div id="lora-list" class="model-list"></div>
         </div>
         
+        <!-- Audio Models -->
+        <div class="card" id="audio-card" style="display: none;">
+            <div class="card-header">
+                <span class="card-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9l10-3v11L9 14 9 9z" />
+                    </svg>
+                    Audio Models
+                </span>
+                <span id="audio-count" style="color: var(--text-secondary); font-size: 0.9rem;">0 models</span>
+            </div>
+            
+            <div id="audio-list" class="model-list"></div>
+        </div>
+        
         <!-- Model Info -->
         <div class="card">
             <div class="card-header">
@@ -73,7 +88,8 @@
             <ul style="color: var(--text-secondary); margin-left: 1.5rem; margin-bottom: 1rem;">
                 <li style="margin-bottom: 0.5rem;">Single <code>.safetensors</code> checkpoint files</li>
                 <li style="margin-bottom: 0.5rem;">Diffusers format directories (with <code>model_index.json</code>)</li>
-                <li>LoRA files in the <code>loras/</code> subdirectory</li>
+                <li style="margin-bottom: 0.5rem;">LoRA files in the <code>loras/</code> subdirectory</li>
+                <li>Music model directories (Stable Audio, MiniMax-Music3) downloaded from HuggingFace</li>
             </ul>
             <p style="color: var(--text-secondary);">
                 After adding new models, click "Refresh" to scan for changes.
@@ -118,6 +134,21 @@
                         <span style="font-weight: 600;">FLUX</span>
                     </div>
                     <div style="color: var(--text-secondary); font-size: 0.85rem;">Various sizes, ~24GB VRAM</div>
+                </div>
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <span class="model-type-badge audio">MUSIC</span>
+                        <span style="font-weight: 600;">Stable Audio</span>
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.85rem;">Text-to-sound effects, up to 47s</div>
+                </div>
+                <div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <span class="model-type-badge audio">MUSIC</span>
+                        <span style="font-weight: 600;">MiniMax Music 3</span>
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.85rem;">Text-to-music with lyrics, up to 6min</div>
+                </div>
                 </div>
             </div>
         </div>
@@ -197,7 +228,7 @@
                                     </div>
                                 </div>
                                 <div class="model-actions">
-                                    <a href="/web/generate.html?model=${encodeURIComponent(model.id)}" class="btn btn-primary btn-sm">
+                                    <a href="/web/images.html?model=${encodeURIComponent(model.id)}" class="btn btn-primary btn-sm">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                         </svg>
@@ -305,6 +336,98 @@
                 }
             }
             
+            async function loadAudioModels() {
+                const cardEl = document.getElementById('audio-card');
+                const listEl = document.getElementById('audio-list');
+                const countEl = document.getElementById('audio-count');
+                
+                listEl.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+                
+                try {
+                    const response = await API.fetch('/v1/models/audio');
+                    const models = response.data || [];
+                    
+                    countEl.textContent = `${models.length} model${models.length !== 1 ? 's' : ''}`;
+                    
+                    if (models.length === 0) {
+                        cardEl.style.display = 'none';
+                        return;
+                    }
+                    
+                    cardEl.style.display = 'block';
+                    
+                    listEl.innerHTML = models.map(model => {
+                        const engineLabel = model.engine === 'minimax_music3' 
+                            ? 'MiniMax Music' 
+                            : model.engine === 'stable_audio' ? 'Stable Audio' 
+                            : model.engine || 'Audio';
+                        
+                        const maxSec = model.max_seconds ? `${model.max_seconds}s` : '';
+                        const sr = model.sample_rate ? `${model.sample_rate}Hz` : '';
+                        const size = model.size_mb ? `${model.size_mb} MB` : '';
+                        
+                        return `
+                            <div class="model-item">
+                                <div class="model-info">
+                                    <div class="model-name">${model.name}</div>
+                                    <div class="model-meta">
+                                        <span class="model-type-badge audio">MUSIC</span>
+                                        <span>${engineLabel}</span>
+                                        ${maxSec ? `<span>${maxSec} max</span>` : ''}
+                                        ${sr ? `<span>${sr}</span>` : ''}
+                                        ${size ? `<span>${size}</span>` : ''}
+                                    </div>
+                                    ${model.description ? `<div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">${model.description}</div>` : ''}
+                                </div>
+                                <div class="model-actions">
+                                    <a href="/web/audio.html?model=${encodeURIComponent(model.id)}" class="btn btn-primary btn-sm">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9l10-3v11L9 14 9 9z" />
+                                        </svg>
+                                        Generate Music
+                                    </a>
+                                    <button class="btn btn-ghost btn-sm delete-audio-btn" data-audio-id="${model.id}" title="Delete model">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    // Add delete handlers
+                    listEl.querySelectorAll('.delete-audio-btn').forEach(btn => {
+                        btn.addEventListener('click', async () => {
+                            const model_id = btn.dataset.audioId;
+                            if (!confirm(`Are you sure you want to delete ${model_id}? This cannot be undone.`)) return;
+                            
+                            btn.disabled = true;
+                            try {
+                                await API.fetch(`/v1/models/audio/${encodeURIComponent(model_id)}`, {
+                                    method: 'DELETE'
+                                });
+                                Toast.success(`Audio model deleted`);
+                                loadAudioModels();
+                            } catch (error) {
+                                Toast.error(`Delete failed: ${error.message}`);
+                            } finally {
+                                btn.disabled = false;
+                            }
+                        });
+                    });
+                    
+                } catch (error) {
+                    listEl.innerHTML = '';
+                    countEl.textContent = 'error';
+                    if (error.message.includes('404') || error.message.includes('disabled')) {
+                        // Audio backend not available - hide the card silently
+                    } else {
+                        console.error('Failed to load audio models:', error);
+                    }
+                }
+            }
+            
             // Refresh button handler
             document.getElementById('refresh-btn').addEventListener('click', async () => {
                 const btn = document.getElementById('refresh-btn');
@@ -314,7 +437,7 @@
                 try {
                     await API.refreshModels();
                     Toast.success('Models refreshed');
-                    await Promise.all([loadModels(), loadLoras()]);
+                    await Promise.all([loadModels(), loadLoras(), loadAudioModels()]);
                 } catch (error) {
                     Toast.error(`Refresh failed: ${error.message}`);
                 } finally {
@@ -328,6 +451,7 @@
             // Initial load
             loadModels();
             loadLoras();
+            loadAudioModels();
         }); // End DOMContentLoaded
     </script>
 </body>
