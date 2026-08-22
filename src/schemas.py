@@ -447,8 +447,51 @@ class GalleryStatsResponse(BaseModel):
     public: int = Field(..., description="Public images")
     private: int = Field(..., alias="private", description="Private images")
     expired: int = Field(..., description="Expired images")
+    total_audio: int = Field(default=0, alias="totalAudio", description="Total audio records")
+    public_audio: int = Field(default=0, alias="publicAudio", description="Public audio records")
+    private_audio: int = Field(default=0, alias="privateAudio", description="Private audio records")
+    expired_audio: int = Field(default=0, alias="expiredAudio", description="Expired audio records")
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class GalleryAudioInfo(BaseModel):
+    """Audio information for gallery display."""
+    id: str = Field(..., description="Audio ID")
+    filename: str = Field(..., description="Audio filename")
+    url: str = Field(..., description="Audio URL for playback")
+    is_public: bool = Field(..., alias="isPublic", description="Public visibility")
+    created_at: float = Field(..., alias="createdAt", description="Creation timestamp")
+    expires_at: Optional[float] = Field(default=None, alias="expiresAt", description="Expiration timestamp")
+    is_owner: bool = Field(..., alias="isOwner", description="Whether requester owns this audio")
+
+    # Generation metadata
+    prompt: str = Field(default="")
+    lyrics: str = Field(default="")
+    model: str = Field(default="")
+    steps: int = Field(default=0)
+    cfg_scale: float = Field(default=0.0, alias="cfgScale")
+    duration_seconds: float = Field(default=0.0, alias="durationSeconds")
+    sample_rate: int = Field(default=0, alias="sampleRate")
+    seed: Optional[int] = Field(default=None)
+    size_bytes: int = Field(default=0, alias="sizeBytes")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class GalleryAudioListResponse(BaseModel):
+    """Response listing gallery audio records."""
+    object: str = Field(default="list")
+    data: List[GalleryAudioInfo]
+    total: int = Field(..., description="Total matching audio records")
+    limit: int = Field(..., description="Limit used")
+    offset: int = Field(..., description="Offset used")
+
+
+class DeleteAudioResponse(BaseModel):
+    """Response for deleting an audio record."""
+    id: str = Field(..., description="Audio ID")
+    deleted: bool = Field(..., description="Whether the audio was deleted")
 
 
 # ----------------------------------------------------------------------------

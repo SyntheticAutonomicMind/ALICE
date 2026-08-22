@@ -28,6 +28,8 @@ import gc
 import logging
 import os
 import random
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -217,7 +219,7 @@ class ALICEAudioEngine:
             model_repo: HuggingFace repo id of the model to load.
 
         Returns:
-            Path to the generated WAV file (absolute path).
+            Path to the generated audio file (MP3 if ffmpeg conversion succeeded, otherwise WAV).
         """
         if not prompt or not prompt.strip():
             raise ValueError("prompt must be a non-empty string")
@@ -562,7 +564,8 @@ class MiniMaxMusic3Engine:
             model_repo_or_path: HF repo id or local model directory.
 
         Returns:
-            Path to the generated WAV file.
+            Path to the generated audio file (MP3 if ffmpeg conversion
+            succeeded, otherwise WAV).
         """
         if not prompt or not prompt.strip():
             raise ValueError("prompt must be a non-empty string")
@@ -630,11 +633,51 @@ class MiniMaxMusic3Engine:
             output_path.stat().st_size / (1024 * 1024), sample_rate,
         )
 
+        # Attempt MP3 conversion using ffmpeg subprocess (pydub not installed).
+        mp3_path = self._try_convert_to_mp3(output_path)
+
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        return output_path
+        return mp3_path if mp3_path else output_path
+
+    def _try_convert_to_mp3(self, wav_path: Path) -> Optional[Path]:
+        """Convert WAV to MP3 using ffmpeg subprocess.
+
+        Returns the MP3 path on success, or None if ffmpeg is unavailable
+        or conversion fails.  The original WAV is preserved so it can be
+        served as a fallback.
+        """
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if ffmpeg_bin is None:
+            return None
+
+        mp3_path = wav_path.with_suffix(".mp3")
+        try:
+            result = subprocess.run(
+                [
+                    ffmpeg_bin, "-y",
+                    "-i", str(wav_path),
+                    "-codec:a", "libmp3lame",
+                    "-b:a", "192k",
+                    str(mp3_path),
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode == 0 and mp3_path.exists():
+                logger.info("Converted %s to MP3: %s", wav_path.name, mp3_path.name)
+                return mp3_path
+            else:
+                logger.warning("ffmpeg conversion failed for %s: %s",
+                               wav_path.name, result.stderr.decode()[:200])
+                mp3_path.unlink(missing_ok=True)
+                return None
+        except (subprocess.TimeoutExpired, OSError) as e:
+            logger.warning("ffmpeg conversion error for %s: %s", wav_path.name, e)
+            mp3_path.unlink(missing_ok=True)
+            return None
 
     # -- introspection -------------------------------------------------------
 

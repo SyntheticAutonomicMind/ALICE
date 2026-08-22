@@ -36,7 +36,7 @@ from .generator import GeneratorService
 from .downloader import DownloadManager
 from .model_cache import ModelCacheService
 from .auth import AuthManager, SESSION_TIMEOUT_SECONDS, SESSION_INACTIVITY_TIMEOUT_SECONDS, set_session_timeout
-from .gallery import GalleryManager, ImageRecord
+from .gallery import GalleryManager, ImageRecord, AudioRecord
 from .cancellation import get_cancellation_registry, CancellationError
 from .updater import init_update_manager, shutdown_update_manager, get_update_manager
 from .config_migration import migrate_config
@@ -78,6 +78,9 @@ from .schemas import (
     AuthStatsResponse,
     GalleryImageInfo,
     GalleryListResponse,
+    GalleryAudioInfo,
+    GalleryAudioListResponse,
+    DeleteAudioResponse,
     UpdateImagePrivacyRequest,
     UpdateImageTagsRequest,
     GalleryStatsResponse,
@@ -361,9 +364,9 @@ async def lifespan(app: FastAPI):
         
         sync_task = asyncio.create_task(model_cache_sync_task())
     
-    # Start background task for cleaning up expired images
-    async def cleanup_expired_images_task():
-        """Background task to periodically clean up expired images."""
+    # Start background task for cleaning up expired images and audio
+    async def cleanup_expired_items_task():
+        """Background task to periodically clean up expired gallery items."""
         while True:
             try:
                 await asyncio.sleep(3600)  # Run every hour
@@ -371,12 +374,15 @@ async def lifespan(app: FastAPI):
                     cleaned = gallery_manager.cleanup_expired(config.storage.images_directory)
                     if cleaned > 0:
                         logger.info("Cleaned up %d expired images", cleaned)
+                    cleaned_audio = gallery_manager.cleanup_expired_audio(config.storage.audio_directory)
+                    if cleaned_audio > 0:
+                        logger.info("Cleaned up %d expired audio records", cleaned_audio)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error("Error in cleanup task: %s", e)
     
-    cleanup_task = asyncio.create_task(cleanup_expired_images_task())
+    cleanup_task = asyncio.create_task(cleanup_expired_items_task())
     
     # Initialize update manager for self-update capabilities
     # Use config's data directory for backups (writable under systemd)
@@ -1903,6 +1909,118 @@ async def list_gallery_images(
         limit=limit,
         offset=offset
     )
+
+
+@app.get("/v1/gallery/audio", response_model=GalleryAudioListResponse)
+async def gallery_list_audio(
+    request: Request,
+    limit: int = 100,
+    offset: int = 0,
+    include_public: bool = True,
+    include_private: bool = True,
+    current_user: Any = Depends(get_current_user)
+):
+    """
+    List audio records accessible to the current user.
+
+    Returns user's own audio (public and private) plus other users' public audio.
+    Anonymous users only see public audio.
+    """
+    if gallery_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    api_key_id = current_user.id if current_user else None
+    is_admin = current_user.get_access_level() == AccessLevel.ADMIN if current_user else False
+
+    logger.debug("Gallery audio list request: api_key_id=%s, is_admin=%s", api_key_id, is_admin)
+
+    audio_records = gallery_manager.list_audio(
+        api_key_id=api_key_id,
+        is_admin=is_admin,
+        include_public=include_public,
+        include_private=include_private,
+        limit=limit,
+        offset=offset,
+    )
+
+    request_host = request.headers.get("host", f"{config.server.host}:{config.server.port}")
+    protocol = request.headers.get("x-forwarded-proto", "http")
+
+    data = []
+    for aud in audio_records:
+        is_owner = bool(api_key_id and aud.owner_api_key_id == api_key_id)
+        data.append(GalleryAudioInfo(
+            id=aud.id,
+            filename=aud.filename,
+            url=f"{protocol}://{request_host}/v1/audio/{aud.filename}",
+            is_public=aud.is_public,
+            created_at=aud.created_at,
+            expires_at=aud.expires_at,
+            is_owner=is_owner,
+            prompt=aud.prompt,
+            lyrics=aud.lyrics,
+            model=aud.model,
+            steps=aud.steps,
+            cfg_scale=aud.cfg_scale,
+            duration_seconds=aud.duration_seconds,
+            sample_rate=aud.sample_rate,
+            seed=aud.seed,
+            size_bytes=aud.size_bytes,
+        ))
+
+    total_count = 0
+    with gallery_manager._lock:
+        for aud in gallery_manager._audio.values():
+            if aud.is_public and aud.is_expired():
+                continue
+            if not aud.is_accessible_by(api_key_id, is_admin):
+                continue
+            is_own = api_key_id and aud.owner_api_key_id == api_key_id
+            if aud.is_public and not include_public and not is_own:
+                continue
+            if not aud.is_public and not include_private:
+                continue
+            total_count += 1
+
+    logger.debug("Gallery audio returning %d records (total=%d)", len(data), total_count)
+    return GalleryAudioListResponse(data=data, total=total_count, limit=limit, offset=offset)
+
+
+@app.delete("/v1/gallery/audio/{audio_id}", response_model=DeleteAudioResponse)
+async def gallery_delete_audio(
+    audio_id: str,
+    current_user: Any = Depends(get_current_user),
+    access: AccessLevel = Depends(require_access_level(AccessLevel.USER)),
+):
+    """Delete an audio record from the gallery (owner or admin only)."""
+    if gallery_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    api_key_id = current_user.id if current_user else None
+    audio = gallery_manager.get_audio(audio_id)
+
+    if audio is None:
+        raise HTTPException(status_code=404, detail="Audio not found")
+
+    # Only owner or admin can delete
+    is_owner = bool(api_key_id and audio.owner_api_key_id == api_key_id)
+    is_admin = current_user.get_access_level() == AccessLevel.ADMIN if current_user else False
+    if not (is_owner or is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this audio")
+
+    success = gallery_manager.delete_audio(audio_id)
+    if success:
+        # Also delete the audio file
+        audio_path = config.storage.audio_directory / audio.filename
+        try:
+            audio_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        logger.info("Deleted audio from gallery: %s", audio_id)
+    else:
+        raise HTTPException(status_code=404, detail="Audio not found")
+
+    return DeleteAudioResponse(id=audio_id, deleted=True)
 
 
 @app.patch("/v1/gallery/{image_id}/privacy")
@@ -3562,6 +3680,30 @@ async def create_audio_generation(
             timeout=config.audio.request_timeout_seconds,
         )
         elapsed = time.time() - start
+        audio_is_public = not config.server.require_auth
+
+        # Record audio in gallery
+        if gallery_manager is not None:
+            audio_id = Path(result.url).stem
+            audio_record = AudioRecord(
+                id=audio_id,
+                filename=Path(result.audio_path).name,
+                owner_api_key_id=getattr(current_user, "id", None),
+                is_public=audio_is_public,
+                prompt=prompt,
+                lyrics=request.lyrics or "",
+                model=model_id,
+                seed=result.seed,
+                steps=result.steps,
+                cfg_scale=result.cfg_scale,
+                duration_seconds=result.duration_seconds,
+                sample_rate=result.sample_rate,
+                size_bytes=result.size_bytes,
+            )
+            gallery_manager.add_audio(audio_record)
+            logger.info("Successfully recorded audio in gallery: %s (public=%s)",
+                        audio_id, audio_is_public)
+
         return AudioGenerationResponse(
             url=result.url,
             model=result.model,

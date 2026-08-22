@@ -80,9 +80,49 @@ class ImageRecord:
         return False
 
 
+@dataclass
+class AudioRecord:
+    """Audio metadata record with ownership and privacy controls."""
+    id: str  # Short hash matching audio filename (without extension)
+    filename: str  # Full filename (e.g., "minimax_31633451_seed797011462.wav")
+    owner_api_key_id: Optional[str]
+    is_public: bool = False
+    created_at: float = field(default_factory=time.time)
+    expires_at: Optional[float] = None
+
+    prompt: str = ""
+    lyrics: str = ""
+    model: str = ""
+    seed: Optional[int] = None
+    steps: int = 0
+    cfg_scale: float = 0.0
+    duration_seconds: float = 0.0
+    sample_rate: int = 0
+    size_bytes: int = 0
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "AudioRecord":
+        return cls(**data)
+
+    def is_expired(self) -> bool:
+        if self.expires_at is None:
+            return False
+        return time.time() > self.expires_at
+
+    def is_accessible_by(self, api_key_id: Optional[str], is_admin: bool = False) -> bool:
+        if api_key_id and self.owner_api_key_id == api_key_id:
+            return True
+        if self.is_public and not self.is_expired():
+            return True
+        return False
+
+
 class GalleryManager:
     """
-    Manages the image gallery storage.
+    Manages the image and audio gallery storage.
     
     Uses JSON file storage for simplicity (no database required).
     Thread-safe for concurrent access.
@@ -99,6 +139,7 @@ class GalleryManager:
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
         self._images: Dict[str, ImageRecord] = {}
+        self._audio: Dict[str, AudioRecord] = {}
         self._load()
     
     def _load(self) -> None:
@@ -116,11 +157,17 @@ class GalleryManager:
                 img_id: ImageRecord.from_dict(img_data)
                 for img_id, img_data in data.get("images", {}).items()
             }
+            self._audio = {
+                aud_id: AudioRecord.from_dict(aud_data)
+                for aud_id, aud_data in data.get("audio", {}).items()
+            }
             
-            logger.info("Loaded %d images from gallery", len(self._images))
+            logger.info("Loaded %d images and %d audio records from gallery",
+                       len(self._images), len(self._audio))
         except Exception as e:
             logger.error("Failed to load gallery: %s", e)
             self._images = {}
+            self._audio = {}
     
     def _save(self) -> None:
         """Save gallery to JSON file."""
@@ -129,7 +176,11 @@ class GalleryManager:
                 "images": {
                     img_id: img.to_dict()
                     for img_id, img in self._images.items()
-                }
+                },
+                "audio": {
+                    aud_id: aud.to_dict()
+                    for aud_id, aud in self._audio.items()
+                },
             }
             
             # Write atomically
@@ -138,7 +189,8 @@ class GalleryManager:
                 json.dump(data, f, indent=2)
             temp_path.replace(self.storage_path)
             
-            logger.debug("Saved gallery with %d images", len(self._images))
+            logger.debug("Saved gallery with %d images, %d audio",
+                        len(self._images), len(self._audio))
         except Exception as e:
             logger.error("Failed to save gallery: %s", e)
     
@@ -149,6 +201,112 @@ class GalleryManager:
             self._save()
             logger.info("Added image to gallery: %s (owner=%s, public=%s)", 
                        image.id, image.owner_api_key_id, image.is_public)
+
+    def add_audio(self, audio: AudioRecord) -> None:
+        """Add an audio record to the gallery."""
+        with self._lock:
+            self._audio[audio.id] = audio
+            self._save()
+            logger.info("Added audio to gallery: %s (owner=%s, public=%s)",
+                       audio.id, audio.owner_api_key_id, audio.is_public)
+
+    def get_audio(self, audio_id: str) -> Optional[AudioRecord]:
+        """Get an audio record by ID."""
+        with self._lock:
+            return self._audio.get(audio_id)
+
+    def list_audio(
+        self,
+        api_key_id: Optional[str] = None,
+        is_admin: bool = False,
+        include_public: bool = True,
+        include_private: bool = True,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[AudioRecord]:
+        """
+        List audio records accessible to the given user.
+
+        Args:
+            api_key_id: API key ID of the requester (None for anonymous)
+            is_admin: Whether requester is an admin
+            include_public: Include public audio
+            include_private: Include private audio (only owner's)
+            limit: Maximum number of records to return (0 = return all)
+            offset: Offset for pagination
+
+        Returns:
+            List of accessible audio records, sorted by created_at (newest first)
+        """
+        with self._lock:
+            accessible = []
+            for audio in self._audio.values():
+                if audio.is_public and audio.is_expired():
+                    continue
+                if not audio.is_accessible_by(api_key_id, is_admin):
+                    continue
+                is_own = api_key_id and audio.owner_api_key_id == api_key_id
+                if audio.is_public and not include_public and not is_own:
+                    continue
+                if not audio.is_public and not include_private:
+                    continue
+                accessible.append(audio)
+            accessible.sort(key=lambda x: x.created_at, reverse=True)
+            if limit > 0:
+                return accessible[offset:offset + limit]
+            return accessible[offset:]
+
+    def delete_audio(self, audio_id: str) -> bool:
+        """
+        Delete an audio record from the gallery.
+
+        Args:
+            audio_id: Audio ID
+
+        Returns:
+            True if deleted, False if not found
+        """
+        with self._lock:
+            if audio_id in self._audio:
+                del self._audio[audio_id]
+                self._save()
+                logger.info("Deleted audio from gallery: %s", audio_id)
+                return True
+            return False
+
+    def cleanup_expired_audio(self, audio_dir: Path) -> int:
+        """
+        Clean up expired public audio files.
+
+        Args:
+            audio_dir: Directory containing audio files
+
+        Returns:
+            Number of audio records cleaned up
+        """
+        with self._lock:
+            expired_ids = [
+                aud_id for aud_id, aud in self._audio.items()
+                if aud.is_expired()
+            ]
+            cleaned = 0
+            for aud_id in expired_ids:
+                audio = self._audio[aud_id]
+                audio_path = audio_dir / audio.filename
+                if audio_path.exists():
+                    try:
+                        audio_path.unlink()
+                        logger.info("Deleted expired audio file: %s", audio.filename)
+                    except Exception as e:
+                        logger.error("Failed to delete expired audio file %s: %s",
+                                   audio.filename, e)
+                        continue
+                del self._audio[aud_id]
+                cleaned += 1
+            if cleaned > 0:
+                self._save()
+                logger.info("Cleaned up %d expired audio records", cleaned)
+            return cleaned
     
     def get_image(self, image_id: str) -> Optional[ImageRecord]:
         """Get an image by ID."""
@@ -372,9 +530,18 @@ class GalleryManager:
             private = total - public
             expired = sum(1 for img in self._images.values() if img.is_expired())
             
+            total_audio = len(self._audio)
+            public_audio = sum(1 for aud in self._audio.values() if aud.is_public)
+            private_audio = total_audio - public_audio
+            expired_audio = sum(1 for aud in self._audio.values() if aud.is_expired())
+            
             return {
                 "total": total,
                 "public": public,
                 "private": private,
-                "expired": expired
+                "expired": expired,
+                "total_audio": total_audio,
+                "public_audio": public_audio,
+                "private_audio": private_audio,
+                "expired_audio": expired_audio
             }

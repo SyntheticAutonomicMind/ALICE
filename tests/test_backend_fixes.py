@@ -480,10 +480,11 @@ class TestTritonCacheDir:
         source = pb_path.read_text()
 
         triton_pos = source.find('if "TRITON_CACHE_DIR" not in os.environ:')
-        torch_pos = source.find("import torch")
-
-        assert triton_pos != -1, "TRITON_CACHE_DIR fix not found in pytorch_backend.py"
-        assert torch_pos != -1, "import torch not found in pytorch_backend.py"
+        # Find the actual 'import torch' statement (not in a comment or string)
+        import re
+        torch_matches = list(re.finditer(r'^import torch$', source, re.MULTILINE))
+        assert torch_matches, "import torch not found in pytorch_backend.py"
+        torch_pos = torch_matches[0].start()
         assert triton_pos < torch_pos, (
             "TRITON_CACHE_DIR must be set before 'import torch'"
         )

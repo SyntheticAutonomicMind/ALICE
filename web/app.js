@@ -315,8 +315,14 @@ const API = {
         return response;
     },
 
-    async getAudioStats() {
-        return this.fetch('/v1/audio/stats');
+    async listAudio(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        const url = query ? `/v1/gallery/audio?${query}` : '/v1/gallery/audio';
+        return this.fetch(url);
+    },
+    
+    async deleteAudio(audioId) {
+        return this.fetch(`/v1/gallery/audio/${audioId}`, { method: 'DELETE' });
     },
 
     // Authentication
@@ -517,6 +523,15 @@ class ImageGallery {
         }
         this.render();
     }
+
+    addAudio(audioUrl, metadata = {}) {
+        this.images.unshift({ url: audioUrl, metadata, timestamp: Date.now(), isAudio: true });
+        // Keep only last 20 items
+        if (this.images.length > 20) {
+            this.images = this.images.slice(0, 20);
+        }
+        this.render();
+    }
     
     render() {
         if (!this.container) return;
@@ -534,14 +549,30 @@ class ImageGallery {
             return;
         }
         
-        this.container.innerHTML = this.images.map((img, index) => `
+        this.container.innerHTML = this.images.map((img, index) => {
+            if (img.isAudio) {
+                return `
+            <div class="gallery-item" data-index="${index}">
+                <div class="audio-item">
+                    <audio controls preload="none">
+                        <source src="${img.url}" type="audio/mpeg">
+                        <source src="${img.url.replace(/\.mp3$/, '.wav')}" type="audio/wav">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <div class="overlay">
+                        ${img.metadata.prompt ? this.truncate(img.metadata.prompt, 50) : 'Generated audio'}
+                    </div>
+                </div>
+            </div>`;
+            }
+            return `
             <div class="gallery-item" data-index="${index}">
                 <img src="${img.url}" alt="Generated image" loading="lazy">
                 <div class="overlay">
                     ${img.metadata.prompt ? this.truncate(img.metadata.prompt, 50) : 'Generated image'}
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
         
         // Add click handlers
         this.container.querySelectorAll('.gallery-item').forEach(item => {
