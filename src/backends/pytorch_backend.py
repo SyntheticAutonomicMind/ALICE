@@ -75,6 +75,35 @@ if torch.cuda.is_available():
     except Exception as e:
         logger.debug("Could not configure SDPA backends: %s", e)
 
+# Suppress noisy warnings from transformers, huggingface_hub, and torch
+# These are informational warnings that clutter logs without actionable info:
+# - HF cache permission denied (cache dir owned by root, writes are non-critical)
+# - Token indices too long (CompelForSDXL handles truncation internally)
+# - torch._sympy interp failures (Inductor internal, non-blocking)
+# - Float32 module warnings (diffusers internal, no action needed)
+# - Siglip2ImageProcessorFast deprecation (transformers internal)
+# - PYTORCH_HIP_ALLOC_CONF deprecation (handled by alias below)
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_LOG_LEVEL", "error")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+# Fix deprecated PYTORCH_HIP_ALLOC_CONF -> PYTORCH_ALLOC_CONF
+# PyTorch now reads PYTORCH_ALLOC_CONF for both CUDA and HIP backends
+if "PYTORCH_HIP_ALLOC_CONF" in os.environ and "PYTORCH_ALLOC_CONF" not in os.environ:
+    os.environ["PYTORCH_ALLOC_CONF"] = os.environ["PYTORCH_HIP_ALLOC_CONF"]
+    logger.info("Migrated PYTORCH_HIP_ALLOC_CONF to PYTORCH_ALLOC_CONF")
+
+# Suppress specific non-actionable warning messages at the Python warnings level
+import warnings
+warnings.filterwarnings("ignore", message=".*failed while executing.*")
+warnings.filterwarnings("ignore", message=".*should be kept in float32.*")
+warnings.filterwarnings("ignore", message=".*Siglip2ImageProcessorFast.*")
+warnings.filterwarnings("ignore", message=".*Token indices sequence length.*")
+warnings.filterwarnings("ignore", message=".*Dynamo detected.*")
+warnings.filterwarnings("ignore", message=".*PYTORCH_HIP_ALLOC_CONF is deprecated.*")
+
 # Lazy imports for diffusers to speed up startup
 _diffusers_imported = False
 _pipeline_classes: Dict[str, Type] = {}
@@ -778,20 +807,28 @@ class PyTorchBackend(BaseBackend):
                 logger.warning("Could not enable attention slicing: %s", e)
         
         # VAE slicing (reduces memory during decode)
+        # Note: Some pipeline types (e.g. SDXL single-file) don't have
+        # enable_vae_slicing() on the pipeline itself - check VAE subcomponent.
         if self.enable_vae_slicing:
-            try:
+            if hasattr(self._pipeline, 'enable_vae_slicing'):
                 self._pipeline.enable_vae_slicing()
                 optimizations_applied.append("vae_slicing")
-            except Exception as e:
-                logger.warning("Could not enable VAE slicing: %s", e)
+            elif hasattr(self._pipeline, 'vae') and hasattr(self._pipeline.vae, 'enable_slicing'):
+                self._pipeline.vae.enable_slicing()
+                optimizations_applied.append("vae_slicing")
+            else:
+                logger.debug("VAE slicing not supported on this pipeline type")
         
         # VAE tiling (for very large images)
         if self.enable_vae_tiling:
-            try:
+            if hasattr(self._pipeline, 'enable_vae_tiling'):
                 self._pipeline.enable_vae_tiling()
                 optimizations_applied.append("vae_tiling")
-            except Exception as e:
-                logger.warning("Could not enable VAE tiling: %s", e)
+            elif hasattr(self._pipeline, 'vae') and hasattr(self._pipeline.vae, 'enable_tiling'):
+                self._pipeline.vae.enable_tiling()
+                optimizations_applied.append("vae_tiling")
+            else:
+                logger.debug("VAE tiling not supported on this pipeline type")
         
         # Torch compile (PyTorch 2.0+ performance optimization)
         if self.enable_torch_compile and not self._unet_compiled:

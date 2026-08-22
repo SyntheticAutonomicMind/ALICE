@@ -88,7 +88,7 @@ services:
       - ${ALICE_CONFIG_FILE:-./docker/config.docker.yaml}:/config/config.yaml:ro
     environment:
       - ALICE_CONFIG=/config/config.yaml
-      - PYTORCH_HIP_ALLOC_CONF=expandable_segments:True
+      - PYTORCH_ALLOC_CONF=expandable_segments:True
       - MIOPEN_DEBUG_FIND_ALL=0
     devices:
       - /dev/kfd:/dev/kfd

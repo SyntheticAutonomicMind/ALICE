@@ -201,13 +201,27 @@ def setup_logging(config: LoggingConfig) -> None:
     # Setup handlers - always include console
     handlers = [logging.StreamHandler()]
     
-    # Add file handler only if file path is configured
+    # Add file handler only if file path is configured and writable
     if config.file:
         try:
             # Create log directory if needed
             log_dir = config.file.parent
             log_dir.mkdir(parents=True, exist_ok=True)
-            handlers.append(logging.FileHandler(config.file))
+            # Check if file is writable before creating handler
+            # (avoids noisy permission errors when running under systemd
+            # which already captures stdout/stderr to the same log file)
+            if config.file.exists() and not os.access(config.file, os.W_OK):
+                logger.warning(
+                    "Log file %s exists but is not writable, using console-only logging",
+                    config.file
+                )
+            elif not os.access(log_dir, os.W_OK):
+                logger.warning(
+                    "Log directory %s is not writable, using console-only logging",
+                    log_dir
+                )
+            else:
+                handlers.append(logging.FileHandler(config.file))
         except Exception as e:
             # If file logging fails, continue with console-only logging
             print(f"Warning: Could not setup file logging: {e}", file=sys.stderr)

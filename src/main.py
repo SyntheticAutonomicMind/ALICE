@@ -290,6 +290,34 @@ async def lifespan(app: FastAPI):
     models = model_registry.scan_models()
     logger.info("Found %d models", len(models))
     
+    # Set HF_HOME to a writable cache directory to prevent permission-denied
+    # warnings when huggingface_hub tries to write tree cache files and refs.
+    # In production, /opt/alice/.cache may be root-owned and not writable
+    # by the alice service user. Use the models directory's parent (which
+    # is on a writable volume) instead.
+    if "HF_HOME" not in os.environ:
+        try:
+            hf_cache = config.models.directory.parent / ".cache" / "huggingface"
+            if hf_cache.parent.exists():
+                os.environ["HF_HOME"] = str(hf_cache)
+                logger.info("Set HF_HOME to writable cache: %s", hf_cache)
+        except Exception:
+            pass
+    
+    # Pre-warm the first available model so the first generation request
+    # doesn't wait for model load. This eliminates the latency spike on
+    # the first request after startup or after a model cache eviction.
+    if models and generator is not None:
+        try:
+            first_model_path = Path(models[0].path)
+            logger.info("Pre-warming model on startup: %s", first_model_path)
+            _warm_start = time.time()
+            await generator.load_model(first_model_path)
+            _warm_elapsed = time.time() - _warm_start
+            logger.info("Pre-warmed model %s in %.2fs", first_model_path, _warm_elapsed)
+        except Exception as e:
+            logger.warning("Pre-warming failed (non-critical, first request will load on demand): %s", e)
+    
     # Start model cache sync if enabled
     sync_task = None
     if model_cache_service and config.model_cache.sync_on_startup:

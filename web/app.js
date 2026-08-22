@@ -411,7 +411,7 @@ const StatusPoller = {
     callbacks: [],
     errorShown: false,
     
-    start(intervalMs = 5000) {
+    start(intervalMs = 10000) {
         this.stop();
         this.errorShown = false;
         this.poll(); // Initial poll
@@ -896,11 +896,92 @@ function initTheme() {
 }
 
 
+/**
+ * Build the navigation bar dynamically.
+ *
+ * All pages include a `<nav id="main-nav"></nav>` placeholder that this
+ * function populates. This ensures a single source of truth for the nav
+ * structure, preventing the copy-paste drift that previously caused
+ * missing links, broken closing tags, and inconsistent styling across
+ * pages.
+ *
+ * The active link class is determined from window.location.pathname.
+ * Admin-only / login / logout link visibility is managed by
+ * updateNavVisibility() which is called by each page's auth flow.
+ */
+function buildNavBar() {
+    const nav = document.getElementById('main-nav');
+    if (!nav) {
+        return;
+    }
+
+    const currentPath = window.location.pathname;
+    // Treat /web and /web/ both as the dashboard page
+    const path = currentPath === '/web' ? '/web/' : currentPath;
+
+    // Centralized link definitions — single source of truth
+    const navLinks = [
+        { href: '/web/',          label: 'Dashboard',      adminOnly: true },
+        { href: '/web/models.html',  label: 'Models',      adminOnly: true },
+        { href: '/web/generate.html', label: 'Generate',    adminOnly: false },
+        { href: '/web/audio.html',    label: 'Music',       adminOnly: false },
+        { href: '/web/gallery.html',  label: 'Gallery',     adminOnly: false },
+        { href: '/web/prompting.html', label: 'Prompting Guide', adminOnly: false },
+        { href: '/web/download.html', label: 'Download',    adminOnly: true },
+        { href: '/web/admin.html',    label: 'Admin',       adminOnly: true },
+        { href: '/docs', label: 'API Docs', adminOnly: false, external: true },
+    ];
+
+    let html = '';
+    // Brand / logo
+    html += '<div class="nav-brand">';
+    html += '<a href="/web/" class="logo">';
+    html += '<img src="/web/alice-logo.png" alt="ALICE" style="height: 40px; width: auto; display: inline-block; margin-right: 8px; vertical-align: middle;">';
+    html += '<span style="display: inline-block; vertical-align: middle; font-weight: 700; font-size: 1.2rem; color: var(--accent);">ALICE</span>';
+    html += '</a>';
+    html += '</div>';
+
+    // Mobile toggle button
+    html += '<button class="nav-toggle" onclick="document.querySelector(\'.nav-links\').classList.toggle(\'open\')">';
+    html += '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">';
+    html += '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />';
+    html += '</svg>';
+    html += '</button>';
+
+    // Nav links
+    html += '<div class="nav-links">';
+    for (const link of navLinks) {
+        const classes = [];
+        if (link.adminOnly) classes.push('admin-only');
+        if (path === link.href) classes.push('active');
+        const classAttr = classes.length ? ' class="' + classes.join(' ') + '"' : '';
+        const targetAttr = link.external ? ' target="_blank"' : '';
+        html += '<a href="' + link.href + '"' + classAttr + targetAttr + '>' + link.label + '</a>';
+    }
+    // Auth links
+    html += '<a href="/web/login.html" class="login-link">Login</a>';
+    html += '<a href="#" onclick="window.SDAPI.logout(); return false;" class="logout-link">Logout</a>';
+    html += '</div>';
+
+    // Theme toggle button (always outside nav-links)
+    html += '<button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">';
+    html += '<svg id="theme-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">';
+    html += '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 0 1 8.646 3.646 9.003 9.003 0 0 0 12 21a9 9 0 0 0 8.354-5.646z" />';
+    html += '</svg>';
+    html += '</button>';
+
+    nav.innerHTML = html;
+}
+
+
 // Export for use in other scripts
-window.SDAPI = { API, UI, Toast, StatusPoller, ModelSelector, ImageGallery, requireAuth, logout, SessionManager, setSessionCookie, clearSessionCookie, updateNavVisibility, ThemeManager };
+window.SDAPI = { API, UI, Toast, StatusPoller, ModelSelector, ImageGallery, requireAuth, logout, SessionManager, setSessionCookie, clearSessionCookie, updateNavVisibility, ThemeManager, buildNavBar };
 
 // Initialize Toast and SessionManager when page loads
 document.addEventListener('DOMContentLoaded', () => {
+    // Build navigation bar (shared across all pages)
+    buildNavBar();
+    
     // Initialize Toast
     Toast.init();
     

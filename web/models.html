@@ -8,34 +8,8 @@
     <link rel="stylesheet" href="/web/style.css">
 </head>
 <body>
-    <nav>
-        <div class="nav-brand">
-            <a href="/web/" class="logo"><img src="/web/alice-logo.png" alt="ALICE" style="height: 40px; width: auto; display: inline-block; margin-right: 8px; vertical-align: middle;"><span style="display: inline-block; vertical-align: middle; font-weight: 700; font-size: 1.2rem; color: var(--accent);">ALICE</span></a>
-        </div>
-        <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-        </button>
-        <div class="nav-links">
-            <a href="/web/" class="admin-only">Dashboard</a>
-            <a href="/web/models.html" class="active admin-only">Models</a>
-            <a href="/web/generate.html">Generate</a>
-            <a href="/web/gallery.html">Gallery</a>
-            <a href="/web/prompting.html">Prompting Guide</a>
-            <a href="/web/download.html" class="admin-only">Download</a>
-            <a href="/web/admin.html" class="admin-only">Admin</a>
-            <a href="/docs" target="_blank">API Docs</a>
-            <a href="/web/login.html" class="login-link">Login</a>
-            <a href="#" onclick="window.SDAPI.logout(); return false;" class="logout-link">Logout</a>
-        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
-            <svg id="theme-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-            </svg>
-        </button>
-    </nav>
-    
-    <main>
+    <nav id="main-nav"></nav>
+<main>
         <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
             <div>
                 <h1>Models</h1>

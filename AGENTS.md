@@ -693,7 +693,7 @@ MUST set in environment (or systemd service):
 ```bash
 export MIOPEN_DEBUG_FIND_ALL=0
 export PYTORCH_ROCM_ARCH=gfx1103  # or gfx1102
-export PYTORCH_HIP_ALLOC_CONF=expandable_segments:True
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 ```
 
 **NVIDIA GPUs:**
