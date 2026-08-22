@@ -591,9 +591,12 @@ class MiniMaxMusic3Engine:
         #   generator: torch generator
         #   num_inference_steps: flow-matching Euler steps per chunk
         #   output_type: 'np' for ndarray, 'pt' for tensor
+        # MiniMax-Music3 requires lyrics to be a non-empty string, even for
+        # instrumental tracks.  When the user doesn't provide lyrics, pass a
+        # sentinel placeholder so the pipeline's check_inputs doesn't reject it.
         result = self.pipeline(
             prompt=prompt,
-            lyrics=lyrics or "",
+            lyrics=lyrics or "(instrumental)",
             audio_duration=audio_duration,
             generator=generator,
             num_inference_steps=num_inference_steps,
