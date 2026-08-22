@@ -30,6 +30,8 @@ NAV_PAGES = [
     "admin.html",
     "prompting.html",
     "login.html",
+    "debug.html",
+    "debug-cookies.html",
 ]
 
 

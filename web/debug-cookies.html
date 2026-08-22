@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cookie Debug - ALICE</title>
+    <link rel="stylesheet" href="/web/fonts/inter.css">
+    <link rel="stylesheet" href="/web/style.css">
     <style>
         body {
             font-family: monospace;
@@ -37,6 +39,7 @@
     </style>
 </head>
 <body>
+    <nav id="main-nav"></nav>
     <h1>Cookie Debug Page</h1>
     <button onclick="location.reload()">Refresh</button>
     <button onclick="clearAliceCookie()">Clear alice_session Cookie</button>
@@ -108,5 +111,6 @@
         
         displayCookies();
     </script>
+    <script src="/web/app.js"></script>
 </body>
 </html>
