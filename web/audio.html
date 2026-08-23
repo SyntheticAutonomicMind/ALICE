@@ -155,12 +155,13 @@ But the stars are calling my name"></textarea>
                 <!-- Progress Bar -->
                 <div id="progress-container" style="display: none; margin-top: 1.5rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                        <span id="progress-status" style="font-size: 0.9rem; color: var(--text-secondary);">Generating music...</span>
+                        <span id="progress-status" style="font-size: 0.9rem; color: var(--text-secondary);">Loading model...</span>
                         <span id="progress-time" style="font-size: 0.85rem; color: var(--text-muted);"></span>
                     </div>
                     <div style="width: 100%; height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden;">
                         <div id="progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.3s;"></div>
                     </div>
+                    <div id="progress-hint" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; display: none;"></div>
                 </div>
             </div>
 
@@ -292,7 +293,7 @@ But the stars are calling my name"></textarea>
 
                 let infoText = `<strong>${selected.textContent}</strong>`;
 
-                infoText += ` — Up to ${maxSeconds}s at ${sampleRate}Hz`;
+                infoText += ` - Up to ${maxSeconds}s at ${sampleRate}Hz`;
                 if (supportsLyrics) {
                     infoText += ` (supports lyrics)`;
                 }
@@ -323,9 +324,52 @@ But the stars are calling my name"></textarea>
                 return `${secs}s`;
             }
 
+            // Progress stages for audio generation
+            const progressStages = [
+                { label: 'Loading model...', pct: 20, eta: 30000 },
+                { label: 'Running diffusion...', pct: 70, eta: 120000 },
+                { label: 'Decoding audio...', pct: 85, eta: 30000 },
+                { label: 'Saving to disk...', pct: 95, eta: 10000 },
+                { label: 'Recording in gallery...', pct: 100, eta: 5000 },
+            ];
+            let currentStage = 0;
+
             // Update progress display
             function updateProgress() {
                 const elapsed = Date.now() - genStartTime;
+
+                // Advance stage after enough time has passed
+                if (currentStage < progressStages.length - 1) {
+                    const stage = progressStages[currentStage];
+                    if (elapsed >= stage.eta) {
+                        currentStage++;
+                    }
+                }
+
+                const stage = progressStages[currentStage];
+                const progressBar = document.getElementById('progress-bar');
+                const statusEl = document.getElementById('progress-status');
+
+                // Interpolate progress within the current stage
+                const prevStage = currentStage > 0 ? progressStages[currentStage - 1] : { pct: 0, eta: 0 };
+                const stageElapsed = elapsed - prevStage.eta;
+                const stageDuration = stage.eta - prevStage.eta;
+                const stageProgress = Math.max(0, Math.min(1, stageElapsed / stageDuration));
+                const pct = prevStage.pct + (stage.pct - prevStage.pct) * stageProgress;
+
+                progressBar.style.width = Math.round(pct) + '%';
+                statusEl.textContent = stage.label;
+
+                // ETA hint
+                const remaining = Math.max(0, stage.eta - elapsed);
+                const hintEl = document.getElementById('progress-hint');
+                if (hintEl) {
+                    const mins = Math.floor(remaining / 60000);
+                    const secs = Math.floor((remaining % 60000) / 1000);
+                    hintEl.textContent = `Estimated time remaining: ${mins > 0 ? mins + 'm ' : ''}${secs}s`;
+                    hintEl.style.display = 'block';
+                }
+
                 document.getElementById('progress-time').textContent =
                     `Elapsed: ${formatElapsed(elapsed)}`;
             }

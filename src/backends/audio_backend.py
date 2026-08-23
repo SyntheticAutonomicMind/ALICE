@@ -476,8 +476,11 @@ class AudioBackend:
                             pass
                         raise RuntimeError("Audio generation cancelled mid-flight")
 
+                    # Resolve generation start time for elapsed tracking
+                    gen_start = time.time()
                     stat = audio_path.stat()
                     rel = audio_path.name
+                    elapsed = time.time() - gen_start
                     return AudioGenerationResult(
                         audio_path=audio_path,
                         url=f"/v1/audio/{rel}",
@@ -488,7 +491,7 @@ class AudioBackend:
                         steps=int(steps),
                         cfg_scale=float(cfg_scale),
                         prompt=prompt,
-                        generation_time_seconds=0.0,  # filled in below
+                        generation_time_seconds=round(elapsed, 3),
                         size_bytes=stat.st_size,
                     )
                 finally:

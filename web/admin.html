@@ -899,9 +899,16 @@
                             </div>
                         </div>
                     </div>
-                    
-                        <!-- Audio Settings -->
-                        <div class="form-row">
+
+                    <!-- Audio Settings -->
+                    <div style="margin-bottom: 1rem;">
+                        <h3 style="font-size: 1rem; color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9l10-3v11L9 14 9 9zM9 9L4 6v12l5 3 5-3 5-3" />
+                            </svg>
+                            Audio Generation
+                        </h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
                             <div class="form-group">
                                 <label for="setting-audio-enabled">Audio Generation</label>
                                 <select id="setting-audio-enabled" data-key="audio.enabled">
@@ -917,8 +924,6 @@
                                     <option value="minimax-music-3">MiniMax Music 3</option>
                                 </select>
                             </div>
-                        </div>
-                        <div class="form-row">
                             <div class="form-group">
                                 <label for="setting-audio-default-seconds">Default Duration (sec)</label>
                                 <input type="number" id="setting-audio-default-seconds" data-key="audio.default_seconds" min="1" max="360">
@@ -927,8 +932,6 @@
                                 <label for="setting-audio-default-steps">Default Steps</label>
                                 <input type="number" id="setting-audio-default-steps" data-key="audio.default_steps" min="1" max="500">
                             </div>
-                        </div>
-                        <div class="form-row">
                             <div class="form-group">
                                 <label for="setting-audio-default-cfg">Default Guidance</label>
                                 <input type="number" id="setting-audio-default-cfg" data-key="audio.default_cfg_scale" min="0" max="20" step="0.5">
@@ -938,8 +941,6 @@
                                 <label for="setting-audio-max-concurrent">Max Concurrent</label>
                                 <input type="number" id="setting-audio-max-concurrent" data-key="audio.max_concurrent" min="1" max="8">
                             </div>
-                        </div>
-                        <div class="form-row">
                             <div class="form-group">
                                 <label for="setting-audio-unload">Unload After Generate</label>
                                 <select id="setting-audio-unload" data-key="audio.unload_after_generate">
@@ -952,8 +953,6 @@
                                 <label for="setting-audio-timeout">Request Timeout (sec)</label>
                                 <input type="number" id="setting-audio-timeout" data-key="audio.request_timeout_seconds" min="30" max="3600">
                             </div>
-                        </div>
-                        <div class="form-row">
                             <div class="form-group">
                                 <label for="setting-audio-force-fp32">Force Float32</label>
                                 <select id="setting-audio-force-fp32" data-key="audio.force_fp32">
@@ -970,7 +969,7 @@
                                 <small style="color: var(--text-muted); font-size: 0.75rem;">Fixes GPU hang on AMD Phoenix APU</small>
                             </div>
                         </div>
-                    
+                    </div>
                     <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 1rem; padding: 1rem; background: var(--bg-secondary); border-radius: var(--radius-md);">
                         <strong>Note:</strong> Most changes require a service restart to take effect.
                     </div>

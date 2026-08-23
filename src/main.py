@@ -2030,7 +2030,7 @@ async def gallery_list_audio(
     offset: int = 0,
     include_public: bool = True,
     include_private: bool = True,
-    current_user: Any = Depends(get_current_user)
+    current_user: Any = Depends(get_current_user_optional)
 ):
     """
     List audio records accessible to the current user.
@@ -3822,21 +3822,51 @@ async def create_audio_generation(
 
     try:
         start = time.time()
-        result = await asyncio.wait_for(
-            audio_backend.generate(
-                prompt=prompt,
-                model_id=model_id,
-                seconds=seconds,
-                steps=steps,
-                cfg_scale=cfg_scale,
-                seed=request.seed,
-                lyrics=request.lyrics or "",
-                unload_after_generate=config.audio.unload_after_generate,
-                request_id=request_id,
-                cancellation_check=cancellation_check,
-            ),
-            timeout=config.audio.request_timeout_seconds,
-        )
+
+        # Build the generation coroutine and wrap it in a task so we can
+        # apply asyncio.shield when cancel_on_disconnect is False — this
+        # lets audio finish (and save to the gallery) even if the client
+        # disconnects, matching the behaviour of the image generation endpoint.
+        async def _do_audio_generation():
+            return await asyncio.wait_for(
+                audio_backend.generate(
+                    prompt=prompt,
+                    model_id=model_id,
+                    seconds=seconds,
+                    steps=steps,
+                    cfg_scale=cfg_scale,
+                    seed=request.seed,
+                    lyrics=request.lyrics or "",
+                    unload_after_generate=config.audio.unload_after_generate,
+                    request_id=request_id,
+                    cancellation_check=cancellation_check,
+                ),
+                timeout=config.audio.request_timeout_seconds,
+            )
+
+        # Check the shared cancel_on_disconnect setting so audio behaves
+        # consistently with image generation.
+        cancel_on_disconnect = config.generation.cancel_on_disconnect
+        generation_task = asyncio.create_task(_do_audio_generation())
+        if not cancel_on_disconnect:
+            _background_tasks.add(generation_task)
+            generation_task.add_done_callback(_background_tasks.discard)
+
+        try:
+            if cancel_on_disconnect:
+                result = await generation_task
+            else:
+                result = await asyncio.shield(generation_task)
+        except asyncio.CancelledError:
+            if not cancel_on_disconnect:
+                logger.info(
+                    "Client disconnected for request %s. Shielded audio task %s "
+                    "continues in background; gallery save will run when complete.",
+                    request_id, generation_task,
+                )
+                raise
+            raise
+
         elapsed = time.time() - start
         audio_is_public = not config.server.require_auth
 
@@ -3913,16 +3943,65 @@ async def get_audio_stats(
 @app.get("/v1/audio/{filename}")
 async def get_audio_file(
     filename: str,
-    access: AccessLevel = Depends(require_access_level(AccessLevel.ANONYMOUS)),
+    alice_session: Optional[str] = Cookie(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
     """
-    Serve a generated WAV file.  Path-traversal protected: only
-    basename, only files inside the configured audio directory.
+    Serve a generated audio file with access control.
+
+    Only the owner, admins, or anyone (for public non-expired audio) can access.
+    Path-traversal protected: only basename, only files inside the
+    configured audio directory.
     """
-    # Strip any path components; refuse anything that smells like traversal.
     safe_name = Path(filename).name
     if not safe_name or safe_name != filename or ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # When the gallery isn't ready (startup / test env), skip the
+    # access-control lookup and serve the file directly — this preserves
+    # the pre-existing behaviour and avoids a 503 on every request.
+    audio_record = None
+    if gallery_manager is not None:
+        audio_id = Path(safe_name).stem
+        audio_record = gallery_manager.get_audio(audio_id)
+
+    # If the file isn't in the gallery (or gallery isn't ready), serve
+    # it directly — path-traversal-protected.
+    if audio_record is None:
+        audio_path = (config.storage.audio_directory / safe_name).resolve()
+        audio_root = config.storage.audio_directory.resolve()
+        try:
+            audio_path.relative_to(audio_root)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        if not audio_path.exists() or not audio_path.is_file():
+            raise HTTPException(status_code=404, detail="Audio file not found")
+        media_type = "audio/wav" if safe_name.lower().endswith(".wav") else "audio/mpeg"
+        return FileResponse(audio_path, media_type=media_type, filename=safe_name)
+
+    # Resolve the current user from session cookie or API key header
+    current_user = None
+    is_admin = False
+
+    if alice_session and auth_manager:
+        api_key = auth_manager.verify_api_key(alice_session)
+        if api_key:
+            current_user = api_key
+            is_admin = api_key.get_access_level() == AccessLevel.ADMIN
+
+    if not current_user and authorization and auth_manager:
+        token = authorization.replace("Bearer ", "")
+        api_key = auth_manager.verify_api_key(token)
+        if api_key:
+            current_user = api_key
+            is_admin = api_key.get_access_level() == AccessLevel.ADMIN
+
+    api_key_id = current_user.id if current_user else None
+    if not audio_record.is_accessible_by(api_key_id, is_admin):
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to access this audio"
+        )
 
     audio_path = (config.storage.audio_directory / safe_name).resolve()
     audio_root = config.storage.audio_directory.resolve()
@@ -3934,7 +4013,7 @@ async def get_audio_file(
     if not audio_path.exists() or not audio_path.is_file():
         raise HTTPException(status_code=404, detail="Audio file not found")
 
-    media_type = "audio/wav" if safe_name.lower().endswith(".wav") else "application/octet-stream"
+    media_type = "audio/wav" if safe_name.lower().endswith(".wav") else "audio/mpeg"
     return FileResponse(audio_path, media_type=media_type, filename=safe_name)
 
 

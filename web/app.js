@@ -651,10 +651,18 @@ async function requireAuth(options = {}) {
                     console.log('[requireAuth] userInfo.authenticated is false');
                 }
             } catch (e) {
-                // Key verification failed - clear it
-                console.log('[requireAuth] Key verification error:', e);
-                localStorage.removeItem('alice-admin-key');
-                clearSessionCookie();
+                // Key verification failed - only clear on auth failures (401/403),
+                // not on transient server errors (503 during model load, etc.)
+                const statusMatch = e.message.match(/HTTP (\d+)/);
+                const status = statusMatch ? parseInt(statusMatch[1]) : 0;
+                console.log('[requireAuth] Key verification error:', e.message, 'status:', status);
+                if (status === 401 || status === 403) {
+                    // Auth failure - the key is invalid, clear it
+                    localStorage.removeItem('alice-admin-key');
+                    clearSessionCookie();
+                }
+                // For 503/504/other errors, keep the key - the server may be
+                // starting up or the request timed out during model loading.
             }
         }
         
