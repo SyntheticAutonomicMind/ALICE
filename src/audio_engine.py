@@ -244,9 +244,10 @@ class ALICEAudioEngine:
 
         start = time.time()
         logger.info(
-            "Generating audio: prompt=%r seconds=%d steps=%d cfg=%.1f seed=%d",
-            prompt[:80], seconds, steps, cfg_scale, seed,
+            "Generating audio: prompt_len=%d seconds=%d steps=%d cfg=%.1f seed=%d",
+            len(prompt), seconds, steps, cfg_scale, seed,
         )
+        logger.debug("Full prompt: %r", prompt)
 
         # The diffusion loop.  We use the modern device-aware autocast
         # instead of the deprecated torch.cuda.amp.autocast so this also
@@ -583,9 +584,10 @@ class MiniMaxMusic3Engine:
 
         start = time.time()
         logger.info(
-            "Generating music: prompt=%r lyrics_len=%d duration=%.1fs steps=%d seed=%d",
-            prompt[:80], len(lyrics), audio_duration, num_inference_steps, seed,
+            "Generating music: prompt_len=%d lyrics_len=%d duration=%.1fs steps=%d seed=%d",
+            len(prompt), len(lyrics), audio_duration, num_inference_steps, seed,
         )
+        logger.debug("Full prompt: %r", prompt)
 
         # Pipeline inputs (per MiniMaxMusic3Blocks docs):
         #   prompt: music description (genre/mood/vocals/...)
