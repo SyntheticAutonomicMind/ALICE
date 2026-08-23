@@ -568,6 +568,41 @@ def test_endpoint_blocks_path_traversal(alice_app_with_audio):
     assert resp.status_code in (400, 404)
 
 
+def test_generated_audio_appears_in_gallery(alice_app_with_audio):
+    """Generated audio should be visible in the gallery audio endpoint.
+
+    Regression test for the auth dependency shadowing bug where the
+    /v1/auth/me route handler (named get_current_user) shadowed the proper
+    auth dependency, causing current_user to be a dict instead of an APIKey
+    object.  This made owner_api_key_id always None, making audio invisible
+    in the gallery.
+    """
+    from fastapi.testclient import TestClient
+    from src.gallery import GalleryManager
+
+    app_module = alice_app_with_audio
+    # Initialize a gallery manager so the gallery endpoints can record/list
+    app_module.gallery_manager = GalleryManager(app_module.config.storage.gallery_file)
+
+    client = TestClient(app_module.app)
+
+    # Generate audio
+    gen = client.post(
+        "/v1/audio/generations",
+        json={"prompt": "test prompt", "seconds": 5},
+    )
+    assert gen.status_code == 200, gen.text
+
+    # Fetch gallery audio - should include the freshly generated audio
+    resp = client.get("/v1/gallery/audio?limit=100&offset=0")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "data" in body
+    # The audio we just generated must be visible in the gallery
+    assert len(body["data"]) >= 1, "Gallery audio endpoint returned no records"
+    assert body["data"][0]["prompt"] == "test prompt"
+
+
 def test_endpoint_returns_503_when_disabled(tmp_path):
     """When config.audio.enabled is False, the endpoint returns 503."""
     from src.config import load_config
