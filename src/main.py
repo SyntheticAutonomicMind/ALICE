@@ -31,7 +31,7 @@ os.environ.setdefault("MKL_NUM_THREADS", str(num_cpus))
 os.environ.setdefault("OPENBLAS_NUM_THREADS", str(num_cpus))
 
 from .config import config, setup_logging
-from .model_registry import ModelRegistry, AudioModelEntry
+from .model_registry import ModelRegistry, AudioModelEntry, get_model_type_description
 from .generator import GeneratorService
 from .downloader import DownloadManager
 from .model_cache import ModelCacheService
@@ -1024,6 +1024,16 @@ async def health_check():
     except Exception:
         active_backend = config.generation.backend
     
+    # Audio backend status
+    audio_enabled = config.audio.enabled
+    audio_backend_name = AudioBackend.get_backend_name() if audio_backend is not None else None
+    audio_model_loaded = False
+    audio_model_id = None
+    if audio_backend is not None:
+        audio_stats = audio_backend.stats()
+        audio_model_loaded = audio_stats.get("model_loaded", False)
+        audio_model_id = audio_stats.get("model_id")
+    
     return HealthResponse(
         status="ok",
         gpu_available=gpu_info["gpu_available"],
@@ -1032,6 +1042,10 @@ async def health_check():
         version=__version__,
         uptime_seconds=uptime,
         backend=active_backend,
+        audio_enabled=audio_enabled,
+        audio_backend=audio_backend_name,
+        audio_model_loaded=audio_model_loaded,
+        audio_model_id=audio_model_id,
     )
 
 
@@ -1085,7 +1099,11 @@ async def list_models(access: AccessLevel = Depends(require_access_level(AccessL
                 id=model.id,
                 object="model",
                 created=model.created,
-                owned_by="alice"
+                owned_by="alice",
+                name=model.name,
+                size_mb=model.size_mb,
+                model_type=model.model_type,
+                description=get_model_type_description(model.model_type),
             )
             for model in models
         ]
@@ -1832,7 +1850,11 @@ async def get_metrics():
         gpu_memory_total=gpu_info.get("memory_total", "0 GB"),
         models_loaded=len(generator.loaded_models) if generator else 0,
         total_generations=generator.total_generations,
-        avg_generation_time=generator.get_average_generation_time()
+        avg_generation_time=generator.get_average_generation_time(),
+        audio_inflight=audio_backend._inflight if audio_backend is not None else 0,
+        audio_backend_available=(config.audio.enabled and AudioBackend.is_available())
+        if audio_backend is not None
+        else False,
     )
 
 
@@ -3286,6 +3308,7 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
     generation_cfg = saved_config.get("generation", {})
     storage_cfg = saved_config.get("storage", {})
     logging_cfg = saved_config.get("logging", {})
+    audio_cfg = saved_config.get("audio", {})
     
     return {
         "server": {
@@ -3347,6 +3370,18 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
             "file": str(logging_cfg.get("file", "")),
             "max_size_mb": logging_cfg.get("max_size_mb", 100),
             "backup_count": logging_cfg.get("backup_count", 5),
+        },
+        "audio": {
+            "enabled": audio_cfg.get("enabled", True),
+            "default_model": audio_cfg.get("default_model", "stable-audio-open-1.0"),
+            "default_seconds": audio_cfg.get("default_seconds", 30),
+            "default_steps": audio_cfg.get("default_steps", 100),
+            "default_cfg_scale": audio_cfg.get("default_cfg_scale", 7.0),
+            "max_concurrent": audio_cfg.get("max_concurrent", 1),
+            "unload_after_generate": audio_cfg.get("unload_after_generate", True),
+            "request_timeout_seconds": audio_cfg.get("request_timeout_seconds", 900),
+            "force_fp32": audio_cfg.get("force_fp32", False),
+            "vae_decode_cpu": audio_cfg.get("vae_decode_cpu", False),
         },
     }
 

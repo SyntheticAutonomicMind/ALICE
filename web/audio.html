@@ -292,15 +292,12 @@ But the stars are calling my name"></textarea>
 
                 let infoText = `<strong>${selected.textContent}</strong>`;
 
-                if (engine === 'minimax_music3') {
-                    infoText += ' - Text-to-music with lyrics and structured music description. ';
-                    infoText += `Up to ${maxSeconds}s at ${sampleRate}Hz. Slow (~25x realtime).`;
-                } else {
-                    infoText += ` - Up to ${maxSeconds}s of stereo audio at ${sampleRate}Hz.`;
+                infoText += ` — Up to ${maxSeconds}s at ${sampleRate}Hz`;
+                if (supportsLyrics) {
+                    infoText += ` (supports lyrics)`;
                 }
 
                 infoContent.innerHTML = infoText;
-                infoBanner.classList.remove('hidden');
                 infoBanner.classList.remove('hidden');
 
                 // Toggle lyrics field

@@ -202,30 +202,51 @@
                     }
                     
                     listEl.innerHTML = models.map(model => {
-                        // Determine model type badge
-                        let typeClass = 'sd';
-                        let typeLabel = 'SD';
+                        // Determine model type from API-provided field or
+                        // fall back to id-based detection for older servers.
+                        let modelType = model.model_type || '';
                         const idLower = model.id.toLowerCase();
-                        
-                        if (idLower.includes('xl') || idLower.includes('sdxl')) {
-                            typeClass = 'sdxl';
-                            typeLabel = 'SDXL';
-                        } else if (idLower.includes('flux')) {
-                            typeClass = 'flux';
-                            typeLabel = 'FLUX';
-                        } else if (idLower.includes('sd3') || idLower.includes('stable-diffusion-3')) {
-                            typeClass = 'sd3';
-                            typeLabel = 'SD3';
+
+                        if (!modelType) {
+                            if (idLower.includes('xl') || idLower.includes('sdxl')) {
+                                modelType = 'sdxl';
+                            } else if (idLower.includes('flux')) {
+                                modelType = 'flux';
+                            } else if (idLower.includes('sd3') || idLower.includes('stable-diffusion-3')) {
+                                modelType = 'sd3';
+                            } else if (idLower.includes('qwen')) {
+                                modelType = 'qwen';
+                            } else {
+                                modelType = 'sd15';
+                            }
                         }
-                        
+
+                        // Map model_type to badge class + label (shared with
+                        // models.html "Supported Model Types" section).
+                        const typeMap = {
+                            sd15:  { badge: 'sd',   label: 'SD 1.5' },
+                            sd21:  { badge: 'sd',   label: 'SD 2.1' },
+                            sdxl:  { badge: 'sdxl', label: 'SDXL' },
+                            flux:  { badge: 'flux', label: 'FLUX' },
+                            sd3:   { badge: 'sd3',  label: 'SD3' },
+                            qwen:  { badge: 'qwen', label: 'Qwen' },
+                            custom:{ badge: 'sd',   label: 'Custom' },
+                        };
+                        const typeInfo = typeMap[modelType] || { badge: 'sd', label: 'SD' };
+
+                        const displayName = model.name || model.id.split('/').pop();
+                        const sizeText = model.size_mb ? `${model.size_mb} MB` : '';
+
                         return `
                             <div class="model-item">
                                 <div class="model-info">
-                                    <div class="model-name">${model.id}</div>
+                                    <div class="model-name">${displayName}</div>
                                     <div class="model-meta">
-                                        <span class="model-type-badge ${typeClass}">${typeLabel}</span>
+                                        <span class="model-type-badge ${typeInfo.badge}">${typeInfo.label}</span>
+                                        ${sizeText ? `<span>${sizeText}</span>` : ''}
                                         <span>Added ${new Date(model.created * 1000).toLocaleDateString()}</span>
                                     </div>
+                                    ${model.description ? `<div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">${model.description}</div>` : ''}
                                 </div>
                                 <div class="model-actions">
                                     <a href="/web/images.html?model=${encodeURIComponent(model.id)}" class="btn btn-primary btn-sm">

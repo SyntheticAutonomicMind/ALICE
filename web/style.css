@@ -707,6 +707,7 @@ select {
 .model-type-badge.sdxl { background: rgba(6, 172, 201, 0.15); color: #06ac8a; }
 .model-type-badge.flux { background: rgba(249, 115, 22, 0.15); color: #f97316; }
 .model-type-badge.sd3  { background: rgba(168, 116, 255, 0.15); color: #a874ff; }
+.model-type-badge.qwen { background: rgba(16, 185, 129, 0.15); color: #10b981; }
 .model-type-badge.audio { background: rgba(236, 72, 153, 0.15); color: #ec4899; }
 
 /* Music model type badge */

@@ -151,6 +151,16 @@ class ModelInfo(BaseModel):
     object: str = Field(default="model")
     created: int = Field(..., description="Unix timestamp")
     owned_by: str = Field(default="alice", alias="ownedBy")
+    # ALICE-specific fields for the model management UI.  These are
+    # ignored by OpenAI-compatible clients that only read the standard
+    # fields above, but give the web UI the rich metadata it needs to
+    # render descriptions consistently across image and music models.
+    name: Optional[str] = Field(default=None, description="Human-readable model name")
+    size_mb: Optional[int] = Field(default=None, description="Size in megabytes")
+    model_type: Optional[str] = Field(
+        default=None, description="Detected type: sd15, sdxl, flux, etc.")
+    description: Optional[str] = Field(
+        default=None, description="One-line description of the model type")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -217,6 +227,11 @@ class HealthResponse(BaseModel):
     version: str = Field(default=__version__)
     uptime_seconds: Optional[float] = Field(default=None, alias="uptimeSeconds")
     backend: Optional[str] = Field(default=None, description="Active backend type")
+    # Audio backend status
+    audio_enabled: bool = Field(default=False, alias="audioEnabled")
+    audio_backend: Optional[str] = Field(default=None, alias="audioBackend")
+    audio_model_loaded: bool = Field(default=False, alias="audioModelLoaded")
+    audio_model_id: Optional[str] = Field(default=None, alias="audioModelId")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -231,6 +246,9 @@ class MetricsResponse(BaseModel):
     models_loaded: int = Field(default=0, alias="modelsLoaded")
     total_generations: int = Field(default=0, alias="totalGenerations")
     avg_generation_time: float = Field(default=0.0, alias="avgGenerationTime")
+    # Audio generation metrics
+    audio_inflight: int = Field(default=0, alias="audioInflight")
+    audio_backend_available: Optional[bool] = Field(default=None, alias="audioBackendAvailable")
 
     model_config = ConfigDict(populate_by_name=True)
 

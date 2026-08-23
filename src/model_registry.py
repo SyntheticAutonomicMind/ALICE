@@ -34,6 +34,25 @@ _AUDIO_MODEL_ID_MAP = {
     "minimax-music3": "minimax-music-3",
 }
 
+# Human-readable descriptions for each detected image-model type.
+# Mirrors the AUDIO_MODEL_CATALOG pattern: descriptions live in the
+# backend so the frontend renders whatever the API returns instead of
+# hard-coding strings that drift out of sync.
+MODEL_TYPE_DESCRIPTIONS: Dict[str, str] = {
+    "sd15": "Stable Diffusion 1.5 — 512×512 native, general-purpose image generation",
+    "sd21": "Stable Diffusion 2.1 — 768×768 native, higher-fidelity than 1.5",
+    "sdxl": "Stable Diffusion XL — 1024×1024 native, best quality, ~12 GB VRAM",
+    "flux": "FLUX.1 — State-of-the-art diffusion, excellent prompt adherence",
+    "sd3": "Stable Diffusion 3 — MMDiT architecture, improved multi-subject generation",
+    "qwen": "Qwen-Image — Image editing and understanding model from Alibaba",
+    "custom": "Custom model — type auto-detection was inconclusive",
+}
+
+
+def get_model_type_description(model_type: str) -> str:
+    """Look up the human-readable description for a model_type string."""
+    return MODEL_TYPE_DESCRIPTIONS.get(model_type, MODEL_TYPE_DESCRIPTIONS["custom"])
+
 
 @dataclass
 class ModelEntry:

@@ -56,6 +56,20 @@
             display: block;
             border-radius: 12px 12px 0 0;
         }
+
+        /* Audio gallery cards */
+        .audio-card-inner {
+            padding: 15px;
+        }
+
+        .audio-card-inner audio {
+            border-radius: 8px 8px 0 0;
+            width: 100%;
+        }
+
+        .audio-duration-info {
+            padding-top: 5px;
+        }
         
         /* Hover Overlay */
         .gallery-overlay {
@@ -646,11 +660,20 @@
 <main>
         <div class="page-header">
             <h1>Gallery</h1>
-            <p>Your generated images</p>
+            <p>Your generated images and music</p>
         </div>
         
         <!-- Filters -->
         <div class="toolbar filters-bar">
+            <div class="toolbar-item">
+                <label>Media</label>
+                <select id="filter-media">
+                    <option value="all">All</option>
+                    <option value="images">Images</option>
+                    <option value="audio">Audio</option>
+                </select>
+            </div>
+            
             <div class="toolbar-item">
                 <label>Model</label>
                 <select id="filter-model">
@@ -727,58 +750,70 @@
                 </svg>
             </button>
             
-            <img id="viewer-image" class="viewer-image" src="" alt="">
-            
-            <button class="viewer-nav next" onclick="navigateImage(1)">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                </svg>
-            </button>
-        </div>
-        
-        <div class="viewer-sidebar" id="viewer-sidebar">
-            <!-- Content populated by JavaScript -->
-        </div>
-    </div>
-    
-    <script src="/web/app.js"></script>
     <script>
-        let currentImages = [];       // All images loaded so far
-        let filteredImages = [];       // After client-side filters
-        let currentViewerIndex = -1;
-        let visualImageOrder = [];
-        let galleryPageSize = 100;     // From admin config
-        let galleryOffset = 0;         // Server pagination offset
-        let galleryTotal = 0;          // Total images on server
-        let isLoadingMore = false;     // Prevent concurrent loads
-        let hasMoreImages = true;      // More pages available
-        let allModelsSet = new Set();  // Models seen across pages
-        
-        // Get visual order of images from gallery DOM
-        function updateVisualImageOrder() {
+        // Unified data model: every item is tagged with `_mediaType`
+        // ('image' or 'audio') so the same rendering pipeline handles both.
+        let allItems = [];            // All items loaded so far (images + audio)
+        let filteredItems = [];       // After client-side filters
+        let currentMedia = 'all';     // 'all', 'images', 'audio'
+        let currentViewerIndex = -1;  // Index into visualItemOrder
+        let visualItemOrder = [];     // DOM-ordered list for viewer navigation
+        let galleryPageSize = 100;    // From admin config
+        let galleryOffset = 0;        // Server pagination offset (images)
+        let galleryTotal = 0;         // Total images on server
+        let audioOffset = 0;          // Server pagination offset (audio)
+        let audioTotal = 0;           // Total audio on server
+        let isLoadingImages = false;  // Prevent concurrent image loads
+        let isLoadingAudio = false;   // Prevent concurrent audio loads
+        let hasMoreImages = true;     // More image pages available
+        let hasMoreAudio = true;      // More audio pages available
+        let allModelsSet = new Set(); // Models seen across pages
+
+        // ------------------------------------------------------------------
+        // Visual order (for viewer navigation via arrow keys / prev-next btn)
+        // ------------------------------------------------------------------
+        function updateVisualItemOrder() {
             const gallery = document.getElementById('gallery');
             const items = gallery.querySelectorAll('.gallery-item');
-            visualImageOrder = Array.from(items).map(item => {
-                const img = item.querySelector('img');
-                return filteredImages.find(fi => fi.url === img.src);
+            visualItemOrder = Array.from(items).map(item => {
+                const dataId = item.getAttribute('data-item-id');
+                return allItems.find(fi => fi.id === dataId);
             });
         }
-        
+
+        // ------------------------------------------------------------------
         // Load gallery (initial load or filter reset)
+        // ------------------------------------------------------------------
         async function loadGallery() {
             const gallery = document.getElementById('gallery');
             gallery.innerHTML = '<div class="loading-container"><div class="spinner"></div><p>Loading gallery...</p></div>';
-            
+
             // Reset pagination state
-            currentImages = [];
-            filteredImages = [];
+            allItems = [];
+            filteredItems = [];
+            var mediaEl = document.getElementById('filter-media');
+            currentMedia = mediaEl ? mediaEl.value : 'all';
             galleryOffset = 0;
             galleryTotal = 0;
+            audioOffset = 0;
+            audioTotal = 0;
             hasMoreImages = true;
+            hasMoreAudio = true;
             allModelsSet = new Set();
-            
+
             try {
-                await fetchPage();
+                var promises = [];
+                if (currentMedia === 'images') {
+                    promises.push(fetchImagePage());
+                } else if (currentMedia === 'audio') {
+                    promises.push(fetchAudioPage());
+                } else {
+                    // 'all' — fetch both
+                    promises.push(fetchImagePage());
+                    promises.push(fetchAudioPage());
+                }
+                await Promise.all(promises);
+                applyFilters();
             } catch (error) {
                 console.error('Failed to load gallery:', error);
                 gallery.innerHTML = `
@@ -793,11 +828,12 @@
                 `;
             }
         }
-        
+
+        // ------------------------------------------------------------------
         // Build query params for server-side filters
-        function buildGalleryParams() {
+        // ------------------------------------------------------------------
+        function buildBaseParams() {
             var params = 'limit=' + (galleryPageSize > 0 ? galleryPageSize : 0);
-            params += '&offset=' + galleryOffset;
             var pf = document.getElementById('filter-privacy').value;
             if (pf === 'private') params += '&include_public=false';
             else if (pf === 'public') params += '&include_private=false';
@@ -807,39 +843,79 @@
             if (ti) params += '&tags=' + encodeURIComponent(ti);
             return params;
         }
-        
+
+        // ------------------------------------------------------------------
         // Fetch one page of images from server
-        async function fetchPage() {
-            if (isLoadingMore) return;
+        // ------------------------------------------------------------------
+        async function fetchImagePage() {
+            if (isLoadingImages) return;
             if (!hasMoreImages && galleryOffset > 0) return;
-            isLoadingMore = true;
+            isLoadingImages = true;
             try {
-                var params = buildGalleryParams();
+                var params = buildBaseParams() + '&offset=' + galleryOffset;
                 var response = await window.SDAPI.API.fetch('/v1/gallery?' + params);
                 if (!response || !response.data) throw new Error('Invalid response');
                 galleryTotal = response.total;
-                var newImages = response.data;
-                currentImages = currentImages.concat(newImages);
-                galleryOffset += newImages.length;
+                var newItems = response.data;
+                newItems.forEach(function(img) {
+                    img._mediaType = 'image';
+                    allModelsSet.add(img.model);
+                });
+                allItems = allItems.concat(newItems);
+                galleryOffset += newItems.length;
                 var effectiveLimit = galleryPageSize > 0 ? galleryPageSize : 0;
-                if (effectiveLimit === 0 || newImages.length < effectiveLimit || galleryOffset >= galleryTotal) {
+                if (effectiveLimit === 0 || newItems.length < effectiveLimit || galleryOffset >= galleryTotal) {
                     hasMoreImages = false;
                 }
-                newImages.forEach(function(img) { allModelsSet.add(img.model); });
                 updateModelDropdown();
-                if (galleryOffset === newImages.length) {
-                    // Initial load - full render
-                    applyFilters();
+                if (galleryOffset === newItems.length) {
+                    // Initial load — will render via applyFilters() after all fetches complete
                 } else {
-                    // Load more - append only new images
-                    appendImages(newImages);
+                    // Load more — append only new items
+                    if (currentMedia !== 'audio') appendItemPage(newItems);
                 }
             } finally {
-                isLoadingMore = false;
+                isLoadingImages = false;
             }
         }
-        
+
+        // ------------------------------------------------------------------
+        // Fetch one page of audio from server
+        // ------------------------------------------------------------------
+        async function fetchAudioPage() {
+            if (isLoadingAudio) return;
+            if (!hasMoreAudio && audioOffset > 0) return;
+            isLoadingAudio = true;
+            try {
+                var params = buildBaseParams() + '&offset=' + audioOffset;
+                var response = await window.SDAPI.API.fetch('/v1/gallery/audio?' + params);
+                if (!response || !response.data) throw new Error('Invalid response (audio)');
+                audioTotal = response.total;
+                var newItems = response.data;
+                newItems.forEach(function(aud) {
+                    aud._mediaType = 'audio';
+                    allModelsSet.add(aud.model);
+                });
+                allItems = allItems.concat(newItems);
+                audioOffset += newItems.length;
+                var effectiveLimit = galleryPageSize > 0 ? galleryPageSize : 0;
+                if (effectiveLimit === 0 || newItems.length < effectiveLimit || audioOffset >= audioTotal) {
+                    hasMoreAudio = false;
+                }
+                updateModelDropdown();
+                if (audioOffset === newItems.length) {
+                    // Initial load — will render via applyFilters() after all fetches complete
+                } else {
+                    if (currentMedia !== 'images') appendItemPage(newItems);
+                }
+            } finally {
+                isLoadingAudio = false;
+            }
+        }
+
+        // ------------------------------------------------------------------
         // Update model filter dropdown
+        // ------------------------------------------------------------------
         function updateModelDropdown() {
             var mf = document.getElementById('filter-model');
             var cv = mf.value;
@@ -852,27 +928,48 @@
                 mf.appendChild(opt);
             });
         }
-        
-        // Load more images (button click)
-        async function loadMoreImages() {
+
+        // ------------------------------------------------------------------
+        // Load more (button click)
+        // ------------------------------------------------------------------
+        async function loadMoreItems() {
             var btn = document.getElementById('load-more-btn');
             if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
             try {
-                await fetchPage();
+                if (currentMedia === 'images') {
+                    await fetchImagePage();
+                } else if (currentMedia === 'audio') {
+                    await fetchAudioPage();
+                } else {
+                    // 'all' — try whichever source has more
+                    if (hasMoreImages && galleryOffset < galleryTotal) {
+                        await fetchImagePage();
+                    } else if (hasMoreAudio) {
+                        await fetchAudioPage();
+                    } else if (hasMoreImages) {
+                        await fetchImagePage();
+                    }
+                }
             } catch (e) {
                 console.error('Failed to load more:', e);
-                if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+            } finally {
+                if (btn) { btn.disabled = false; }
             }
         }
-        
+
+        // ------------------------------------------------------------------
         // Update gallery count and Load More button
+        // ------------------------------------------------------------------
         function updateGalleryStatus() {
             var count = document.getElementById('gallery-count');
-            if (hasMoreImages && galleryTotal > 0) {
-                count.textContent = filteredImages.length + ' of ' + galleryTotal + ' images';
+            var totalItems = galleryTotal + audioTotal;
+
+            if (totalItems > 0) {
+                count.textContent = filteredItems.length + ' of ' + totalItems + ' items';
             } else {
-                count.textContent = filteredImages.length + ' image' + (filteredImages.length !== 1 ? 's' : '');
+                count.textContent = filteredItems.length + ' item' + (filteredItems.length !== 1 ? 's' : '');
             }
+
             // Ensure Load More container exists
             var lmc = document.getElementById('load-more-container');
             if (!lmc) {
@@ -883,467 +980,349 @@
                 btn.id = 'load-more-btn';
                 btn.className = 'btn btn-primary';
                 btn.style.cssText = 'padding:0.75rem 2rem; font-size:1rem;';
-                btn.onclick = loadMoreImages;
+                btn.onclick = loadMoreItems;
                 lmc.appendChild(btn);
-                // Insert after gallery container in the DOM
                 var gallery = document.getElementById('gallery');
                 gallery.parentNode.insertBefore(lmc, gallery.nextSibling);
             }
             var lmb = document.getElementById('load-more-btn');
-            if (hasMoreImages && galleryPageSize > 0) {
-                var remaining = galleryTotal - galleryOffset;
+            var hasMore = false;
+            if (galleryPageSize > 0) {
+                if (currentMedia === 'images') hasMore = hasMoreImages && galleryOffset < galleryTotal;
+                else if (currentMedia === 'audio') hasMore = hasMoreAudio && audioOffset < audioTotal;
+                else hasMore = (hasMoreImages && galleryOffset < galleryTotal) || (hasMoreAudio && audioOffset < audioTotal);
+            }
+            if (hasMore) {
+                var remaining = 0;
+                if (currentMedia === 'images') remaining = galleryTotal - galleryOffset;
+                else if (currentMedia === 'audio') remaining = audioTotal - audioOffset;
+                else remaining = (galleryTotal - galleryOffset) + (audioTotal - audioOffset);
                 lmb.disabled = false;
-                lmb.textContent = 'Load More (' + remaining + ' remaining)';
+                lmb.textContent = 'Load More (' + Math.max(0, remaining) + ' remaining)';
                 lmc.style.display = 'block';
             } else {
                 lmc.style.display = 'none';
             }
         }
-        
-        // Append new images to gallery without full re-render
-        function appendImages(newImages) {
+
+        // ------------------------------------------------------------------
+        // Append new items to gallery without full re-render
+        // ------------------------------------------------------------------
+        function appendItemPage(newItems) {
             var gallery = document.getElementById('gallery');
             var modelFilter = document.getElementById('filter-model').value;
-            
-            // Filter new images (client-side model filter)
-            var filtered = newImages.filter(function(img) {
-                if (modelFilter && img.model !== modelFilter) return false;
+
+            var filtered = newItems.filter(function(item) {
+                if (modelFilter && item.model !== modelFilter) return false;
                 return true;
             });
-            
-            // Also add to filteredImages array
-            filteredImages = filteredImages.concat(filtered);
-            
-            // Create DOM elements
+
+            filteredItems = filteredItems.concat(filtered);
             var fragment = document.createDocumentFragment();
-            var newElements = [];
-            filtered.forEach(function(img) {
-                var modelName = img.model.replace('sd/', '').substring(0, 20);
-                var div = document.createElement('div');
-                div.className = 'gallery-item';
-                div.setAttribute('data-image-id', img.id);
-                div.onclick = function() { openViewerByImageId(img.id); };
-                div.innerHTML = '<img src="' + img.url + '" alt="' + escapeHtml(img.prompt).substring(0, 100) + '" loading="lazy">' +
-                    '<div class="gallery-overlay">' +
-                    '<div class="overlay-top">' +
-                    '<span class="privacy-badge ' + (img.isPublic ? 'public' : 'private') + '">' + (img.isPublic ? 'Public' : 'Private') + '</span>' +
-                    '<span class="model-badge" title="' + escapeHtml(img.model) + '">' + escapeHtml(modelName) + '</span>' +
-                    '</div>' +
-                    '<div class="overlay-actions">' +
-                    '<button class="overlay-btn" onclick="event.stopPropagation(); regenerateImage(\'' + img.id + '\')" title="Regenerate"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button>' +
-                    '<button class="overlay-btn" onclick="event.stopPropagation(); downloadImage(\'' + img.url + '\', \'' + img.id + '\')" title="Download"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg></button>' +
-                    (img.isOwner ? '<button class="overlay-btn danger" onclick="event.stopPropagation(); confirmDelete(\'' + img.id + '\')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>' : '') +
-                    '</div></div>';
-                fragment.appendChild(div);
-                newElements.push(div);
+            filtered.forEach(function(item) {
+                fragment.appendChild(renderItemNode(item));
             });
-            
-            // Append to gallery
             gallery.appendChild(fragment);
-            
-            // Update button state function
-            function updateLoadMoreButton() {
-                updateGalleryStatus();
+
+            if (window.galleryMasonry) {
+                window.galleryMasonry.reloadItems();
+                window.galleryMasonry.layout();
             }
-            
-            // Re-initialize Masonry with all items (existing + new)
-            if (window.Masonry) {
-                // Freeze gallery dimensions to prevent layout shift during re-init
-                var currentHeight = gallery.offsetHeight;
-                var existingItems = gallery.querySelectorAll('.gallery-item');
-                var savedPositions = [];
-                existingItems.forEach(function(item) {
-                    savedPositions.push({
-                        el: item,
-                        top: item.style.top,
-                        left: item.style.left,
-                        position: item.style.position
-                    });
-                });
-                // Freeze gallery container dimensions
-                gallery.style.minHeight = currentHeight + 'px';
-                gallery.style.height = currentHeight + 'px';
-                var currentWidth = gallery.style.width;
-                var currentPosition = gallery.style.position;
-                
-                // Destroy existing Masonry instance
+            setTimeout(function() {
                 if (window.galleryMasonry) {
-                    window.galleryMasonry.destroy();
-                    window.galleryMasonry = null;
+                    window.galleryMasonry.reloadItems();
+                    window.galleryMasonry.layout();
                 }
-                
-                // Restore gallery container and item positions to prevent visual shift
-                gallery.style.position = currentPosition || 'relative';
-                gallery.style.width = currentWidth;
-                gallery.style.height = currentHeight + 'px';
-                savedPositions.forEach(function(sp) {
-                    sp.el.style.position = sp.position || 'absolute';
-                    sp.el.style.top = sp.top;
-                    sp.el.style.left = sp.left;
-                });
-                // Wait for NEW images to load, then re-init Masonry
-                var newImgs = [];
-                newElements.forEach(function(el) {
-                    var img = el.querySelector('img');
-                    if (img) newImgs.push(img);
-                });
-                var loaded = 0;
-                var masonryDone = false;
-                function reinitMasonry() {
-                    if (masonryDone) return;
-                    masonryDone = true;
-                    gallery.style.minHeight = '';
-                    gallery.style.height = '';
-                    initMasonry(gallery);
-                    updateLoadMoreButton();
-                }
-                function onImgReady() {
-                    loaded++;
-                    if (loaded >= newImgs.length) reinitMasonry();
-                }
-                newImgs.forEach(function(img) {
-                    if (img.complete) { loaded++; }
-                    else {
-                        img.addEventListener('load', onImgReady, { once: true });
-                        img.addEventListener('error', onImgReady, { once: true });
-                    }
-                });
-                if (loaded >= newImgs.length) reinitMasonry();
-                setTimeout(reinitMasonry, 3000);
-            } else {
-                updateLoadMoreButton();
-            }
-            
-        }
-        
-        // Apply client-side filters (model + sort only)
-        function applyFilters() {
-            var modelFilter = document.getElementById('filter-model').value;
-            var sortFilter = document.getElementById('filter-sort').value;
-            filteredImages = currentImages.filter(function(img) {
-                if (modelFilter && img.model !== modelFilter) return false;
-                return true;
-            });
-            if (sortFilter === 'newest') {
-                filteredImages.sort(function(a, b) { return b.createdAt - a.createdAt; });
-            } else {
-                filteredImages.sort(function(a, b) { return a.createdAt - b.createdAt; });
-            }
-            renderGallery();
+            }, 500);
+            updateVisualItemOrder();
             updateGalleryStatus();
         }
-        
-        // Server-side filter changed - full reset and re-fetch
+
+        // ------------------------------------------------------------------
+        // Render a single item card (DOM node for appendItemPage)
+        // ------------------------------------------------------------------
+        function renderItemNode(item) {
+            var div = document.createElement('div');
+            div.className = 'gallery-item';
+            div.setAttribute('data-item-id', item.id);
+            div.setAttribute('data-media-type', item._mediaType);
+            div.onclick = function() { openItemById(item.id); };
+            if (item._mediaType === 'audio') {
+                div.innerHTML = renderAudioCardInner(item);
+            } else {
+                div.innerHTML = renderImageCardInner(item);
+            }
+            return div;
+        }
+
+        // ------------------------------------------------------------------
+        // Render a single item card (HTML string for full render)
+        // ------------------------------------------------------------------
+        function renderItemCard(item) {
+            var wrapper = document.createElement('div');
+            wrapper.className = 'gallery-item';
+            wrapper.setAttribute('data-item-id', item.id);
+            wrapper.setAttribute('data-media-type', item._mediaType);
+            wrapper.setAttribute('onclick', 'openItemById("' + escapeHtml(item.id) + '")');
+            if (item._mediaType === 'audio') {
+                wrapper.innerHTML = renderAudioCardInner(item);
+            } else {
+                wrapper.innerHTML = renderImageCardInner(item);
+            }
+            return wrapper.outerHTML;
+        }
+
+        // ------------------------------------------------------------------
+        // Image card inner HTML
+        // ------------------------------------------------------------------
+        function renderImageCardInner(img) {
+            var modelName = (img.model || '').replace('sd/', '').substring(0, 20);
+            return '<img src="' + img.url + '" alt="' + escapeHtml(img.prompt).substring(0, 100) + '" loading="lazy">' +
+                '<div class="gallery-overlay">' +
+                '<div class="overlay-top">' +
+                '<span class="privacy-badge ' + (img.isPublic ? 'public' : 'private') + '">' + (img.isPublic ? 'Public' : 'Private') + '</span>' +
+                '<span class="model-badge" title="' + escapeHtml(img.model) + '">' + escapeHtml(modelName) + '</span>' +
+                '</div>' +
+                '<div class="overlay-actions">' +
+                '<button class="overlay-btn" onclick="event.stopPropagation(); regenerateImage(\'' + img.id + '\')" title="Regenerate">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button>' +
+                '<button class="overlay-btn" onclick="event.stopPropagation(); downloadItem(\'' + img.url + '\', \'' + img.id + '\', \'image\')" title="Download">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg></button>' +
+                (img.isOwner ? '<button class="overlay-btn danger" onclick="event.stopPropagation(); confirmDelete(\'' + img.id + '\', \'image\')" title="Delete">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>' : '') +
+                '</div></div>';
+        }
+
+        // ------------------------------------------------------------------
+        // Audio card inner HTML
+        // ------------------------------------------------------------------
+        function renderAudioCardInner(aud) {
+            var modelName = (aud.model || '').replace('audio/', '').substring(0, 20);
+            var dur = aud.durationSeconds ? aud.durationSeconds.toFixed(1) + 's' : '';
+            var size = aud.sizeBytes ? formatBytes(aud.sizeBytes) : '';
+            var durInfo = (dur || '') + (dur && size ? ' * ' : '') + size;
+            return '<div class="audio-card-inner">' +
+                '<audio controls preload="none" style="width:100%;">' +
+                '<source src="' + aud.url + '" type="audio/wav">' +
+                'Your browser does not support the audio element.' +
+                '</audio>' +
+                '<div class="gallery-overlay">' +
+                '<div class="overlay-top">' +
+                '<span class="privacy-badge ' + (aud.isPublic ? 'public' : 'private') + '">' + (aud.isPublic ? 'Public' : 'Private') + '</span>' +
+                '<span class="model-badge" title="' + escapeHtml(aud.model) + '">' + escapeHtml(modelName) + '</span>' +
+                '</div>' +
+                '<div class="overlay-actions">' +
+                '<button class="overlay-btn" onclick="event.stopPropagation(); downloadItem(\'' + aud.url + '\', \'' + aud.id + '\', \'audio\')" title="Download">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg></button>' +
+                (aud.isOwner ? '<button class="overlay-btn danger" onclick="event.stopPropagation(); confirmDelete(\'' + aud.id + '\', \'audio\')" title="Delete">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>' : '') +
+                '</div>' +
+                (durInfo ? '<div style="font-size:0.7rem; color:rgba(255,255,255,0.9); margin-top:4px;">' + durInfo + '</div>' : '') +
+                '</div></div>';
+        }
+
+        // ------------------------------------------------------------------
+        // Helper: format bytes for audio cards
+        // ------------------------------------------------------------------
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            var k = 1024;
+            var sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            var i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // ------------------------------------------------------------------
+        // Apply client-side filters (media + model + sort)
+        // ------------------------------------------------------------------
+        function applyFilters() {
+            var mediaFilter = document.getElementById('filter-media').value;
+            var modelFilter = document.getElementById('filter-model').value;
+            var sortFilter = document.getElementById('filter-sort').value;
+
+            filteredItems = allItems.filter(function(item) {
+                if (mediaFilter === 'images' && item._mediaType !== 'image') return false;
+                if (mediaFilter === 'audio' && item._mediaType !== 'audio') return false;
+                if (modelFilter && item.model !== modelFilter) return false;
+                return true;
+            });
+
+            if (sortFilter === 'newest') {
+                filteredItems.sort(function(a, b) { return b.createdAt - a.createdAt; });
+            } else {
+                filteredItems.sort(function(a, b) { return a.createdAt - b.createdAt; });
+            }
+
+            renderGallery();
+            updateGalleryStatus();
+            updateVisualItemOrder();
+        }
+
+        // ------------------------------------------------------------------
+        // Server-side filter changed — full reset and re-fetch
+        // ------------------------------------------------------------------
         function onServerFilterChanged() {
             loadGallery();
         }
-        // Render gallery
+
+        // ------------------------------------------------------------------
+        // Render gallery (full render)
+        // ------------------------------------------------------------------
         function renderGallery() {
-            const gallery = document.getElementById('gallery');
-            const count = document.getElementById('gallery-count');
-            
-            if (hasMoreImages && galleryTotal > 0) {
-                count.textContent = filteredImages.length + ' of ' + galleryTotal + ' images';
+            var gallery = document.getElementById('gallery');
+            var count = document.getElementById('gallery-count');
+            var totalItems = galleryTotal + audioTotal;
+
+            if (totalItems > 0) {
+                count.textContent = filteredItems.length + ' of ' + totalItems + ' items';
             } else {
-                count.textContent = filteredImages.length + ' image' + (filteredImages.length !== 1 ? 's' : '');
+                count.textContent = filteredItems.length + ' item' + (filteredItems.length !== 1 ? 's' : '');
             }
-            
-            if (filteredImages.length === 0) {
+
+            if (filteredItems.length === 0) {
+                var mediaFilter = document.getElementById('filter-media').value;
+                var emptyTitle = 'No items found';
+                var emptyMsg = 'Try adjusting your filters or generate your first item';
+                var emptyBtn = '<a href="/web/images.html" class="btn btn-primary">Generate Image</a>';
+                if (mediaFilter === 'audio') {
+                    emptyTitle = 'No audio found';
+                    emptyMsg = 'Try adjusting your filters or generate your first track';
+                    emptyBtn = '<a href="/web/audio.html" class="btn btn-primary">Generate Music</a>';
+                } else if (mediaFilter === 'images') {
+                    emptyTitle = 'No images found';
+                    emptyMsg = 'Try adjusting your filters or generate your first image';
+                    emptyBtn = '<a href="/web/images.html" class="btn btn-primary">Generate Image</a>';
+                }
                 gallery.innerHTML = `
                     <div class="empty-state">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
-                        <h2>No images found</h2>
-                        <p>Try adjusting your filters or generate your first image</p>
-                        <a href="/web/images.html" class="btn btn-primary">Generate Image</a>
+                        <h2>${emptyTitle}</h2>
+                        <p>${emptyMsg}</p>
+                        ${emptyBtn}
                     </div>
                 `;
                 return;
             }
-            
-            gallery.innerHTML = filteredImages.map((img, index) => {
-                const modelName = img.model.replace('sd/', '').substring(0, 20);
-                return `
-                    <div class="gallery-item" data-image-id="${img.id}" onclick="openViewerByImageId('${img.id}')">
-                        <img src="${img.url}" alt="${escapeHtml(img.prompt).substring(0, 100)}" loading="lazy">
-                        <div class="gallery-overlay">
-                            <div class="overlay-top">
-                                <span class="privacy-badge ${img.isPublic ? 'public' : 'private'}">
-                                    ${img.isPublic ? 'Public' : 'Private'}
-                                </span>
-                                <span class="model-badge" title="${img.model}">${modelName}</span>
-                            </div>
-                            <div class="overlay-actions">
-                                <button class="overlay-btn" onclick="event.stopPropagation(); regenerateImage('${img.id}')" title="Regenerate">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                    </svg>
-                                </button>
-                                <button class="overlay-btn" onclick="event.stopPropagation(); downloadImage('${img.url}', '${img.id}')" title="Download">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                </button>
-                                ${img.isOwner ? `
-                                <button class="overlay-btn danger" onclick="event.stopPropagation(); confirmDelete('${img.id}')" title="Delete">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                </button>
-                                ` : ''}
-                            </div>
-                        </div>
-                    </div>
-                `;
+
+            gallery.innerHTML = filteredItems.map(function(item) {
+                return renderItemCard(item);
             }).join('');
-            
+
             // Initialize Masonry layout after rendering
             if (window.Masonry) {
-                // Wait for images to load before laying out
-                let imagesLoaded = 0;
-                const images = gallery.querySelectorAll('img');
-                const totalImages = images.length;
-                
-                if (totalImages === 0) {
-                    // Initialize if no images
-                    initMasonry(gallery);
-                    return;
-                }
-                
-                function checkAllImagesLoaded() {
-                    if (imagesLoaded === totalImages) {
-                        // Give browser time to calculate dimensions
-                        requestAnimationFrame(() => {
-                            initMasonry(gallery);
-                        });
+                initMasonry(gallery);
+                setTimeout(function() {
+                    if (window.galleryMasonry) {
+                        window.galleryMasonry.reloadItems();
+                        window.galleryMasonry.layout();
                     }
-                }
-                
-                images.forEach(img => {
-                    // If image is already loaded (cached), count it immediately
-                    if (img.complete) {
-                        imagesLoaded++;
-                    } else {
-                        // Listen for load
-                        img.addEventListener('load', () => {
-                            imagesLoaded++;
-                            checkAllImagesLoaded();
-                        }, { once: true });
-                        
-                        // Listen for error
-                        img.addEventListener('error', () => {
-                            imagesLoaded++;
-                            checkAllImagesLoaded();
-                        }, { once: true });
-                    }
-                });
-                
-                // Check if all were cached (complete)
-                checkAllImagesLoaded();
-                
-                // Safety timeout in case load events don't fire
-                setTimeout(() => {
-                    if (imagesLoaded < totalImages) {
-                        imagesLoaded = totalImages;
-                        initMasonry(gallery);
-                    }
-                }, 3000);
+                }, 500);
             }
+            updateVisualItemOrder();
         }
-        
-        // Initialize Masonry layout with responsive column width
+
+        // ------------------------------------------------------------------
+        // Initialize Masonry layout
+        // ------------------------------------------------------------------
         function initMasonry(container) {
-            // Calculate column width based on viewport
-            let columnWidth = 312;
+            var columnWidth = 312;
             if (window.innerWidth < 1400) columnWidth = 275;
             if (window.innerWidth < 1024) columnWidth = 250;
-            if (window.innerWidth < 640) columnWidth = window.innerWidth - 40; // Full width minus padding
-            
-            const msnry = new Masonry(container, {
+            if (window.innerWidth < 640) columnWidth = window.innerWidth - 40;
+
+            var msnry = new Masonry(container, {
                 itemSelector: '.gallery-item',
                 columnWidth: columnWidth,
                 gutter: 20,
                 fitWidth: true,
                 transitionDuration: '0.3s'
             });
-            
-            // Store instance for window resize and update visual order
+
             window.galleryMasonry = msnry;
-            updateVisualImageOrder();
-            
-            // After layout, update visual order and ensure button is positioned
+            updateVisualItemOrder();
+
             msnry.on('layoutComplete', function() {
-                updateVisualImageOrder();
+                updateVisualItemOrder();
             });
-            
-            // Re-layout after a short delay to catch images that loaded after initial layout
-            setTimeout(() => {
+
+            setTimeout(function() {
                 msnry.reloadItems();
                 msnry.layout();
-                updateVisualImageOrder();
+                updateVisualItemOrder();
             }, 500);
         }
-        
+
         // Re-layout Masonry on window resize
-        window.addEventListener('resize', () => {
+        window.addEventListener('resize', function() {
             if (window.galleryMasonry) {
-                let columnWidth = 312;
+                var columnWidth = 312;
                 if (window.innerWidth < 1400) columnWidth = 275;
                 if (window.innerWidth < 1024) columnWidth = 250;
                 if (window.innerWidth < 640) columnWidth = window.innerWidth - 40;
-                
                 window.galleryMasonry.options.columnWidth = columnWidth;
                 window.galleryMasonry.layout();
             }
         });
-        
-        // Open viewer by image ID (finds visual position in gallery)
-        function openViewerByImageId(imageId) {
-            // First try visual order, then fall back to filteredImages index
-            let index = visualImageOrder.findIndex(img => img && img.id === imageId);
-            if (index === -1) {
-                // Visual order not populated yet, use filteredImages
-                index = filteredImages.findIndex(img => img.id === imageId);
-            }
+
+        // ------------------------------------------------------------------
+        // Open viewer by item ID
+        // ------------------------------------------------------------------
+        function openItemById(itemId) {
+            var index = filteredItems.findIndex(function(item) { return item.id === itemId; });
             if (index !== -1) {
                 currentViewerIndex = index;
-                openViewer(index, true); // preserve state to keep viewer open
+                openViewer(index, true);
             }
         }
-        
-        // Open viewer
-        function openViewer(index, preserveState = false) {
+
+        // Backward-compat alias
+        function openViewerByImageId(itemId) {
+            openItemById(itemId);
+        }
+
+        // ------------------------------------------------------------------
+        // Open viewer — handles both image and audio items
+        // ------------------------------------------------------------------
+        function openViewer(index, preserveState) {
             currentViewerIndex = index;
-            
-            // Use visual order if available, otherwise fall back to filteredImages
-            const img = visualImageOrder[index] || filteredImages[index];
-            if (!img) return;
-            
-            const viewer = document.getElementById('viewer');
-            const viewerImage = document.getElementById('viewer-image');
-            const sidebar = document.getElementById('viewer-sidebar');
-            
-            // Preserve fullscreen/sidebar state when navigating between images
-            const wasFullscreen = viewer.classList.contains('fullscreen');
-            const hadSidebar = viewer.classList.contains('sidebar-visible');
-            
-            viewerImage.src = img.url;
-            
+            var item = filteredItems[index];
+            if (!item) return;
+
+            var viewer = document.getElementById('viewer');
+            var viewerImage = document.getElementById('viewer-image');
+            var viewerAudio = document.getElementById('viewer-audio');
+            var sidebar = document.getElementById('viewer-sidebar');
+
+            // Show the right media element
+            if (item._mediaType === 'audio') {
+                viewerImage.style.display = 'none';
+                viewerImage.src = '';
+                viewerAudio.style.display = 'block';
+                var source = viewerAudio.querySelector('source');
+                source.src = item.url;
+                viewerAudio.load();
+            } else {
+                viewerAudio.style.display = 'none';
+                viewerAudio.pause();
+                var sourceEl = viewerAudio.querySelector('source');
+                sourceEl.src = '';
+                viewerImage.style.display = 'block';
+                viewerImage.src = item.url;
+            }
+
             // Build sidebar content
-            sidebar.innerHTML = `
-                <div class="sidebar-header">
-                    <div class="privacy-badge ${img.isPublic ? 'public' : 'private'}" style="margin-bottom: 0.5rem;">
-                        ${img.isPublic ? 'Public' : 'Private'}
-                    </div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted);">
-                        ${new Date(img.createdAt * 1000).toLocaleString()}
-                    </div>
-                </div>
-                
-                <div class="sidebar-section">
-                    <h3>Prompt</h3>
-                    <div class="prompt-text">${escapeHtml(img.prompt)}</div>
-                    <button class="copy-btn" onclick="copyToClipboard(\`${escapeHtml(img.prompt).replace(/`/g, '\\`')}\`, 'Prompt copied!')">
-                        Copy Prompt
-                    </button>
-                </div>
-                
-                ${img.negativePrompt ? `
-                <div class="sidebar-section">
-                    <h3>Negative Prompt</h3>
-                    <div class="prompt-text">${escapeHtml(img.negativePrompt)}</div>
-                    <button class="copy-btn" onclick="copyToClipboard(\`${escapeHtml(img.negativePrompt).replace(/`/g, '\\`')}\`, 'Negative prompt copied!')">
-                        Copy Negative Prompt
-                    </button>
-                </div>
-                ` : ''}
-                
-                <div class="sidebar-section">
-                    <h3>Generation Settings</h3>
-                    <div class="settings-grid">
-                        <div class="setting-item">
-                            <div class="setting-label">Model</div>
-                            <div class="setting-value" style="font-size: 0.75rem;">${escapeHtml(img.model)}</div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-label">Resolution</div>
-                            <div class="setting-value">${img.width}×${img.height}</div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-label">Steps</div>
-                            <div class="setting-value">${img.steps}</div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-label">Guidance</div>
-                            <div class="setting-value">${img.guidanceScale !== undefined ? img.guidanceScale : 'N/A'}</div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-label">Scheduler</div>
-                            <div class="setting-value" style="font-size: 0.75rem;">${img.scheduler || 'N/A'}</div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-label">Seed</div>
-                            <div class="setting-value" style="font-size: 0.75rem;">${img.seed !== undefined ? img.seed : 'N/A'}</div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-label">Time</div>
-                            <div class="setting-value">${img.generationTime !== undefined && img.generationTime !== null ? img.generationTime.toFixed(1) + 's' : 'N/A'}</div>
-                        </div>
-                   </div>
-                </div>
-                
-                ${img.isOwner ? `
-                <div class="sidebar-section">
-                    <h3>Tags</h3>
-                    <div class="tags-container">
-                        <div class="tag-list" id="image-tags-${img.id}">
-                            ${((img.tags || []).map(t => `
-                                <span class="tag">${escapeHtml(t)}
-                                    <button class="tag-remove" onclick="removeTag('${img.id}', '${t}')">&times;</button>
-                                </span>
-                            `).join('')) || '<em class="no-tags">No tags</em>'}
-                        </div>
-                        <div class="tag-input">
-                            <input type="text" id="new-tag-${img.id}" placeholder="Add tag..." onkeypress="if(event.key==='Enter') addTag('${img.id}')">
-                            <button class="btn btn-sm" onclick="addTag('${img.id}')">Add</button>
-                        </div>
-                    </div>
-                </div>
-                ` : ''}
-                
-                <div class="action-buttons">
-                    <button class="btn btn-primary action-btn" onclick="regenerateImage('${img.id}')">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        Regenerate Image
-                    </button>
-                    <button class="btn btn-secondary action-btn" onclick="downloadImage('${img.url}', '${img.id}')">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        Download Image
-                    </button>
-                    ${img.isOwner ? `
-                    <button class="btn btn-secondary action-btn" onclick="togglePrivacy('${img.id}', ${!img.isPublic})">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                        Make ${img.isPublic ? 'Private' : 'Public'}
-                    </button>
-                    <button class="btn btn-danger action-btn" onclick="confirmDelete('${img.id}')">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                        Delete Image
-                    </button>
-                    ` : ''}
-                </div>
-            `;
-            
-            // If opening from gallery, set fullscreen mode. If navigating, preserve existing state.
+            sidebar.innerHTML = buildSidebar(item);
+
+            var wasFullscreen = viewer.classList.contains('fullscreen');
+            var hadSidebar = viewer.classList.contains('sidebar-visible');
+
             if (!preserveState && !wasFullscreen) {
                 viewer.classList.add('active', 'fullscreen', 'sidebar-visible');
             } else if (preserveState || wasFullscreen) {
@@ -1353,44 +1332,141 @@
             } else {
                 viewer.classList.add('active', 'fullscreen', 'sidebar-visible');
             }
-            
+
             document.body.style.overflow = 'hidden';
         }
-        
+
+        // ------------------------------------------------------------------
+        // Build sidebar content for an item (image or audio)
+        // ------------------------------------------------------------------
+        function buildSidebar(item) {
+            var isAudio = item._mediaType === 'audio';
+            var html = '<div class="sidebar-header">';
+            html += '<div class="privacy-badge ' + (item.isPublic ? 'public' : 'private') + '" style="margin-bottom: 0.5rem;">';
+            html += (item.isPublic ? 'Public' : 'Private');
+            html += '</div>';
+            html += '<div style="font-size: 0.75rem; color: var(--text-muted);">';
+            html += new Date(item.createdAt * 1000).toLocaleString();
+            html += '</div></div>';
+
+            html += '<div class="sidebar-section"><h3>' + (isAudio ? 'Music Description' : 'Prompt') + '</h3>';
+            html += '<div class="prompt-text">' + escapeHtml(item.prompt) + '</div>';
+            html += '<button class="copy-btn" onclick="copyToClipboard(\`' + escapeHtml(item.prompt).replace(/`/g, '\\`') + '\`, \'Prompt copied!\')">Copy Prompt</button>';
+            html += '</div>';
+
+            if (isAudio && item.lyrics) {
+                html += '<div class="sidebar-section"><h3>Lyrics</h3>';
+                html += '<div class="prompt-text">' + escapeHtml(item.lyrics) + '</div>';
+                html += '<button class="copy-btn" onclick="copyToClipboard(\`' + escapeHtml(item.lyrics).replace(/`/g, '\\`') + '\`, \'Lyrics copied!\')">Copy Lyrics</button>';
+                html += '</div>';
+            }
+
+            if (!isAudio && item.negativePrompt) {
+                html += '<div class="sidebar-section"><h3>Negative Prompt</h3>';
+                html += '<div class="prompt-text">' + escapeHtml(item.negativePrompt) + '</div>';
+                html += '<button class="copy-btn" onclick="copyToClipboard(\`' + escapeHtml(item.negativePrompt).replace(/`/g, '\\`') + '\`, \'Negative prompt copied!\')">Copy Negative Prompt</button>';
+                html += '</div>';
+            }
+
+            html += '<div class="sidebar-section"><h3>Generation Settings</h3><div class="settings-grid">';
+            html += settingItem('Model', escapeHtml(item.model));
+
+            if (isAudio) {
+                html += settingItem('Duration', item.durationSeconds !== undefined ? item.durationSeconds.toFixed(1) + 's' : 'N/A');
+                html += settingItem('Sample Rate', item.sampleRate !== undefined ? item.sampleRate + ' Hz' : 'N/A');
+                html += settingItem('Steps', item.steps);
+                html += settingItem('CFG Scale', item.cfgScale !== undefined ? item.cfgScale : 'N/A');
+                html += settingItem('Seed', item.seed !== undefined ? item.seed : 'N/A');
+                html += settingItem('File Size', item.sizeBytes !== undefined ? formatBytes(item.sizeBytes) : 'N/A');
+            } else {
+                html += settingItem('Resolution', item.width + '×' + item.height);
+                html += settingItem('Steps', item.steps);
+                html += settingItem('Guidance', item.guidanceScale !== undefined ? item.guidanceScale : 'N/A');
+                html += settingItem('Scheduler', item.scheduler || 'N/A');
+                html += settingItem('Seed', item.seed !== undefined ? item.seed : 'N/A');
+                html += settingItem('Time', item.generationTime !== undefined && item.generationTime !== null ? item.generationTime.toFixed(1) + 's' : 'N/A');
+            }
+            html += '</div></div>';
+
+            // Tags (image only)
+            if (!isAudio && item.isOwner) {
+                html += '<div class="sidebar-section"><h3>Tags</h3>';
+                html += '<div class="tags-container"><div class="tag-list" id="item-tags-' + item.id + '">';
+                (item.tags || []).forEach(function(t) {
+                    html += '<span class="tag">' + escapeHtml(t) + '<button class="tag-remove" onclick="removeTag(\'' + item.id + '\', \'' + t + '\')">&times;</button></span>';
+                });
+                if (!item.tags || !item.tags.length) html += '<em class="no-tags">No tags</em>';
+                html += '</div><div class="tag-input"><input type="text" id="new-tag-' + item.id + '" placeholder="Add tag..." onkeypress="if(event.key===\'Enter\') addTag(\'' + item.id + '\')"><button class="btn btn-sm" onclick="addTag(\'' + item.id + '\')">Add</button></div>';
+                html += '</div></div>';
+            }
+
+            // Action buttons
+            html += '<div class="action-buttons">';
+            if (!isAudio) {
+                html += '<button class="btn btn-primary action-btn" onclick="regenerateImage(\'' + item.id + '\')"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>Regenerate Image</button>';
+            }
+            html += '<button class="btn btn-secondary action-btn" onclick="downloadItem(\'' + item.url + '\', \'' + item.id + '\', \'' + item._mediaType + '\')">';
+            html += '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>Download ' + (isAudio ? 'Audio' : 'Image') + '</button>';
+            if (item.isOwner) {
+                if (!isAudio) {
+                    html += '<button class="btn btn-secondary action-btn" onclick="togglePrivacy(\'' + item.id + '\', ' + !item.isPublic + ')"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>Make ' + (item.isPublic ? 'Private' : 'Public') + '</button>';
+                }
+                html += '<button class="btn btn-danger action-btn" onclick="confirmDelete(\'' + item.id + '\', \'' + item._mediaType + '\')"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>Delete ' + (isAudio ? 'Audio' : 'Image') + '</button>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function settingItem(label, value) {
+            return '<div class="setting-item"><div class="setting-label">' + label + '</div><div class="setting-value">' + value + '</div></div>';
+        }
+
+        // ------------------------------------------------------------------
         // Close viewer
+        // ------------------------------------------------------------------
         function closeViewer() {
-            document.getElementById('viewer').classList.remove('active', 'fullscreen', 'sidebar-visible');
+            var viewer = document.getElementById('viewer');
+            viewer.classList.remove('active', 'fullscreen', 'sidebar-visible');
+            var audio = document.getElementById('viewer-audio');
+            if (audio) { audio.pause(); audio.style.display = 'none'; }
             document.body.style.overflow = '';
             currentViewerIndex = -1;
         }
-        
-        // Toggle sidebar visibility in fullscreen mode
+
+        // ------------------------------------------------------------------
+        // Toggle sidebar
+        // ------------------------------------------------------------------
         function toggleSidebar() {
-            const viewer = document.getElementById('viewer');
+            var viewer = document.getElementById('viewer');
             viewer.classList.add('fullscreen');
             viewer.classList.toggle('sidebar-visible');
         }
-        
-        // Navigate images - use visual order from gallery
+
+        // ------------------------------------------------------------------
+        // Navigate items
+        // ------------------------------------------------------------------
         function navigateImage(direction) {
-            if (currentViewerIndex === -1 || visualImageOrder.length === 0) return;
-            
+            navigateItem(direction);
+        }
+
+        function navigateItem(direction) {
+            if (currentViewerIndex === -1 || filteredItems.length === 0) return;
             currentViewerIndex += direction;
-            if (currentViewerIndex < 0) currentViewerIndex = visualImageOrder.length - 1;
-            if (currentViewerIndex >= visualImageOrder.length) currentViewerIndex = 0;
-            
-            // Get the image at this visual position
-            const img = visualImageOrder[currentViewerIndex];
-            if (img) {
+            if (currentViewerIndex < 0) currentViewerIndex = filteredItems.length - 1;
+            if (currentViewerIndex >= filteredItems.length) currentViewerIndex = 0;
+            var item = filteredItems[currentViewerIndex];
+            if (item) {
                 openViewer(currentViewerIndex, true);
             }
         }
-        
-        // Regenerate image
+
+        // ------------------------------------------------------------------
+        // Regenerate image (images only)
+        // ------------------------------------------------------------------
         function regenerateImage(imageId) {
-            const img = currentImages.find(i => i.id === imageId);
+            var img = allItems.find(function(i) { return i.id === imageId && i._mediaType === 'image'; });
             if (!img) return;
-            
+
             sessionStorage.setItem('regenerate_settings', JSON.stringify({
                 prompt: img.prompt,
                 negativePrompt: img.negativePrompt || '',
@@ -1404,253 +1480,246 @@
                 loras: img.loras || [],
                 loraScales: img.loraScales || [],
             }));
-            
+
             window.location.href = '/web/images.html';
         }
-        
-        // Download image
-        function downloadImage(url, imageId) {
-            const a = document.createElement('a');
+
+        // ------------------------------------------------------------------
+        // Download item (image or audio)
+        // ------------------------------------------------------------------
+        function downloadItem(url, itemId, mediaType) {
+            var ext = mediaType === 'audio' ? '.wav' : '.png';
+            var a = document.createElement('a');
             a.href = url;
-            a.download = `alice_${imageId}.png`;
+            a.download = 'alice_' + itemId + ext;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             window.SDAPI.Toast.success('Download started');
         }
-        
-        // Toggle privacy
+
+        // Backward-compat alias
+        function downloadImage(url, imageId) {
+            downloadItem(url, imageId, 'image');
+        }
+
+        // ------------------------------------------------------------------
+        // Toggle privacy (images only — audio records are private by default)
+        // ------------------------------------------------------------------
         async function togglePrivacy(imageId, makePublic) {
             try {
-                const { API, Toast } = window.SDAPI;
-                await API.fetch(`/v1/gallery/${imageId}/privacy`, {
+                await window.SDAPI.API.fetch('/v1/gallery/' + imageId + '/privacy', {
                     method: 'PATCH',
                     body: JSON.stringify({
                         isPublic: makePublic,
                         expiresInHours: makePublic ? 168 : undefined
                     })
                 });
-                
-                Toast.success(`Image is now ${makePublic ? 'public' : 'private'}`);
+                window.SDAPI.Toast.success('Image is now ' + (makePublic ? 'public' : 'private'));
                 await loadGallery();
                 closeViewer();
             } catch (error) {
                 window.SDAPI.Toast.error('Failed to update privacy: ' + error.message);
             }
         }
-        
-        // Delete image
-        async function confirmDelete(imageId) {
-            if (!confirm('Are you sure you want to delete this image? This action cannot be undone.')) {
+
+        // Backward-compat: confirmDelete now takes (itemId, mediaType)
+        // but old onclick handlers may call it with just (itemId).
+        // The function below handles both calling conventions.
+        async function confirmDelete(itemId, mediaType) {
+            if (mediaType === undefined) mediaType = 'image';
+            var typeLabel = mediaType === 'audio' ? 'audio track' : 'image';
+            if (!confirm('Are you sure you want to delete this ' + typeLabel + '? This action cannot be undone.')) {
                 return;
             }
-            
+
             try {
-                const { API, Toast } = window.SDAPI;
-                await API.fetch('/v1/gallery/' + imageId, { method: 'DELETE' });
-                
-                Toast.success('Image deleted successfully');
-                
-                // Find position in viewer before removing
-                var viewerWasOpen = document.getElementById('viewer').classList.contains('active');
-                var viewerIdx = currentViewerIndex;
-                
-                // Remove from local data (avoid full reload)
-                currentImages = currentImages.filter(function(img) { return img.id !== imageId; });
-                filteredImages = filteredImages.filter(function(img) { return img.id !== imageId; });
-                visualImageOrder = visualImageOrder.filter(function(img) { return img && img.id !== imageId; });
-                galleryTotal = Math.max(0, galleryTotal - 1);
-                
+                var url = mediaType === 'audio'
+                    ? '/v1/gallery/audio/' + itemId
+                    : '/v1/gallery/' + itemId;
+                await window.SDAPI.API.fetch(url, { method: 'DELETE' });
+
+                window.SDAPI.Toast.success((mediaType === 'audio' ? 'Audio' : 'Image') + ' deleted successfully');
+
+                // Remove from local data
+                allItems = allItems.filter(function(item) { return item.id !== itemId; });
+                filteredItems = filteredItems.filter(function(item) { return item.id !== itemId; });
+                visualItemOrder = visualItemOrder.filter(function(item) { return item && item.id !== itemId; });
+
+                if (mediaType === 'audio') {
+                    audioTotal = Math.max(0, audioTotal - 1);
+                } else {
+                    galleryTotal = Math.max(0, galleryTotal - 1);
+                }
+
                 // Remove from gallery DOM
-                var galleryItem = document.querySelector('.gallery-item[data-image-id="' + imageId + '"]');
+                var galleryItem = document.querySelector('.gallery-item[data-item-id="' + itemId + '"]');
                 if (galleryItem && window.galleryMasonry) {
                     window.galleryMasonry.remove(galleryItem);
                     window.galleryMasonry.layout();
                 } else if (galleryItem) {
                     galleryItem.remove();
                 }
-                
-                // Update count and Load More button
+
                 updateGalleryStatus();
-                
-                // If viewer was open, show next image instead of closing
+                updateVisualItemOrder();
+
+                // If viewer was open, show next item
+                var viewerWasOpen = document.getElementById('viewer').classList.contains('active');
                 if (viewerWasOpen) {
-                    if (filteredImages.length === 0) {
+                    if (filteredItems.length === 0) {
                         closeViewer();
                     } else {
-                        // Stay at same index (which now points to next image), or go back one
-                        var newIdx = Math.min(viewerIdx, filteredImages.length - 1);
+                        var newIdx = Math.min(currentViewerIndex, filteredItems.length - 1);
                         openViewer(newIdx, true);
                     }
                 }
-                
-                updateVisualImageOrder();
             } catch (error) {
-                window.SDAPI.Toast.error('Failed to delete image: ' + error.message);
+                window.SDAPI.Toast.error('Failed to delete: ' + error.message);
             }
         }
-        
-        // Add tag to image
-        async function addTag(imageId) {
-            const input = document.getElementById(`new-tag-${imageId}`);
-            const tag = input.value.trim().toLowerCase();
-            
+
+        // ------------------------------------------------------------------
+        // Tags (images only)
+        // ------------------------------------------------------------------
+        async function addTag(itemId) {
+            var input = document.getElementById('new-tag-' + itemId);
+            var tag = input.value.trim().toLowerCase();
             if (!tag) return;
-            
+
             try {
-                const { API, Toast } = window.SDAPI;
-                
-                // Get current tags from the image in our local data
-                const img = currentImages.find(i => i.id === imageId);
-                const currentTags = img?.tags || [];
-                
-                // Add new tag if not already present
+                var item = allItems.find(function(i) { return i.id === itemId; });
+                var currentTags = item ? (item.tags || []) : [];
                 if (!currentTags.includes(tag)) {
-                    const newTags = [...currentTags, tag];
-                    
-                    await API.fetch(`/v1/gallery/${imageId}/tags`, {
+                    var newTags = currentTags.concat([tag]);
+                    await window.SDAPI.API.fetch('/v1/gallery/' + itemId + '/tags', {
                         method: 'PATCH',
                         body: JSON.stringify({ tags: newTags })
                     });
-                    
                     input.value = '';
-                    Toast.success('Tag added');
+                    window.SDAPI.Toast.success('Tag added');
                     await loadGallery();
-                    
-                    // Reopen the same image after a short delay for DOM to update
-                    setTimeout(() => openViewerByImageId(imageId), 100);
+                    setTimeout(function() { openItemById(itemId); }, 100);
                 } else {
-                    Toast.warning('Tag already exists');
+                    window.SDAPI.Toast.warning('Tag already exists');
                 }
             } catch (error) {
                 window.SDAPI.Toast.error('Failed to add tag: ' + error.message);
             }
         }
-        
-        // Remove tag from image
-        async function removeTag(imageId, tagToRemove) {
+
+        async function removeTag(itemId, tagToRemove) {
             try {
-                const { API, Toast } = window.SDAPI;
-                
-                // Get current tags
-                const img = currentImages.find(i => i.id === imageId);
-                const currentTags = img?.tags || [];
-                const newTags = currentTags.filter(t => t !== tagToRemove);
-                
-                await API.fetch(`/v1/gallery/${imageId}/tags`, {
+                var item = allItems.find(function(i) { return i.id === itemId; });
+                var currentTags = item ? (item.tags || []) : [];
+                var newTags = currentTags.filter(function(t) { return t !== tagToRemove; });
+                await window.SDAPI.API.fetch('/v1/gallery/' + itemId + '/tags', {
                     method: 'PATCH',
                     body: JSON.stringify({ tags: newTags })
                 });
-                
-                Toast.success('Tag removed');
+                window.SDAPI.Toast.success('Tag removed');
                 await loadGallery();
-                
-                // Reopen the same image after a short delay for DOM to update
-                setTimeout(() => openViewerByImageId(imageId), 100);
+                setTimeout(function() { openItemById(itemId); }, 100);
             } catch (error) {
                 window.SDAPI.Toast.error('Failed to remove tag: ' + error.message);
             }
         }
-        
-        // Copy to clipboard
-        function copyToClipboard(text, message = 'Copied!') {
-            navigator.clipboard.writeText(text).then(() => {
+
+        // ------------------------------------------------------------------
+        // Utilities
+        // ------------------------------------------------------------------
+        function copyToClipboard(text, message) {
+            if (!message) message = 'Copied!';
+            navigator.clipboard.writeText(text).then(function() {
                 window.SDAPI.Toast.success(message);
-            }).catch(err => {
+            }).catch(function(err) {
                 console.error('Failed to copy:', err);
                 window.SDAPI.Toast.error('Failed to copy to clipboard');
             });
         }
-        
-        // Escape HTML
+
         function escapeHtml(text) {
-            const div = document.createElement('div');
+            if (!text) return '';
+            var div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
-        
+
+        function debounce(func, wait) {
+            var timeout;
+            return function() {
+                var context = this, args = arguments;
+                clearTimeout(timeout);
+                timeout = setTimeout(function() { func.apply(context, args); }, wait);
+            };
+        }
+
+        // ------------------------------------------------------------------
         // Filter listeners
-        // Client-side only (no re-fetch)
+        // ------------------------------------------------------------------
+        document.getElementById('filter-media').addEventListener('change', onServerFilterChanged);
         document.getElementById('filter-model').addEventListener('change', applyFilters);
         document.getElementById('filter-sort').addEventListener('change', applyFilters);
-        // Server-side filters (trigger full re-fetch)
         document.getElementById('filter-privacy').addEventListener('change', onServerFilterChanged);
         document.getElementById('search-prompt').addEventListener('input', debounce(onServerFilterChanged, 500));
         document.getElementById('filter-tags').addEventListener('input', debounce(onServerFilterChanged, 500));
-        
-        // Debounce helper
-        function debounce(func, wait) {
-            let timeout;
-            return function(...args) {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => func.apply(this, args), wait);
-            };
-        }
-        
+
+        // ------------------------------------------------------------------
         // Keyboard navigation
-        document.addEventListener('keydown', (e) => {
-            const viewer = document.getElementById('viewer');
+        // ------------------------------------------------------------------
+        document.addEventListener('keydown', function(e) {
+            var viewer = document.getElementById('viewer');
             if (!viewer.classList.contains('active')) return;
-            
             switch (e.key) {
-                case 'Escape':
-                    closeViewer();
-                    break;
-                case 'ArrowLeft':
-                    navigateImage(-1);
-                    break;
-                case 'ArrowRight':
-                    navigateImage(1);
-                    break;
+                case 'Escape': closeViewer(); break;
+                case 'ArrowLeft': navigateItem(-1); break;
+                case 'ArrowRight': navigateItem(1); break;
             }
         });
-        
-        // Theme Toggle
+
+        // ------------------------------------------------------------------
+        // Theme
+        // ------------------------------------------------------------------
         function toggleTheme() {
-            const html = document.documentElement;
-            const currentTheme = html.getAttribute('data-theme');
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            
+            var html = document.documentElement;
+            var newTheme = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
             html.setAttribute('data-theme', newTheme);
             localStorage.setItem('theme', newTheme);
-            
-            // Update icon
-            const icon = document.getElementById('theme-icon');
-            if (newTheme === 'dark') {
-                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />';
-            } else {
-                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />';
+            var icon = document.getElementById('theme-icon');
+            if (icon) {
+                icon.innerHTML = newTheme === 'dark'
+                    ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 01-8 0 4 4 0 018 0z" />'
+                    : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 0 1 8.646 3.646 9.003 9.003 0 0 0 12 21a9.003 9.003 0 0 0 8.354-5.646z" />';
             }
         }
-        
-        // Initialize theme on load
+
         function initTheme() {
-            const savedTheme = localStorage.getItem('theme') || 'light';
+            var savedTheme = localStorage.getItem('theme') || 'light';
             document.documentElement.setAttribute('data-theme', savedTheme);
-            
-            const icon = document.getElementById('theme-icon');
-            if (savedTheme === 'dark') {
-                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />';
+            var icon = document.getElementById('theme-icon');
+            if (icon && savedTheme === 'dark') {
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 01-8 0 4 4 0 018 0z" />';
             }
         }
-        
-        // Init theme immediately (before DOMContentLoaded to prevent flash)
+
         initTheme();
-        
-        // Load on page load
-        document.addEventListener('DOMContentLoaded', async () => {
+
+        // ------------------------------------------------------------------
+        // Init
+        // ------------------------------------------------------------------
+        document.addEventListener('DOMContentLoaded', async function() {
             if (typeof window.SDAPI === 'undefined') {
                 document.body.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--error);">Error: ALICE JavaScript failed to load. Please refresh the page.</div>';
                 return;
             }
-            
-            const { requireAuth } = window.SDAPI;
-            const authResult = await requireAuth();
-            
+
+            var { requireAuth } = window.SDAPI;
+            var authResult = await requireAuth();
+
             if (authResult.isAdmin) {
                 document.body.classList.add('is-admin');
             }
-            
+
             // Fetch configured page size before loading gallery
             try {
                 var cfg = await window.SDAPI.API.fetch('/v1/gallery/config');

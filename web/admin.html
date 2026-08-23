@@ -900,6 +900,77 @@
                         </div>
                     </div>
                     
+                        <!-- Audio Settings -->
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="setting-audio-enabled">Audio Generation</label>
+                                <select id="setting-audio-enabled" data-key="audio.enabled">
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Enable/disable the /v1/audio/* endpoints</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-audio-default-model">Default Model</label>
+                                <select id="setting-audio-default-model" data-key="audio.default_model">
+                                    <option value="stable-audio-open-1.0">Stable Audio Open 1.0</option>
+                                    <option value="minimax-music-3">MiniMax Music 3</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="setting-audio-default-seconds">Default Duration (sec)</label>
+                                <input type="number" id="setting-audio-default-seconds" data-key="audio.default_seconds" min="1" max="360">
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-audio-default-steps">Default Steps</label>
+                                <input type="number" id="setting-audio-default-steps" data-key="audio.default_steps" min="1" max="500">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="setting-audio-default-cfg">Default Guidance</label>
+                                <input type="number" id="setting-audio-default-cfg" data-key="audio.default_cfg_scale" min="0" max="20" step="0.5">
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Stable Audio only; MiniMax ignores</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-audio-max-concurrent">Max Concurrent</label>
+                                <input type="number" id="setting-audio-max-concurrent" data-key="audio.max_concurrent" min="1" max="8">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="setting-audio-unload">Unload After Generate</label>
+                                <select id="setting-audio-unload" data-key="audio.unload_after_generate">
+                                    <option value="true">Yes (lower VRAM)</option>
+                                    <option value="false">No (faster chaining)</option>
+                                </select>
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Drop audio model after each generation</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-audio-timeout">Request Timeout (sec)</label>
+                                <input type="number" id="setting-audio-timeout" data-key="audio.request_timeout_seconds" min="30" max="3600">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="setting-audio-force-fp32">Force Float32</label>
+                                <select id="setting-audio-force-fp32" data-key="audio.force_fp32">
+                                    <option value="false">No (auto)</option>
+                                    <option value="true">Yes (AMD gfx1103 fix)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="setting-audio-vae-cpu">Audio VAE on CPU</label>
+                                <select id="setting-audio-vae-cpu" data-key="audio.vae_decode_cpu">
+                                    <option value="false">No (GPU)</option>
+                                    <option value="true">Yes (AMD workaround)</option>
+                                </select>
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Fixes GPU hang on AMD Phoenix APU</small>
+                            </div>
+                        </div>
+                    
                     <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 1rem; padding: 1rem; background: var(--bg-secondary); border-radius: var(--radius-md);">
                         <strong>Note:</strong> Most changes require a service restart to take effect.
                     </div>
@@ -1500,6 +1571,18 @@
                     document.getElementById('setting-logging-file').value = config.logging.file || '';
                     document.getElementById('setting-logging-max-size').value = config.logging.max_size_mb || 10;
                     document.getElementById('setting-logging-backup-count').value = config.logging.backup_count || 5;
+                    
+                    // Audio settings
+                    document.getElementById('setting-audio-enabled').value = config.audio.enabled ? 'true' : 'false';
+                    document.getElementById('setting-audio-default-model').value = config.audio.default_model || 'stable-audio-open-1.0';
+                    document.getElementById('setting-audio-default-seconds').value = config.audio.default_seconds || 30;
+                    document.getElementById('setting-audio-default-steps').value = config.audio.default_steps || 100;
+                    document.getElementById('setting-audio-default-cfg').value = config.audio.default_cfg_scale || 7.0;
+                    document.getElementById('setting-audio-max-concurrent').value = config.audio.max_concurrent || 1;
+                    document.getElementById('setting-audio-unload').value = config.audio.unload_after_generate ? 'true' : 'false';
+                    document.getElementById('setting-audio-timeout').value = config.audio.request_timeout_seconds || 900;
+                    document.getElementById('setting-audio-force-fp32').value = config.audio.force_fp32 ? 'true' : 'false';
+                    document.getElementById('setting-audio-vae-cpu').value = config.audio.vae_decode_cpu ? 'true' : 'false';
                     
                     document.getElementById('settings-loading').style.display = 'none';
                     document.getElementById('settings-form').style.display = 'block';

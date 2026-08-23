@@ -217,6 +217,14 @@
                     <div class="stat-value" id="avg-time">0s</div>
                     <div class="stat-label">Avg Time</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="audio-status">--</div>
+                    <div class="stat-label">Audio Backend</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="audio-model-loaded">--</div>
+                    <div class="stat-label">Audio Model</div>
+                </div>
             </div>
         </div>
         
@@ -362,6 +370,10 @@
                     <div id="server-uptime" style="font-size: 1rem; font-weight: 600;">--</div>
                 </div>
                 <div>
+                    <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Audio Backend</div>
+                    <div id="audio-backend-info" style="font-size: 1rem; font-weight: 600;">--</div>
+                </div>
+                <div>
                     <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Last Updated</div>
                     <div id="last-updated" style="font-size: 1rem; font-weight: 600;">--</div>
                 </div>
@@ -419,6 +431,26 @@
                 document.getElementById('avg-time').textContent = 
                     UI.formatDuration(metrics.avgGenerationTime || 0);
                 
+                // Audio backend status
+                const audioBackendEl = document.getElementById('audio-backend-info');
+                if (health.audioEnabled) {
+                    const audioName = health.audioBackend || 'audio';
+                    const modelLoaded = health.audioModelLoaded;
+                    audioBackendEl.textContent = modelLoaded 
+                        ? (health.audioModelId || 'Loaded')
+                        : (audioName + ' ready');
+                    audioBackendEl.style.color = modelLoaded ? 'var(--success)' : 'var(--text-secondary)';
+                    
+                    document.getElementById('audio-status').textContent = 
+                        modelLoaded ? 'Active' : 'Ready';
+                    document.getElementById('audio-model-loaded').textContent = 
+                        modelLoaded ? (health.audioModelId || 'Loaded') : 'None loaded';
+                } else {
+                    audioBackendEl.textContent = 'Disabled';
+                    document.getElementById('audio-status').textContent = 'Off';
+                    document.getElementById('audio-model-loaded').textContent = '--';
+                }
+                
                 // GPU Memory
                 const usedMatch = (metrics.gpuMemoryUsed || '0').match(/[\d.]+/);
                 const totalMatch = (metrics.gpuMemoryTotal || '0').match(/[\d.]+/);
@@ -465,8 +497,22 @@
                 const queueDepth = metrics.queueDepth || 0;
                 const activeGenerations = metrics.activeGenerations || 0;
                 
-                if (activeGenerations > 0) {
+                // Audio generation state
+                const audioInflight = metrics.audioInflight || 0;
+                
+                if (activeGenerations > 0 || audioInflight > 0) {
                     // Currently generating
+                    let genLabel = 'Generating...';
+                    let genMeta = '';
+                    if (activeGenerations > 0 && audioInflight > 0) {
+                        genLabel = 'Generating...';
+                        genMeta = `${activeGenerations} image${activeGenerations > 1 ? 's' : ''} • ${audioInflight} music${audioInflight > 1 ? 's' : ''} active`;
+                    } else if (audioInflight > 0) {
+                        genLabel = 'Generating Music...';
+                        genMeta = `${audioInflight} music${audioInflight > 1 ? 's' : ''} active`;
+                    } else {
+                        genMeta = `${activeGenerations} active • ${queueDepth} pending`;
+                    }
                     feed.innerHTML = `
                         <div class="activity-item">
                             <div class="activity-icon generating">
@@ -475,8 +521,8 @@
                                 </svg>
                             </div>
                             <div class="activity-info">
-                                <div class="activity-title">Generating...</div>
-                                <div class="activity-meta">${activeGenerations} active • ${queueDepth} pending</div>
+                                <div class="activity-title">${genLabel}</div>
+                                <div class="activity-meta">${genMeta}</div>
                             </div>
                         </div>
                     `;
