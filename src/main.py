@@ -1317,7 +1317,7 @@ async def list_audio_models_installed(
         data.append(InstalledAudioModelInfo(
             id=aud.id,
             name=meta.get("name", aud.name),
-            catalog_id=catalog_id,
+            catalog_id=aud.catalog_id,
             description=meta.get("description", ""),
             engine=meta.get("engine", aud.engine),
             max_seconds=meta.get("max_seconds", 0),

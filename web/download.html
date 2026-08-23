@@ -488,6 +488,12 @@
                     document.getElementById('type-filter-group').style.display = 
                         currentSource === 'civitai' ? 'block' : 'none';
                     
+                    // Hide search bar for Music tab (only 2 models - no search needed)
+                    const searchSection = document.querySelector('.search-section');
+                    if (searchSection) {
+                        searchSection.style.display = currentSource === 'music' ? 'none' : 'flex';
+                    }
+                    
                     // Clear results and load browse mode for CivitAI
                     searchResults = [];
                     renderSearchResults();
@@ -783,6 +789,7 @@
                                     </div>
                                     ${model.description ? `<div style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.5rem 0;">${model.description}</div>` : ''}
                                     ${model.installed ? '<div style="font-size: 0.75rem; color: var(--success); margin-bottom: 0.5rem;">Installed</div>' : '<div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem;">Not installed</div>'}
+                                    <a href="https://huggingface.co/${model.repo}" target="_blank" style="font-size: 0.75rem; color: var(--accent); text-decoration: none; display: inline-block; margin-bottom: 0.5rem;">View on HuggingFace</a>
                                     <button class="btn btn-primary btn-sm btn-block download-btn" ${model.installed ? 'disabled' : ''} data-model='${JSON.stringify({
                                         id: model.id,
                                         name: model.name,

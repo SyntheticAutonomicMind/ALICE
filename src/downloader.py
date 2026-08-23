@@ -49,6 +49,7 @@ if "HF_HOME" not in os.environ:
         pass
 
 from huggingface_hub import snapshot_download, hf_hub_download
+from huggingface_hub import HfApi
 
 logger = logging.getLogger(__name__)
 
@@ -765,6 +766,14 @@ class DownloadManager:
                         return None
                     model_info = await response.json()
 
+            # Check if the model is gated and the user may not have access
+            gated = model_info.get("gated")
+            if gated and gated is not True:
+                logger.warning(
+                    "Audio model %s is gated (%s) - user must accept license on HuggingFace first",
+                    model_id, gated,
+                )
+
             model_name = model_id.split("/")[-1]
             clone_url = f"https://huggingface.co/{model_id}"
 
@@ -1111,34 +1120,40 @@ class DownloadManager:
             
             logger.info("Downloading HuggingFace model: %s -> %s", model_id, destination)
             
-            # Try to get expected total size from HuggingFace API for accurate progress
-            try:
-                headers = {}
-                if self.huggingface_token:
-                    headers["Authorization"] = f"Bearer {self.huggingface_token}"
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"{self.HUGGINGFACE_API_BASE}/models/{model_id}",
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=15),
-                    ) as response:
-                        if response.status == 200:
-                            model_info = await response.json()
-                            siblings = model_info.get("siblings", [])
-                            expected_size = sum(s.get("size", 0) for s in siblings if s.get("size"))
-                            if expected_size > 0:
-                                task.metadata["expected_size"] = expected_size
-                                task.total_size = expected_size
-                                logger.info("Expected download size for %s: %.1f MB", model_id, expected_size / (1024 * 1024))
-            except Exception as e:
-                logger.debug("Could not get expected size from HuggingFace API: %s", e)
-            
-            task.progress = 5.0
-            self._notify_progress(task)
-            
             # Use huggingface_hub's snapshot_download in a thread pool
             # to avoid blocking the event loop
             loop = asyncio.get_event_loop()
+            
+            # Try to get expected total size from HuggingFace API for accurate progress.
+            # Note: the /api/models/ endpoint returns siblings WITHOUT size info,
+            # so we use HfApi().list_repo_tree() which returns per-file sizes.
+            try:
+                hf_api = HfApi()
+                file_list = await loop.run_in_executor(
+                    None,
+                    lambda: list(hf_api.list_repo_tree(
+                        repo_id=model_id,
+                        revision=revision,
+                        token=self.huggingface_token,
+                        recursive=True,
+                    ))
+                )
+                expected_size = sum(
+                    f.size for f in file_list
+                    if hasattr(f, "size") and f.size
+                )
+                if expected_size > 0:
+                    task.metadata["expected_size"] = expected_size
+                    task.total_size = expected_size
+                    logger.info(
+                        "Expected download size for %s: %.1f MB (%d files)",
+                        model_id, expected_size / (1024 * 1024), len(file_list),
+                    )
+            except Exception as e:
+                logger.debug("Could not get expected size from HuggingFace: %s", e)
+            
+            task.progress = 5.0
+            self._notify_progress(task)
             
             def do_download():
                 return snapshot_download(
@@ -1182,10 +1197,24 @@ class DownloadManager:
             )
             
         except Exception as e:
+            error_str = str(e)
             task.status = DownloadStatus.FAILED
-            task.error = str(e)
             task.completed_at = time.time()
-            logger.error("HuggingFace download failed: %s - %s", task.name, e)
+            
+            # Provide a helpful message for gated models
+            if "403" in error_str or "gated" in error_str.lower() or "restricted" in error_str.lower():
+                task.error = (
+                    f"Download failed: '{model_id}' is a gated model on HuggingFace. "
+                    f"Visit https://huggingface.co/{model_id} to request access and "
+                    f"accept the model license, then retry the download."
+                )
+                logger.error(
+                    "Download failed for gated model %s: user must accept license on HuggingFace first",
+                    model_id,
+                )
+            else:
+                task.error = error_str
+                logger.error("HuggingFace download failed: %s - %s", task.name, e)
             
             # Clean up partial download
             if task.destination.exists():
