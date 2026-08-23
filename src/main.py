@@ -2887,7 +2887,7 @@ async def delete_session(session_id: str, admin: bool = Depends(verify_admin_key
 
 
 @app.get("/v1/auth/me")
-async def get_current_user(
+async def get_my_user_info(
     x_api_key: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
 ):
@@ -3868,7 +3868,17 @@ async def create_audio_generation(
             raise
 
         elapsed = time.time() - start
-        audio_is_public = not config.server.require_auth
+        audio_is_public = not config.server.require_auth or current_user is None
+
+        # When the user is anonymous, current_user is None (or an
+        # AnonymousUser with id="anonymous").  In either case we need to
+        # ensure the audio record is visible — otherwise anonymous users
+        # can generate audio that no one can ever see in the gallery.
+        api_key_id = getattr(current_user, "id", None) if current_user else None
+        if api_key_id is None:
+            # No authenticated owner — mark as public so it's visible
+            audio_is_public = True
+            api_key_id = None
 
         # Record audio in gallery
         if gallery_manager is not None:
@@ -3876,7 +3886,7 @@ async def create_audio_generation(
             audio_record = AudioRecord(
                 id=audio_id,
                 filename=Path(result.audio_path).name,
-                owner_api_key_id=getattr(current_user, "id", None),
+                owner_api_key_id=api_key_id,
                 is_public=audio_is_public,
                 prompt=prompt,
                 lyrics=request.lyrics or "",
