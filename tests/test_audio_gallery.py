@@ -332,22 +332,38 @@ class TestGalleryAudioEndpoint:
 # ---------------------------------------------------------------------------
 
 class TestInstrumentalFallback:
-    """Tests for the instrumental lyrics fallback in MiniMaxMusic3Engine."""
+    """Tests that the instrumental lyrics fallback was fixed.
 
-    def test_lyrics_or_instrumental(self):
-        """Verify the lyrics fallback produces '(instrumental)' for empty lyrics."""
-        # Read the source to confirm the fix is in place
+    Previously, the code passed 'lyrics=lyrics or "(instrumental)"' which
+    caused the Qwen3 model to SING '(instrumental)' as actual lyrics,
+    producing vocal music when the user asked for instrumental.  The fix
+    passes empty string ('') directly, which _normalize_lyrics correctly
+    interprets as 'no lyrics' (instrumental).
+    """
+
+    def test_lyrics_sentinel_removed(self):
+        """The '(instrumental)' lyrics sentinel must be removed."""
         import inspect
         source = inspect.getsource(MiniMaxMusic3Engine.generate)
-        assert "lyrics or \"(instrumental)\"" in source, (
-            "MiniMaxMusic3Engine.generate should use 'lyrics or \"(instrumental)\"' fallback"
+        assert "lyrics or \"(instrumental)\"" not in source, (
+            "The '(instrumental)' lyrics sentinel must be removed - it causes "
+            "the Qwen3 model to sing '(instrumental)' as lyrics, producing "
+            "unwanted vocals in instrumental tracks"
         )
 
-    def test_lyrics_or_instrumental_not_empty(self):
-        """The old code 'lyrics or \"\"' should NOT be present."""
+    def test_lyrics_passed_directly(self):
+        """Lyrics should be passed directly to the pipeline without a sentinel."""
         import inspect
         source = inspect.getsource(MiniMaxMusic3Engine.generate)
-        # The old broken pattern should not be there
+        assert "lyrics=lyrics" in source, (
+            "MiniMaxMusic3Engine.generate should pass lyrics=lyrics directly "
+            "to the pipeline, without any 'or' fallback"
+        )
+
+    def test_no_lyrics_or_empty_sentinel(self):
+        """The old 'lyrics or \"\"' fallback pattern should NOT be present."""
+        import inspect
+        source = inspect.getsource(MiniMaxMusic3Engine.generate)
         assert "lyrics or \"\"" not in source, (
             "MiniMaxMusic3Engine.generate should NOT use 'lyrics or \"\"'"
         )
