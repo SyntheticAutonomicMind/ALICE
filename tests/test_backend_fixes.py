@@ -258,6 +258,36 @@ class TestWarningSuppression:
             "Filter for token indices warning not found in source"
         )
 
+    def test_logging_level_suppression_for_sympy(self):
+        """The torch._sympy 'failed while executing' log should be suppressed at logging level.
+
+        This message is emitted via logging.warning(), not warnings.warn(),
+        so warnings.filterwarnings has no effect. We set the logger level to
+        ERROR instead.
+        """
+        import logging
+        interp_logger = logging.getLogger("torch.utils._sympy.interp")
+        assert interp_logger.level == logging.ERROR, (
+            "torch.utils._sympy.interp logger should be set to ERROR level "
+            "to suppress 'failed while executing' logging.warning() calls"
+        )
+
+    def test_logging_level_suppression_for_float32(self):
+        """The 'should be kept in float32' log should be suppressed at logging level."""
+        import logging
+        logger = logging.getLogger("diffusers.models.modeling_utils")
+        assert logger.level == logging.ERROR, (
+            "diffusers.models.modeling_utils logger should be set to ERROR level"
+        )
+
+    def test_logging_level_suppression_for_token_indices(self):
+        """The 'Token indices sequence length' log should be suppressed at logging level."""
+        import logging
+        logger = logging.getLogger("transformers.tokenization_utils_base")
+        assert logger.level == logging.ERROR, (
+            "transformers.tokenization_utils_base logger should be set to ERROR level"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Model cache / LRU eviction tests

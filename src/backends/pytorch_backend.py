@@ -130,6 +130,24 @@ warnings.filterwarnings("ignore", message=".*Token indices sequence length.*")
 warnings.filterwarnings("ignore", message=".*Dynamo detected.*")
 warnings.filterwarnings("ignore", message=".*PYTORCH_HIP_ALLOC_CONF is deprecated.*")
 
+# --- Suppress the same messages at the Python logging level ---
+# Several of the messages above are emitted via logging.warning() (not
+# warnings.warn()), so warnings.filterwarnings has no effect on them.
+# Verified sources:
+#   - "failed while executing"        -> torch.utils._sympy.interp (log.warning)
+#   - "should be kept in float32"     -> diffusers.models.modeling_utils (logger.warning)
+#   - "Token indices sequence length" -> transformers.tokenization_utils_base (logger.warning)
+# Logger objects are singletons, so setting the level here takes effect even
+# though the loggers are created later inside torch/diffusers/transformers.
+# Using ERROR level is intentional — these modules do not emit useful
+# WARNING-level messages that we would lose.
+for _noisy_log_name in (
+    "torch.utils._sympy.interp",
+    "diffusers.models.modeling_utils",
+    "transformers.tokenization_utils_base",
+):
+    logging.getLogger(_noisy_log_name).setLevel(logging.ERROR)
+
 # Lazy imports for diffusers to speed up startup
 _diffusers_imported = False
 _pipeline_classes: Dict[str, Type] = {}

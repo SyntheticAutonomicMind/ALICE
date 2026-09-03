@@ -750,6 +750,24 @@
                 </svg>
             </button>
             
+            <img id="viewer-image" class="viewer-image" src="" alt="">
+            
+            <audio id="viewer-audio" style="display:none;" width="100%">
+                <source src="" type="audio/wav">
+            </audio>
+            
+            <button class="viewer-nav next" onclick="navigateImage(1)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+            </button>
+        </div>
+        
+        <div class="viewer-sidebar" id="viewer-sidebar">
+            <!-- Content populated by JavaScript -->
+        </div>
+    </div>
+    
     <script src="/web/app.js"></script>
     <script>
         // Unified data model: every item is tagged with `_mediaType`
