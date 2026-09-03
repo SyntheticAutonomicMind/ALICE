@@ -332,17 +332,22 @@ class TestGalleryAudioEndpoint:
 # ---------------------------------------------------------------------------
 
 class TestInstrumentalFallback:
-    """Tests that the instrumental lyrics fallback was fixed.
+    """Tests that lyrics content and instrumental fallback are handled correctly.
 
-    Previously, the code passed 'lyrics=lyrics or "(instrumental)"' which
-    caused the Qwen3 model to SING '(instrumental)' as actual lyrics,
-    producing vocal music when the user asked for instrumental.  The fix
-    passes empty string ('') directly, which _normalize_lyrics correctly
-    interprets as 'no lyrics' (instrumental).
+    The MiniMax-Music3 pipeline requires non-empty lyrics (it raises
+    ValueError otherwise) and silently drops text on lines that start
+    with [tag] structure markers.  The engine preprocesses lyrics via
+    ``_preprocess_lyrics`` to:
+    - Split ``[tag] text`` lines so body text survives ``_normalize_lyrics``
+    - Replace empty/None lyrics with ``"[instrumental]"`` so the pipeline
+      doesn't raise ValueError
+
+    This replaces the older approach of passing ``""`` directly, which
+    the pipeline rejects with ``ValueError``.
     """
 
     def test_lyrics_sentinel_removed(self):
-        """The '(instrumental)' lyrics sentinel must be removed."""
+        """The '(instrumental)' lyrics sentinel must not be present."""
         import inspect
         source = inspect.getsource(MiniMaxMusic3Engine.generate)
         assert "lyrics or \"(instrumental)\"" not in source, (
@@ -351,13 +356,16 @@ class TestInstrumentalFallback:
             "unwanted vocals in instrumental tracks"
         )
 
-    def test_lyrics_passed_directly(self):
-        """Lyrics should be passed directly to the pipeline without a sentinel."""
+    def test_lyrics_are_preprocessed(self):
+        """Lyrics must be preprocessed via _preprocess_lyrics before the pipeline call."""
         import inspect
         source = inspect.getsource(MiniMaxMusic3Engine.generate)
-        assert "lyrics=lyrics" in source, (
-            "MiniMaxMusic3Engine.generate should pass lyrics=lyrics directly "
-            "to the pipeline, without any 'or' fallback"
+        assert "_preprocess_lyrics" in source, (
+            "MiniMaxMusic3Engine.generate should preprocess lyrics via "
+            "_preprocess_lyrics before passing to the pipeline"
+        )
+        assert "lyrics=processed_lyrics" in source, (
+            "The preprocessed lyrics value should be what's passed to the pipeline"
         )
 
     def test_no_lyrics_or_empty_sentinel(self):

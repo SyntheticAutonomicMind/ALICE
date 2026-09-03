@@ -28,6 +28,7 @@ import gc
 import logging
 import os
 import random
+import re
 import shutil
 import subprocess
 import time
@@ -369,6 +370,48 @@ class ALICEAudioEngine:
 # assembled component dictionary because the language_model is a transformers
 # model rather than a diffusers one.
 
+# A line starting with one or more [tag] patterns (mirrors the pipeline's
+# own regex in diffusers.modular_pipelines.minimax_music3.encoders).
+_MINIMAX_LEADING_TAGS_RE = re.compile(r"^[ \t]*((?:\[[^\]]+\][ \t]*)+)")
+
+
+def _preprocess_lyrics(lyrics: Optional[str]) -> str:
+    """
+    Pre-process lyrics so the MiniMax-Music3 pipeline preserves the user's
+    text.
+
+    The pipeline's internal `_normalize_lyrics` matches lines beginning with
+    structure tags (e.g. ``[verse]``) and keeps *only* the tag, silently
+    dropping any body text on the same line.  So a line like
+    ``[verse] My heart beats fast`` becomes just ``[verse]`` and the actual
+    lyrics vanish.
+
+    This helper splits such lines into two: the tag on its own line and the
+    body text on the next line.  After this transform the pipeline keeps both.
+
+    Empty or whitespace-only lyrics (including ``None``) are replaced with
+    ``"[instrumental]"`` because the pipeline raises ``ValueError`` when
+    ``lyrics.strip()`` is falsy.
+    """
+    if not lyrics or not lyrics.strip():
+        return "[instrumental]"
+
+    lines = []
+    for line in lyrics.split("\n"):
+        match = _MINIMAX_LEADING_TAGS_RE.match(line)
+        if match:
+            tags = match.group(1).strip()
+            rest = line[match.end():]
+            if rest.strip():
+                lines.append(tags)
+                lines.append(rest.strip())
+            else:
+                lines.append(tags)
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
 # Pipeline-level defaults.  These mirror the upstream defaults and the
 # numbers used in the trial run that produced the first end-to-end output.
 MINIMAX_MUSIC3_DEFAULT_REPO = "MiniMaxAI/MiniMax-Music3"
@@ -558,7 +601,9 @@ class MiniMaxMusic3Engine:
         Args:
             prompt: Music description (genre, mood, vocals, instrumentation).
             lyrics: Lyrics with optional `[verse]`/`[chorus]` structure tags.
-                Empty string means instrumental.
+                Empty string means instrumental.  Lines that put text on the
+                same line as a tag (e.g. ``[verse] My text``) are auto-split
+                by ``_preprocess_lyrics`` so the pipeline doesn't drop them.
             audio_duration: Target length in seconds (clamped to MAX).
             num_inference_steps: Flow-matching Euler steps per chunk.
             seed: Reproducibility seed.
@@ -585,7 +630,7 @@ class MiniMaxMusic3Engine:
         start = time.time()
         logger.info(
             "Generating music: prompt_len=%d lyrics_len=%d duration=%.1fs steps=%d seed=%d",
-            len(prompt), len(lyrics), audio_duration, num_inference_steps, seed,
+            len(prompt), len(processed_lyrics), audio_duration, num_inference_steps, seed,
         )
         logger.debug("Full prompt: %r", prompt)
 
@@ -596,11 +641,19 @@ class MiniMaxMusic3Engine:
         #   generator: torch generator
         #   num_inference_steps: flow-matching Euler steps per chunk
         #   output_type: 'np' for ndarray, 'pt' for tensor
-        # Pass empty string for instrumental; the pipeline's _normalize_lyrics
-        # handles "" correctly (produces "[start]" with no lyrics content).
+        #
+        # Pre-process lyrics: the pipeline's _normalize_lyrics silently
+        # drops text on the same line as a [tag].  Splitting tag+text
+        # lines preserves the user's lyric content.  Empty lyrics
+        # (instrumental) become "[instrumental]" because the pipeline
+        # raises ValueError on a blank string.
+        processed_lyrics = _preprocess_lyrics(lyrics)
+        if processed_lyrics != lyrics:
+            logger.debug("Lyrics preprocessed for MiniMax pipeline: %r -> %r", lyrics, processed_lyrics)
+
         result = self.pipeline(
             prompt=prompt,
-            lyrics=lyrics,
+            lyrics=processed_lyrics,
             audio_duration=audio_duration,
             generator=generator,
             num_inference_steps=num_inference_steps,
@@ -622,7 +675,7 @@ class MiniMaxMusic3Engine:
         audio_int16 = (audio_clipped * 32767.0).astype(np.int16)
 
         suffix = f"seed{seed}"
-        short_hash = abs(hash((prompt, lyrics))) % (10**8)
+        short_hash = abs(hash((prompt, processed_lyrics))) % (10**8)
         output_path = self.output_dir / f"minimax_{short_hash:08d}_{suffix}.wav"
 
         wavfile.write(str(output_path), sample_rate, audio_int16.T)

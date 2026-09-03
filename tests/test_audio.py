@@ -321,6 +321,94 @@ def test_minimax_engine_generate_rejects_empty_prompt(tmp_path):
         engine.generate(prompt="   ", audio_duration=10.0)
 
 
+# ---------------------------------------------------------------------------
+# MiniMax-Music3 lyrics preprocessing
+# ---------------------------------------------------------------------------
+
+
+def test_preprocess_lyrics_splits_tag_and_text():
+    """A [verse] tag followed by text on the same line is split so the
+    pipeline's _normalize_lyrics doesn't drop the body text."""
+    from src.audio_engine import _preprocess_lyrics
+
+    result = _preprocess_lyrics("[verse] My heart beats fast")
+    assert result == "[verse]\nMy heart beats fast"
+
+
+def test_preprocess_lyrics_preserves_multiline_lyrics():
+    """Full lyrics with mixed tag+text and standalone text lines are preserved."""
+    from src.audio_engine import _preprocess_lyrics
+
+    raw = "[verse] My heart beats fast\n[chorus] I can't hold back"
+    result = _preprocess_lyrics(raw)
+    assert result == "[verse]\nMy heart beats fast\n[chorus]\nI can't hold back"
+
+
+def test_preprocess_lyrics_keeps_standalone_text_lines():
+    """Lines without leading tags are passed through unchanged."""
+    from src.audio_engine import _preprocess_lyrics
+
+    raw = "My heart beats fast\n[chorus] I can't hold back"
+    result = _preprocess_lyrics(raw)
+    assert result == "My heart beats fast\n[chorus]\nI can't hold back"
+
+
+def test_preprocess_lyrics_keeps_existing_proper_formatting():
+    """Lyrics already formatted with tags on their own lines pass through."""
+    from src.audio_engine import _preprocess_lyrics
+
+    raw = "[verse]\nMy heart beats fast\n[chorus]\nI can't hold back"
+    result = _preprocess_lyrics(raw)
+    assert result == raw
+
+
+def test_preprocess_lyrics_handles_multiple_consecutive_tags():
+    """Leading consecutive tags like [verse][chorus] are extracted as a group;
+    mid-line tags stay in the body (the pipeline's _normalize_lyrics handles
+    those via its own ] /  [ replacements)."""
+    from src.audio_engine import _preprocess_lyrics
+
+    result = _preprocess_lyrics("[verse] Intro line [chorus] More text")
+    assert result == "[verse]\nIntro line [chorus] More text"
+
+
+def test_preprocess_lyrics_empty_returns_instrumental():
+    """Empty string becomes '[instrumental]' so the pipeline doesn't raise."""
+    from src.audio_engine import _preprocess_lyrics
+
+    assert _preprocess_lyrics("") == "[instrumental]"
+
+
+def test_preprocess_lyrics_whitespace_returns_instrumental():
+    """Whitespace-only lyrics also become '[instrumental]'."""
+    from src.audio_engine import _preprocess_lyrics
+
+    assert _preprocess_lyrics("   \n  \t  ") == "[instrumental]"
+
+
+def test_preprocess_lyrics_none_returns_instrumental():
+    """None is treated as empty and becomes '[instrumental]'."""
+    from src.audio_engine import _preprocess_lyrics
+
+    assert _preprocess_lyrics(None) == "[instrumental]"
+
+
+def test_preprocess_lyrics_already_has_instrumental_preserved():
+    """A standalone [instrumental] tag is kept unchanged."""
+    from src.audio_engine import _preprocess_lyrics
+
+    result = _preprocess_lyrics("[instrumental]")
+    assert result == "[instrumental]"
+
+
+def test_preprocess_lyrics_no_change_for_plain_text():
+    """Plain text without any tags is returned as-is."""
+    from src.audio_engine import _preprocess_lyrics
+
+    raw = "Just some lyrics\nWithout any tags\nAt all"
+    assert _preprocess_lyrics(raw) == raw
+
+
 def test_audio_models_list_includes_engine_and_lyrics_flags():
     """AudioModelInfo serialises engine and supports_lyrics flags."""
     from src.backends.audio_backend import AudioBackend
