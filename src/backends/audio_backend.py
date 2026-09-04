@@ -334,6 +334,8 @@ class AudioBackend:
                     output_dir=self.output_dir,
                     force_fp32=self.config.generation.force_float32,
                     vae_decode_cpu=self.config.generation.vae_decode_cpu,
+                    force_float32=self.config.generation.force_float32,
+                    force_bfloat16=self.config.generation.force_bfloat16,
                 )
                 self._engine_model_id = model_id
         return self._engine

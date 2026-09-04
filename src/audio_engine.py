@@ -38,6 +38,17 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 
+# Suppress non-actionable torch._sympy / diffusers / transformers log spam.
+# These modules emit via logging.warning(), so warnings.filterwarnings has
+# no effect.  Logger objects are singletons, so these level adjustments take
+# effect for code imported later (inside load_model / generate).
+for _noisy_log_name in (
+    "torch.utils._sympy.interp",
+    "diffusers.models.modeling_utils",
+    "transformers.tokenization_utils_base",
+):
+    logging.getLogger(_noisy_log_name).setLevel(logging.ERROR)
+
 logger = logging.getLogger(__name__)
 
 
@@ -441,6 +452,8 @@ class MiniMaxMusic3Engine:
         device: Optional[torch.device] = None,
         force_fp32: bool = False,
         vae_decode_cpu: bool = False,
+        force_float32: bool = False,
+        force_bfloat16: bool = False,
     ):
         """
         Args:
@@ -448,20 +461,31 @@ class MiniMaxMusic3Engine:
             device: Torch device.  Auto-detected if None.
             force_fp32: Force float32 dtype (rare; FP16 VAE hangs gfx1103).
             vae_decode_cpu: Decode on CPU (AMD gfx1103 workaround).
+            force_float32: Alias for force_fp32 (config.generation.force_float32).
+            force_bfloat16: Prefer bfloat16 despite force_fp32 (AMD Phoenix).
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.device = device or detect_device()
-        self.force_fp32 = force_fp32
+        self.force_fp32 = force_fp32 or force_float32
         self.vae_decode_cpu = vae_decode_cpu
+
+        # Dtype resolution order for AMD GPUs:
+        #   force_bfloat16 > force_fp32 > default (float16 on CUDA, float32 on CPU)
+        # bfloat16 is preferred on AMD Phoenix/Phoenix Point APUs; fp32 on
+        # gfx1103 (where fp16/bf16 can hang the GPU).
+        if force_bfloat16:
+            self.dtype = torch.bfloat16
+        else:
+            self.dtype = detect_dtype(self.device, force_fp32=self.force_fp32)
 
         self.pipeline: Optional[Any] = None
         self.model_repo: Optional[str] = None
 
         logger.info(
-            "MiniMaxMusic3Engine initialised: device=%s output_dir=%s",
-            self.device, self.output_dir,
+            "MiniMaxMusic3Engine initialised: device=%s dtype=%s output_dir=%s",
+            self.device, self.dtype, self.output_dir,
         )
 
     # -- availability --------------------------------------------------------
@@ -484,6 +508,33 @@ class MiniMaxMusic3Engine:
         except Exception as exc:  # pragma: no cover - import probe
             logger.debug("MiniMax-Music3 unavailable: %s", exc)
             return False
+
+    def _lm_max_memory(self) -> Optional[Dict[str, str]]:
+        """
+        Build a max_memory map for accelerate device_map="auto" on the
+        Qwen3 language model.
+
+        On GPUs with limited VRAM (e.g. Radeon 8060S / Strix Halo with ~8GB),
+        loading the full Qwen3-8B model plus the diffusion transformer,
+        VAE, and vocoder simultaneously causes a GPU memory access fault.
+        We cap the GPU budget so accelerate spills overflow layers to CPU.
+
+        Returns ``None`` when CUDA is unavailable — in that case we load the
+        language model normally on the available device without device_map
+        (which is a no-op on CPU-only systems and can cause issues with
+        some HuggingFace model classes).
+        """
+        if not torch.cuda.is_available():
+            return None
+        # Give the language model a tight GPU budget; the remaining components
+        # (flow transformer, vocoder) need VRAM too.  4GB on an 8GB card leaves
+        # ~4GB for the rest.  If the model doesn't fit, accelerate moves layers
+        # to CPU automatically.
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory
+        gpu_budget = min(gpu_mem // 2, 4 * 1024 * 1024 * 1024)
+        logger.info("MiniMax language model GPU budget: %.1f GB / %.1f GB total",
+                    gpu_budget / (1024**3), gpu_mem / (1024**3))
+        return {"cpu": "32GB", 0: f"{gpu_budget} bytes"}
 
     # -- model lifecycle -----------------------------------------------------
 
@@ -535,35 +586,70 @@ class MiniMaxMusic3Engine:
         # Step 1: shell pipeline (no components yet)
         pipeline = MiniMaxMusic3ModularPipeline.from_pretrained(model_repo_or_path)
 
-        # Step 2: hand-built component dictionary.  All non-language_model
-        # components load in bfloat16 to halve VRAM vs fp32; the language
-        # model is the largest single component so it gets the same.
+        # Step 2: hand-built component dictionary.
+        # The Qwen3 language model is the largest component (~8B params, ~16GB
+        # in bf16).  On GPUs with limited VRAM (e.g. Radeon 8060S / Strix Halo,
+        # ~8GB) loading everything at once causes a GPU memory access fault.
+        # We therefore load the language model with device_map="auto" and a
+        # max_memory budget so accelerate spills overflow layers to CPU,
+        # while keeping the smaller diffusion components on the GPU.
+        dtype = self.dtype
+        logger.info("MiniMax-Music3 dtype: %s (force_fp32=%s)", dtype, self.force_fp32)
+
+        lm_max_memory = self._lm_max_memory()
+
+        # Build kwargs for the language model.  On CPU-only systems or when
+        # we can't constrain VRAM, fall back to a plain from_pretrained that
+        # loads on the target device without device_map.
+        lm_kwargs: Dict[str, Any] = {
+            "torch_dtype": dtype,
+            "local_files_only": local_files_only,
+        }
+        if lm_max_memory is not None:
+            lm_kwargs["device_map"] = "auto"
+            lm_kwargs["max_memory"] = lm_max_memory
+            try:
+                language_model = Qwen3ForCausalLM.from_pretrained(
+                    model_repo_or_path, subfolder="language_model", **lm_kwargs,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Language model device_map='auto' failed (%s); falling back to "
+                    "plain load on %s",
+                    exc, self.device,
+                )
+                language_model = Qwen3ForCausalLM.from_pretrained(
+                    model_repo_or_path, subfolder="language_model",
+                    torch_dtype=dtype, local_files_only=local_files_only,
+                ).to(str(self.device))
+        else:
+            language_model = Qwen3ForCausalLM.from_pretrained(
+                model_repo_or_path, subfolder="language_model", **lm_kwargs,
+            )
+
         components = {
             "tokenizer": AutoTokenizer.from_pretrained(
                 model_repo_or_path, subfolder="tokenizer", local_files_only=local_files_only,
             ),
-            "language_model": Qwen3ForCausalLM.from_pretrained(
-                model_repo_or_path, subfolder="language_model",
-                torch_dtype=torch.bfloat16, local_files_only=local_files_only,
-            ),
+            "language_model": language_model,
             "rvq_depth_decoder": MiniMaxMusic3RVQDepthDecoder.from_pretrained(
                 model_repo_or_path, subfolder="rvq_depth_decoder",
-                torch_dtype=torch.bfloat16, local_files_only=local_files_only,
+                torch_dtype=dtype, local_files_only=local_files_only,
             ),
             "condition_encoder": MiniMaxMusic3ConditionEncoder.from_pretrained(
                 model_repo_or_path, subfolder="condition_encoder",
-                torch_dtype=torch.bfloat16, local_files_only=local_files_only,
+                torch_dtype=dtype, local_files_only=local_files_only,
             ),
             "transformer": MiniMaxMusic3Transformer1DModel.from_pretrained(
                 model_repo_or_path, subfolder="transformer",
-                torch_dtype=torch.bfloat16, local_files_only=local_files_only,
+                torch_dtype=dtype, local_files_only=local_files_only,
             ),
             "scheduler": FlowMatchEulerDiscreteScheduler.from_pretrained(
                 model_repo_or_path, subfolder="scheduler", local_files_only=local_files_only,
             ),
             "vocoder": MiniMaxMusic3Vocoder.from_pretrained(
                 model_repo_or_path, subfolder="vocoder",
-                torch_dtype=torch.bfloat16, local_files_only=local_files_only,
+                torch_dtype=dtype, local_files_only=local_files_only,
             ),
         }
         pipeline.register_components(**components)
@@ -660,11 +746,25 @@ class MiniMaxMusic3Engine:
             output_type="np",
         )
 
+        # Free GPU memory used by the AR language model and intermediate
+        # latents immediately — on limited-VRAM cards the Qwen3 KV cache
+        # and flow-matching activations can keep the GPU at capacity.
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         # The pipeline returns a numpy ndarray: shape (channels, samples) float32.
         # Sample rate is exposed on the pipeline; upstream card says 32kHz but
         # the actual vocoder outputs 44.1kHz - trust the pipeline.
         audio = result.audios[0] if hasattr(result, "audios") else result[0]
         sample_rate = int(self.pipeline.sampling_rate)
+
+        # When vae_decode_cpu is set, move the audio array to CPU early to
+        # release GPU memory before any subsequent requests.  The pipeline
+        # already returns numpy (CPU) when output_type="np", but the vocoder
+        # may have left tensors on GPU, so we clean up.
+        if self.vae_decode_cpu:
+            logger.info("MiniMax vocoder decode completed; ensuring CPU offload")
 
         from scipy.io import wavfile
 

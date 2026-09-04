@@ -312,6 +312,51 @@ def test_minimax_engine_creates_output_dir(tmp_path):
     assert engine.is_loaded() is False
 
 
+def test_minimax_engine_respects_force_fp32(tmp_path):
+    """MiniMaxMusic3Engine uses float32 when force_fp32 is set."""
+    from src.audio_engine import MiniMaxMusic3Engine
+    import torch
+
+    engine = MiniMaxMusic3Engine(output_dir=tmp_path, force_fp32=True)
+    assert engine.dtype == torch.float32
+
+
+def test_minimax_engine_uses_float16_by_default_on_cuda(tmp_path):
+    """MiniMaxMusic3Engine defaults to float16 on CUDA (same as image backend's detect_dtype)."""
+    from src.audio_engine import MiniMaxMusic3Engine
+    import torch
+
+    engine = MiniMaxMusic3Engine(output_dir=tmp_path)
+    if engine.device.type == "cuda":
+        assert engine.dtype == torch.float16
+    else:
+        assert engine.dtype == torch.float32
+
+
+def test_minimax_engine_force_bfloat16_overrides_fp32(tmp_path):
+    """force_bfloat16 wins over force_fp32 (more specific AMD signal)."""
+    from src.audio_engine import MiniMaxMusic3Engine
+    import torch
+
+    engine = MiniMaxMusic3Engine(output_dir=tmp_path, force_fp32=True, force_bfloat16=True)
+    assert engine.dtype == torch.bfloat16
+
+
+def test_minimax_engine_lm_max_memory_returns_none_on_cpu(tmp_path):
+    """_lm_max_memory returns None when CUDA is unavailable (CPU-only)."""
+    from src.audio_engine import MiniMaxMusic3Engine
+    import torch
+
+    engine = MiniMaxMusic3Engine(output_dir=tmp_path)
+    if not torch.cuda.is_available():
+        assert engine._lm_max_memory() is None
+    else:
+        result = engine._lm_max_memory()
+        assert result is not None
+        assert "cpu" in result
+        assert 0 in result
+
+
 def test_minimax_engine_generate_rejects_empty_prompt(tmp_path):
     """MiniMaxMusic3Engine.generate refuses empty prompts before model load."""
     from src.audio_engine import MiniMaxMusic3Engine
