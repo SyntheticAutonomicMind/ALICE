@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import gc
 import time
 import uuid
 from collections import OrderedDict
@@ -1810,6 +1811,16 @@ class PyTorchBackend(BaseBackend):
                 return saved_paths, metadata
         
         finally:
+            # Free GPU memory after each generation to prevent accumulation
+            # that leads to crashes after ~20+ images or during model switching.
+            # torch.cuda.empty_cache() releases unused cached blocks from the
+            # caching allocator (intermediate tensors, VAE outputs, etc.).
+            # gc.collect() breaks reference cycles in diffusers/dynamo objects
+            # that prevent tensor deallocation.
+            if self._device == "cuda":
+                torch.cuda.empty_cache()
+            gc.collect()
+            
             # Always decrement queue counter, even on error
             async with self._queue_lock:
                 self._pending_requests -= 1
