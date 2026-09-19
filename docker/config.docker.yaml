@@ -12,7 +12,7 @@ server:
 
 models:
   directory: /data/models
-  auto_unload_timeout: 300
+  auto_unload_timeout: 0
   default_model: ""
   civitai_api_key: null
   huggingface_token: null

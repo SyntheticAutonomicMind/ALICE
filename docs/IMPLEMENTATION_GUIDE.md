@@ -67,7 +67,7 @@ class ServerConfig(BaseModel):
 
 class ModelsConfig(BaseModel):
     directory: Path = Path("/var/lib/alice/models")
-    auto_unload_timeout: int = 300
+    auto_unload_timeout: int = 0  # Disabled; no time-based eviction
     default_model: str = "stable-diffusion-v1-5"
 
 class GenerationConfig(BaseModel):

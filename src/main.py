@@ -3326,7 +3326,7 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
         },
         "models": {
             "directory": str(models_cfg.get("directory", "./models")),
-            "auto_unload_timeout": models_cfg.get("auto_unload_timeout", 300),
+            "auto_unload_timeout": models_cfg.get("auto_unload_timeout", 0),
             "default_model": models_cfg.get("default_model"),
             "civitai_api_key": "***" if models_cfg.get("civitai_api_key") else None,
             "huggingface_token": "***" if models_cfg.get("huggingface_token") else None,

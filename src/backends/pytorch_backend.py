@@ -92,6 +92,9 @@ class _CachedModel:
    unet_compiled: bool = False
    original_unet: Optional[Any] = None
    loaded_at: float = field(default_factory=time.time)
+   # Timestamp of last generation request that used this model (epoch).
+   # Used for diagnostic logging; the OrderedDict LRU order governs eviction.
+   last_used: float = field(default_factory=time.time)
    # Estimated VRAM footprint (bytes) after loading.  Used to decide
    # how many models can coexist in GPU memory without guessing.
    vram_footprint_bytes: int = 0
@@ -628,6 +631,12 @@ class PyTorchBackend(BaseBackend):
         self._gc_counter: int = 0
         self._gc_interval: int = 5
         
+        # Flag set when a model was evicted or unloaded since the last
+        # generation. _cleanup_after_generation checks this and only runs
+        # gc.collect()/empty_cache() when True, avoiding periodic stalls
+        # during normal batched generation.
+        self._pending_cleanup: bool = False
+        
         # Concurrency control
         self._model_lock: asyncio.Lock = asyncio.Lock()  # Protects model loading operations
         self._generation_semaphore: asyncio.Semaphore = asyncio.Semaphore(max_concurrent_generations)
@@ -1137,17 +1146,7 @@ class PyTorchBackend(BaseBackend):
         except Exception:
             pass
         return None
-    
-    def _should_evict_vram(self) -> bool:
-        """Check if free VRAM is below the eviction threshold."""
-        if self._vram_evict_threshold_gb <= 0:
-            return False
-        free = self._get_free_vram_bytes()
-        if free is None:
-            return False
-        threshold_bytes = int(self._vram_evict_threshold_gb * (1024 ** 3))
-        return free < threshold_bytes
-    
+
     def _evict_lru(self, count: int = 1, move_to_cpu: bool = True) -> int:
         """Evict least-recently-used models from the GPU VRAM cache.
 
@@ -1181,22 +1180,15 @@ class PyTorchBackend(BaseBackend):
 
             evicted += 1
 
-        if evicted > 0 and self._device == "cuda":
-            # Sync + empty_cache in a thread to avoid blocking the event
-            # loop on AMD ROCm (HIP allocator can deadlock).
-            def _evict_cleanup():
-                try:
-                    torch.cuda.synchronize()
-                except Exception:
-                    pass
-                try:
-                    torch.cuda.empty_cache()
-                except Exception as e:
-                    logger.warning("empty_cache failed during eviction: %s", e)
-            try:
-                asyncio.create_task(asyncio.to_thread(_evict_cleanup))
-            except RuntimeError:
-                pass
+        # If evicted models from VRAM, flag pending cleanup so
+        # _cleanup_after_generation (called in generate_image's finally
+        # block) runs gc.collect() + empty_cache() in the right context.
+        # We do NOT call empty_cache() here directly because _evict_lru
+        # is a synchronous method called from load_model; running a
+        # fire-and-forget thread for empty_cache risks racing with the
+        # next generation's GPU work.
+        if evicted > 0:
+            self._pending_cleanup = True
 
         # If we evicted the active model, set a new active one
         if self._current_model not in self._model_cache and len(self._model_cache) > 0:
@@ -1223,17 +1215,21 @@ class PyTorchBackend(BaseBackend):
         """
         logger.info("Offloading model to CPU RAM: %s", cached.model_path.name)
         try:
-            # Move pipeline to CPU — free GPU memory while keeping weights
-            # in system RAM for fast reload.
-            cached.pipeline = cached.pipeline.to("cpu")
-            # Free compel and compiled unet references (GPU-specific)
+            # Restore the eager UNET *before* moving to CPU.  The compiled
+            # UNET (torch.compile wrapper) is GPU-only and cannot run on CPU.
+            # By swapping in the saved eager UNET we ensure that when the
+            # model returns to GPU, _apply_memory_optimizations recompiles
+            # the *eager* UNET (using the cached Inductor/Triton artifacts)
+            # rather than double-wrapping an already-compiled graph.
+            if cached.unet_compiled and cached.original_unet is not None:
+                cached.pipeline.unet = cached.original_unet
+                cached.unet_compiled = False
+            # CompelForSDXL holds GPU tensors and CUDA calls; discard it.
+            # It will be re-created on reload via load_model's CPU cache path.
             if cached.compel is not None:
                 del cached.compel
                 cached.compel = None
-            if cached.original_unet is not None:
-                del cached.original_unet
-                cached.original_unet = None
-            cached.unet_compiled = False
+            cached.pipeline = cached.pipeline.to("cpu")
             cached.vram_footprint_bytes = 0  # No longer in VRAM
         except Exception as e:
             logger.warning("Failed to offload %s to CPU: %s. Deleting instead.",
@@ -1306,6 +1302,7 @@ class PyTorchBackend(BaseBackend):
         cached.unet_compiled = self._unet_compiled
         cached.original_unet = self._original_unet
         cached.loaded_at = time.time()
+        cached.last_used = time.time()
 
     def _estimate_vram_footprint(self, pipeline: Any) -> int:
         """Estimate the VRAM footprint of a loaded pipeline in bytes."""
@@ -1331,23 +1328,32 @@ class PyTorchBackend(BaseBackend):
             return int(total * 1.3)
         return 0
 
-    async def _cleanup_after_generation(self) -> None:
-        """Non-blocking GPU memory cleanup after a generation.
+    async def _cleanup_after_generation(self, model_evicted: bool = False) -> None:
+        """GPU memory cleanup that only runs when a model was evicted or unloaded.
 
-        On AMD ROCm, both gc.collect() and torch.cuda.empty_cache() can
-        block the event loop for seconds or deadlock against the HIP
-        command processor when called synchronously.  Runs cleanup in a
-        thread pool with a synchronization barrier and timeout.
+        During normal generation with a cached model, PyTorch's caching
+        allocator reuses memory blocks, so periodic gc.collect() and
+        empty_cache() are unnecessary. The old implementation ran gc.collect()
+        every 5 generations (~5 min with 1-min generations), which on systems
+        with large models and torch.compile caused multi-minute stalls as the
+        GC swept through GBs of tensor objects and compiled graph artifacts.
 
-        gc.collect() runs only every _gc_interval generations;
-        torch.cuda.empty_cache() runs every time.
+        Cleanup is now triggered only when ``model_evicted`` is True, which
+        is set by ``_evict_lru`` and ``_unload_model_internal`` /
+        ``unload_model`` when models are actually removed from GPU memory.
+
+        When ``model_evicted`` is False this is a no-op (the fastest path).
+
+        Args:
+            model_evicted: True if a model was evicted from VRAM or unloaded
+                since the last generation, indicating cleanup is needed.
         """
-        self._gc_counter += 1
-        do_full_gc = (self._gc_counter % self._gc_interval == 0)
+        if not model_evicted:
+            return
 
         if self._device != "cuda":
-            if do_full_gc:
-                await asyncio.to_thread(gc.collect)
+            # CPU-only: just run gc.collect() to release freed Python objects
+            await asyncio.to_thread(gc.collect)
             return
 
         def _cleanup_sync():
@@ -1355,8 +1361,7 @@ class PyTorchBackend(BaseBackend):
                 torch.cuda.synchronize()
             except Exception as e:
                 logger.debug("GPU sync failed during cleanup: %s", e)
-            if do_full_gc:
-                gc.collect()
+            gc.collect()
             try:
                 torch.cuda.empty_cache()
             except Exception as e:
@@ -1707,6 +1712,8 @@ class PyTorchBackend(BaseBackend):
                 asyncio.create_task(asyncio.to_thread(_unload_cleanup))
             except RuntimeError:
                 pass
+        if self._device != "cuda":
+            self._pending_cleanup = True
 
         logger.info("All models unloaded")
     
@@ -1744,6 +1751,10 @@ class PyTorchBackend(BaseBackend):
             if not evicted_from_vram and not evicted_from_cpu:
                 logger.debug("Model not in cache, nothing to evict: %s", target_key)
                 return
+
+            # Flag pending cleanup so _cleanup_after_generation (if called
+            # in the same request flow) runs gc.collect/empty_cache.
+            self._pending_cleanup = True
 
             if self._device == "cuda":
                 def _per_model_cleanup():
@@ -2219,12 +2230,19 @@ class PyTorchBackend(BaseBackend):
                 return saved_paths, metadata
         
         finally:
-            # Free GPU memory after each generation to prevent accumulation
-            # that leads to crashes after ~20+ images or during model switching.
-            # Runs in a thread pool to avoid blocking the event loop; on AMD
-            # ROCm, gc.collect() and torch.cuda.empty_cache() can deadlock
-            # when called synchronously.
-            await self._cleanup_after_generation()
+            # Update last_used timestamp for the active model so LRU order
+            # stays accurate even across many generations with the same model.
+            if self._current_model in self._model_cache:
+                self._model_cache[self._current_model].last_used = time.time()
+
+            # Only run gc.collect()/empty_cache() when a model was actually
+            # evicted or unloaded since the last generation. During normal
+            # batched generation with a cached model, PyTorch's caching
+            # allocator reuses memory, so periodic cleanup causes unnecessary
+            # stalls (the old gc.collect() every 5 generations caused
+            # multi-minute pauses on large models with torch.compile).
+            await self._cleanup_after_generation(model_evicted=self._pending_cleanup)
+            self._pending_cleanup = False
             
             # Always decrement queue counter, even on error
             async with self._queue_lock:

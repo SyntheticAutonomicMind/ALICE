@@ -520,7 +520,7 @@ server:
 
 models:
   directory: /var/lib/alice/models
-  auto_unload_timeout: 300  # Seconds
+  auto_unload_timeout: 0  # Disabled; models persist until evicted by memory pressure
   default_model: stable-diffusion-v1-5
 
 generation:

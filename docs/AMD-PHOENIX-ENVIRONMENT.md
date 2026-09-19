@@ -75,7 +75,7 @@ server:
 
 models:
   directory: /home/deck/.local/share/alice/models
-  auto_unload_timeout: 300
+  auto_unload_timeout: 0
   default_model: null
 
 generation:

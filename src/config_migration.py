@@ -56,7 +56,7 @@ def get_default_config() -> Dict[str, Any]:
         },
         "models": {
             "directory": "./models",
-            "auto_unload_timeout": 300,
+            "auto_unload_timeout": 0,
             "default_model": None,
             "civitai_api_key": None,
             "huggingface_token": None,

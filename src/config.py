@@ -33,7 +33,7 @@ class ServerConfig(BaseModel):
 class ModelsConfig(BaseModel):
     """Model management configuration."""
     directory: Path = Field(default=Path("./models"), description="Models directory path")
-    auto_unload_timeout: int = Field(default=300, description="Seconds before unloading idle model")
+    auto_unload_timeout: int = Field(default=0, description="Disabled by default. Models are NOT unloaded based on idle time — they persist in cache until evicted by memory pressure (vram_evict_threshold_gb / max_cached_models) or explicitly requested via the API. Set to a positive value for backward compatibility (currently ignored).")
     default_model: Optional[str] = Field(default=None, description="Default model name")
     civitai_api_key: Optional[str] = Field(default=None, description="CivitAI API key for downloads")
     huggingface_token: Optional[str] = Field(default=None, description="HuggingFace token for private models")
