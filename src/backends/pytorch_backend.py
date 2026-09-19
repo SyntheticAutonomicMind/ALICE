@@ -33,6 +33,14 @@ if "TRITON_CACHE_DIR" not in os.environ:
         except (PermissionError, OSError):
             continue
 
+# Set torch CPU thread counts BEFORE importing torch — these are read at
+# import time and cannot be changed afterwards (inter-op in particular).
+_cpu_count = os.cpu_count() or 1
+_torch_threads = max(1, _cpu_count // 2)
+os.environ.setdefault("OMP_NUM_THREADS", str(_torch_threads))
+os.environ.setdefault("MKL_NUM_THREADS", str(_torch_threads))
+os.environ.setdefault("TORCH_NUM_THREADS", str(_torch_threads))
+
 import torch
 from PIL import Image
 
@@ -147,6 +155,7 @@ warnings.filterwarnings("ignore", message=".*PYTORCH_HIP_ALLOC_CONF is deprecate
 # WARNING-level messages that we would lose.
 for _noisy_log_name in (
     "torch.utils._sympy.interp",
+    "torch.fx.experimental.symbolic_shapes",
     "diffusers.models.modeling_utils",
     "transformers.tokenization_utils_base",
 ):
@@ -610,7 +619,14 @@ class PyTorchBackend(BaseBackend):
         
         # Device detection
         self._device = self._detect_device()
-        
+
+        # CPU thread pool sizing — PyTorch defaults to 1 intra-op thread which
+        # leaves 31 cores idle on a 32-thread CPU.  We use a fraction of the
+        # available cores to speed up CPU-bound portions of generation (VAE
+        # decode on CPU, latent init, post-processing) without starving the
+        # OS or other process.
+        self._configure_torch_threads()
+
         # Statistics
         self.total_generations = 0
         self.total_generation_time = 0.0
@@ -638,8 +654,47 @@ class PyTorchBackend(BaseBackend):
             logger.info("Using CPU device")
         
         return device
-    
-    
+
+    def _configure_torch_threads(self) -> None:
+        """Configure PyTorch's CPU thread pools for multi-core systems.
+
+        PyTorch defaults to 1 intra-op thread — on a 32-core CPU this
+        leaves 31 cores idle during CPU-bound generation steps (VAE decode
+        on CPU, latent sampling, image post-processing).  We use half the
+        available cores for intra-op and reserve some for inter-op.
+
+        On GPU systems the GPU does most of the heavy lifting, but CPU
+        thread parallelism still helps for VAE decode on CPU and for
+        torch.compile/Inductor codegen.
+        """
+        try:
+            cpu_count = os.cpu_count() or 1
+            # Use half the cores for intra-op (model parallelism within
+            # a single operation, e.g. matmul), leave the rest for system
+            # overhead and inter-op parallelism.
+            intra_threads = max(1, cpu_count // 2)
+            inter_threads = max(1, min(4, cpu_count))
+
+            current_intra = torch.get_num_threads()
+            current_inter = torch.get_num_interop_threads()
+
+            if intra_threads != current_intra or inter_threads != current_inter:
+                torch.set_num_threads(intra_threads)
+                # set_num_interop_threads must be called before any parallel
+                # work; it's a no-op if the pool is already initialized
+                try:
+                    torch.set_num_interop_threads(inter_threads)
+                except RuntimeError:
+                    pass  # Already initialized — accept the default
+
+                logger.info(
+                    "Configured torch threads: intra=%d (was %d), inter=%d (was %d) "
+                    "[cpu_count=%d]",
+                    intra_threads, current_intra, inter_threads, current_inter, cpu_count
+                )
+        except Exception as e:
+            logger.debug("Thread configuration skipped: %s", e)
+
     @property
     def current_model(self) -> Optional[str]:
         """Get currently active model path (most recently used)."""
@@ -946,6 +1001,32 @@ class PyTorchBackend(BaseBackend):
                     # compile-wrap time. If that happens, we restore the eager UNet and retry.
                     self._original_unet = self._pipeline.unet
                     try:
+                        # Reduce Inductor symbolic-shape recursion depth on complex UNets.
+                        # SDXL's unet has many dynamic shape dimensions; the default
+                        # max_rotation_size triggers RecursionError in _fast_expand which
+                        # is slow but non-fatal.  Disabling rotation helps on AMD ROCm.
+                        _inductor_cfg = getattr(torch, "_inductor", None)
+                        if _inductor_cfg is not None:
+                            _cfg = _inductor_cfg.config
+                            # These reduce symbolic-shape analysis overhead on
+                            # complex UNets (e.g. SDXL's 2560-dim bottleneck).
+                            # set_float32_fallback and others may not exist
+                            # across all torch versions — guard each.
+                            for _key, _val in [
+                                ("max_rotation_size", 128),
+                                ("coordinate_descent_tuning", False),
+                            ]:
+                                if hasattr(_cfg, _key):
+                                    try:
+                                        setattr(_cfg, _key, _val)
+                                    except Exception:
+                                        pass
+                            _triton = getattr(_cfg, "triton", None)
+                            if _triton is not None and hasattr(_triton, "cudasim"):
+                                try:
+                                    _triton.cudasim = False
+                                except Exception:
+                                    pass
                         self._pipeline.unet = torch.compile(
                             self._pipeline.unet,
                             mode=effective_mode,
