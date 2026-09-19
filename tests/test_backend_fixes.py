@@ -18,6 +18,7 @@ installation.
 import os
 import sys
 import warnings
+from collections import OrderedDict
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
@@ -568,4 +569,221 @@ class TestConfigLoggingPermission:
         source = config_py.read_text()
         assert "console-only logging" in source or "console-only" in source, (
             "setup_logging does not fall back to console-only on permission error"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Thread configuration tests
+# ---------------------------------------------------------------------------
+
+class TestThreadConfiguration:
+    """Test that PyTorchBackend configures CPU threads for multi-core systems."""
+
+    def test_thread_configs_set_before_torch_import(self):
+        """OMP_NUM_THREADS, MKL_NUM_THREADS, TORCH_NUM_THREADS must be set
+        before 'import torch' in pytorch_backend.py."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        import re
+        torch_pos = list(re.finditer(r'^import torch$', source, re.MULTILINE))[0].start()
+
+        oomp_pos = source.find('OMP_NUM_THREADS')
+        assert oomp_pos < torch_pos, "OMP_NUM_THREADS must be set before 'import torch'"
+
+        mkl_pos = source.find('MKL_NUM_THREADS')
+        assert mkl_pos < torch_pos, "MKL_NUM_THREADS must be set before 'import torch'"
+
+        torch_threads_pos = source.find('TORCH_NUM_THREADS')
+        assert torch_threads_pos < torch_pos, "TORCH_NUM_THREADS must be before 'import torch'"
+
+    def test_triton_threads_configured(self):
+        """TRITON_NUM_THREADS should be set to use multiple CPU threads."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        assert "TRITON_NUM_THREADS" in source, (
+            "TRITON_NUM_THREADS not set for Triton parallel codegen"
+        )
+
+    def test_triton_persistent_cache_enabled(self):
+        """TRITON_CACHE_PERSISTENT should be set to '1' for persistent kernel cache."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        assert "TRITON_CACHE_PERSISTENT" in source, (
+            "TRITON_CACHE_PERSISTENT not set for persistent kernel cache"
+        )
+
+    def test_torch_home_set_for_protecthome(self):
+        """TORCH_HOME should be set to /var/lib/alice/.cache/torch for systemd."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        assert "TORCH_HOME" in source, (
+            "TORCH_HOME not set for systemd ProtectHome compatibility"
+        )
+        assert "/var/lib/alice/.cache/torch" in source, (
+            "TORCH_HOME fallback to /var/lib/alice/.cache/torch not found"
+        )
+
+
+# ---------------------------------------------------------------------------
+# CPU offload cache tests
+# ---------------------------------------------------------------------------
+
+class TestCPUCache:
+    """Test the CPU offload cache (model warm cache for fast VRAM reload)."""
+
+    def test_cpu_cache_initialized(self):
+        """PyTorchBackend should have a _cpu_cache OrderedDict."""
+        backend = pytorch_backend.PyTorchBackend(
+            images_dir=Path("./test_images"),
+            force_cpu=True,
+            enable_torch_compile=False,
+        )
+        assert hasattr(backend, '_cpu_cache'), "_cpu_cache not initialized"
+        assert isinstance(backend._cpu_cache, OrderedDict), "_cpu_cache should be an OrderedDict"
+
+    def test_max_cpu_cached_models_attribute(self):
+        """Backend should have _max_cpu_cached_models."""
+        backend = pytorch_backend.PyTorchBackend(
+            images_dir=Path("./test_images"),
+            force_cpu=True,
+            max_cpu_cached_models=16,
+            enable_torch_compile=False,
+        )
+        assert backend._max_cpu_cached_models == 16
+
+    def test_cpu_cache_max_enforced(self):
+        """CPU cache should evict oldest when exceeding max_cpu_cached_models."""
+        backend = pytorch_backend.PyTorchBackend(
+            images_dir=Path("./test_images"),
+            force_cpu=True,
+            max_cpu_cached_models=2,
+            enable_torch_compile=False,
+        )
+
+        # Fill the CPU cache with 3 models (max is 2)
+        for name in ["a", "b", "c"]:
+            cached = pytorch_backend._CachedModel(
+                pipeline=MagicMock(),
+                model_path=Path(f"/models/{name}"),
+                model_type="sd15",
+                device_map_active=False,
+                is_single_file_sdxl=False,
+            )
+            backend._move_model_to_cpu(str(Path(f"/models/{name}")), cached)
+
+        assert len(backend._cpu_cache) <= 2, "CPU cache exceeded max"
+        assert "/models/a" not in backend._cpu_cache, "LRU CPU model was not evicted"
+        assert "/models/c" in backend._cpu_cache, "MRU CPU model was evicted instead"
+
+    def test_move_to_cpu_drops_compel(self):
+        """Moving a model to CPU should drop the CompelForSDXL instance
+        (it holds GPU-specific state)."""
+        backend = pytorch_backend.PyTorchBackend(
+            images_dir=Path("./test_images"),
+            force_cpu=True,
+            enable_torch_compile=False,
+        )
+
+        cached = pytorch_backend._CachedModel(
+            pipeline=MagicMock(),
+            model_path=Path("/models/test"),
+            model_type="sd15",
+            device_map_active=False,
+            is_single_file_sdxl=False,
+            compel=MagicMock(),
+        )
+        # Simulate the pipeline.to() call in _move_model_to_cpu
+        cached.pipeline.to = MagicMock(return_value=cached.pipeline)
+
+        backend._move_model_to_cpu("/models/test", cached)
+
+        assert cached.compel is None, "Compel not cleared on CPU offload"
+        assert cached.vram_footprint_bytes == 0, "VRAM footprint not cleared on offload"
+
+    def test_move_to_gpu_reload(self):
+        """_move_model_to_gpu should reload a CPU-cached model to GPU."""
+        backend = pytorch_backend.PyTorchBackend(
+            images_dir=Path("./test_images"),
+            force_cpu=True,
+            enable_torch_compile=False,
+        )
+
+        cached = pytorch_backend._CachedModel(
+            pipeline=MagicMock(),
+            model_path=Path("/models/test"),
+            model_type="sd15",
+            device_map_active=False,
+            is_single_file_sdxl=False,
+        )
+        cached.pipeline.to = MagicMock(return_value=cached.pipeline)
+
+        backend._cpu_cache["/models/test"] = cached
+
+        # Reload to GPU
+        result = backend._move_model_to_gpu("/models/test")
+        assert result is True, "Failed to reload CPU model to GPU"
+        assert "/models/test" not in backend._cpu_cache, "Model not removed from CPU cache after reload"
+
+    def test_move_to_gpu_not_found(self):
+        """_move_model_to_gpu should return False for models not in CPU cache."""
+        backend = pytorch_backend.PyTorchBackend(
+            images_dir=Path("./test_images"),
+            force_cpu=True,
+            enable_torch_compile=False,
+        )
+        result = backend._move_model_to_gpu("/models/nonexistent")
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Non-blocking cleanup tests
+# ---------------------------------------------------------------------------
+
+class TestNonBlockingCleanup:
+    """Test that _cleanup_after_generation runs in a thread pool."""
+
+    def test_cleanup_uses_asyncio_to_thread(self):
+        """_cleanup_after_generation should use asyncio.to_thread for cleanup."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        assert "asyncio.to_thread" in source, (
+            "_cleanup_after_generation does not use asyncio.to_thread"
+        )
+        assert "asyncio.wait_for" in source, (
+            "_cleanup_after_generation does not use asyncio.wait_for with timeout"
+        )
+
+    def test_cleanup_has_timeout(self):
+        """_cleanup_after_generation should have a 30s timeout."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        assert "timeout=30" in source, (
+            "_cleanup_after_generation does not have a 30s timeout"
+        )
+
+    def test_gc_runs_every_5_generations(self):
+        """gc.collect() should only run every 5 generations (gc_interval=5)."""
+        backend = pytorch_backend.PyTorchBackend(
+            images_dir=Path("./test_images"),
+            force_cpu=True,
+            enable_torch_compile=False,
+        )
+        assert backend._gc_interval == 5, f"gc_interval should be 5, got {backend._gc_interval}"
+
+    def test_cleanup_sync_has_synchronize_before_empty_cache(self):
+        """GPU cleanup should call torch.cuda.synchronize() before empty_cache()."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        # The _cleanup_sync function inside _cleanup_after_generation
+        assert "torch.cuda.synchronize()" in source, (
+            "torch.cuda.synchronize() not called before empty_cache()"
+        )
+
+    def test_evict_cleanup_non_blocking(self):
+        """_evict_lru should run empty_cache in a thread, not synchronously."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        # Should use asyncio.create_task with asyncio.to_thread for cleanup
+        assert "asyncio.create_task(asyncio.to_thread" in source, (
+            "_evict_lru does not use asyncio.to_thread for non-blocking cleanup"
         )
