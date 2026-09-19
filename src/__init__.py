@@ -2,10 +2,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 Andrew Wyatt (Fewtarius)
 
 """
-ALICE - Remote Stable Diffusion Service
+ALICE - Artificial Latent Interpretive Creation Engine
 
 A standalone Python service that provides OpenAI-compatible REST API
-endpoints for Stable Diffusion image generation.
+endpoints for Stable Diffusion image generation and audio synthesis.
 """
 
 __version__ = "20260223.1"

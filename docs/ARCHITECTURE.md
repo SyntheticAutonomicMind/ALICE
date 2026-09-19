@@ -4,13 +4,13 @@
 # ALICE Architecture
 
 **Version:** 1.1  
-**Purpose:** Remote Stable Diffusion service for SAM integration
+**Purpose:** Remote Stable Diffusion and audio generation service for SAM integration
 
 ---
 
 ## Overview
 
-ALICE is a standalone Python service that provides OpenAI-compatible API endpoints for Stable Diffusion image generation. It enables SAM clients to offload image generation to remote GPU servers.
+ALICE is a standalone Python service that provides OpenAI-compatible API endpoints for Stable Diffusion image generation and Stable Audio / MiniMax Music synthesis. It enables SAM clients to offload media generation to remote GPU servers.
 
 **Key Features:**
 - OpenAI-compatible REST API (`POST /v1/chat/completions`)

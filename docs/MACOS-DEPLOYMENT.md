@@ -2,13 +2,13 @@
 
 **Platform:** macOS 13 Ventura or later  
 **Architecture:** Apple Silicon (M1/M2/M3/M4) recommended; Intel supported (CPU only)  
-**Use case:** Running ALICE as a local image generation service for SAM
+**Use case:** Running ALICE as a local image and audio generation service for SAM
 
 ---
 
 ## Overview
 
-ALICE runs as a user-level process on macOS - no system privileges required. On Apple Silicon, PyTorch uses the Metal Performance Shaders (MPS) backend for GPU-accelerated image generation. Intel Macs fall back to CPU-only inference, which is significantly slower.
+ALICE runs as a user-level process on macOS - no system privileges required. On Apple Silicon, PyTorch uses the Metal Performance Shaders (MPS) backend for GPU-accelerated media generation. Intel Macs fall back to CPU-only inference, which is significantly slower.
 
 ### Paths
 

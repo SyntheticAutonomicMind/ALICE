@@ -5,7 +5,7 @@
 ALICE Main Application
 
 FastAPI application providing OpenAI-compatible endpoints for
-Stable Diffusion image generation.
+Stable Diffusion image generation and audio synthesis.
 """
 
 import asyncio
@@ -454,7 +454,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ALICE",
-    description="Remote Stable Diffusion Service with OpenAI-compatible API",
+    description="Remote Stable Diffusion and audio generation service with OpenAI-compatible API",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",

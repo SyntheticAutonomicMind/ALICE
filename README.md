@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: CC-BY-NC-4.0 -->
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025 Andrew Wyatt (Fewtarius) -->
 
-# ALICE - Artificial Latent Image Composition Engine
+# ALICE - Artificial Latent Interpretive Creation Engine
 
-**Local AI image generation that runs on your hardware. No subscription, no cloud uploads, no per-image cost.**
+**Local AI image and audio generation that runs on your hardware. No subscription, no cloud uploads, no per-image or per-track cost.**
 
-I built ALICE for fun. I wanted to generate images on my own hardware without paying per image or uploading prompts to someone else's server. ALICE is a standalone Stable Diffusion service with a web interface, an OpenAI-compatible API, and native integration with SAM. Your prompts and images never leave your hardware.
+I built ALICE for fun. I wanted to generate images and music on my own hardware without paying per image or track and without uploading prompts to someone else's server. ALICE is a standalone Stable Diffusion and audio service with a web interface, an OpenAI-compatible API, and native integration with SAM. Your prompts and media never leave your hardware.
 
-Use ALICE on its own through the web interface, connect it to SAM for image generation, or integrate it with any client that supports the OpenAI image API.
+Use ALICE on its own through the web interface, connect it to SAM for image or music generation, or integrate it with any client that supports the OpenAI image or audio API.
 
 ALICE is part of [Synthetic Autonomic Mind](https://github.com/SyntheticAutonomicMind).
 

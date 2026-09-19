@@ -19,8 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class GeneratorService:
-    """
-    Image generation service (backward-compatible wrapper).
+    """Media generation service (backward-compatible wrapper).
     
     This class maintains the same public API as the original GeneratorService
     but delegates all work to a pluggable backend (PyTorch, Vulkan, etc.).
