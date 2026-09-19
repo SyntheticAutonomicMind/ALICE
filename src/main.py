@@ -167,6 +167,7 @@ async def lifespan(app: FastAPI):
         max_concurrent_generations=config.generation.max_concurrent,
         max_cached_models=config.generation.max_cached_models,
         vram_evict_threshold_gb=config.generation.vram_evict_threshold_gb,
+        max_cpu_cached_models=config.generation.max_cpu_cached_models,
     )
     download_manager = DownloadManager(
         models_dir=config.models.directory,
@@ -1127,6 +1128,9 @@ async def get_cached_models(access: AccessLevel = Depends(require_access_level(A
         "cached_models": cached,
         "count": len(cached),
         "max_cached": config.generation.max_cached_models if config else 2,
+        "max_cpu_cached": config.generation.max_cpu_cached_models if config else 8,
+        "cpu_cached_models": getattr(generator, 'cpu_cached_models', []),
+        "cpu_cached_count": len(getattr(generator, 'cpu_cached_models', [])),
         "current_model": generator.current_model,
     }
 
@@ -3358,6 +3362,10 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
             "enable_mmap": generation_cfg.get("enable_mmap", False),
             "keep_clip_on_cpu": generation_cfg.get("keep_clip_on_cpu", False),
             "circular": generation_cfg.get("circular", False),
+            "cancel_on_disconnect": generation_cfg.get("cancel_on_disconnect", False),
+            "max_cached_models": generation_cfg.get("max_cached_models", 2),
+            "vram_evict_threshold_gb": generation_cfg.get("vram_evict_threshold_gb", 2.0),
+            "max_cpu_cached_models": generation_cfg.get("max_cpu_cached_models", 8),
         },
         "storage": {
             "images_directory": str(storage_cfg.get("images_directory", "./images")),
@@ -3928,7 +3936,7 @@ async def create_audio_generation(
         raise HTTPException(status_code=500, detail=f"Audio generation failed: {exc}")
     finally:
         try:
-            cancellation_registry.discard(request_id)
+            cancellation_registry.unregister(request_id)
         except Exception:
             pass
 

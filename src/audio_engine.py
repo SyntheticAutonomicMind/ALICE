@@ -261,31 +261,27 @@ class ALICEAudioEngine:
         )
         logger.debug("Full prompt: %r", prompt)
 
-        # The diffusion loop.  We use the modern device-aware autocast
-        # instead of the deprecated torch.cuda.amp.autocast so this also
-        # works on CPU and MPS (the latter is uncommon for audio but
-        # harmless).
-        amp_enabled = (self.device.type == "cuda") and (self.dtype == torch.float16)
+        # The diffusion loop.  The model weights are already loaded in the
+        # correct dtype (torch_dtype=self.dtype), so we do NOT wrap the
+        # call in torch.amp.autocast.  On AMD ROCm, autocast with float16
+        # corrupts the CLAP text encoder's embeddings, causing the generated
+        # audio to not match the prompt.  The model dtype is already set
+        # correctly at load time — autocast is redundant and harmful here.
         with torch.inference_mode():
-            with torch.amp.autocast(
-                device_type=self.device.type,
-                dtype=self.dtype,
-                enabled=amp_enabled,
-            ):
-                from stable_audio_tools.inference.generation import generate_diffusion_cond
+            from stable_audio_tools.inference.generation import generate_diffusion_cond
 
-                latents = generate_diffusion_cond(
-                    self.model,
-                    steps=steps,
-                    cfg_scale=cfg_scale,
-                    conditioning=conditioning,
-                    sample_size=sample_size,
-                    device=self.device,
-                    sigma_min=0.3,
-                    sigma_max=500.0,
-                    sampler_type="dpmpp-3m-sde",
-                    seed=seed,
-                )
+            latents = generate_diffusion_cond(
+                self.model,
+                steps=steps,
+                cfg_scale=cfg_scale,
+                conditioning=conditioning,
+                sample_size=sample_size,
+                device=self.device,
+                sigma_min=0.3,
+                sigma_max=500.0,
+                sampler_type="dpmpp-3m-sde",
+                seed=seed,
+            )
 
         # The VAE decode is the part that historically hangs on AMD gfx1103.
         # Mirror the image backend knob: decode on CPU when requested.
@@ -335,12 +331,11 @@ class ALICEAudioEngine:
             output_path.name, elapsed, output_path.stat().st_size / (1024 * 1024),
         )
 
-        # Free unused intermediates aggressively.  The model itself stays
-        # loaded (the backend decides when to unload).
+        # Free unused intermediates.  The model itself stays loaded
+        # (the backend decides when to unload).  We do NOT call
+        # gc.collect()/empty_cache() here — the AudioBackend.unload()
+        # method handles cleanup after generation.
         del latents, audio
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
         return output_path
 
@@ -714,6 +709,19 @@ class MiniMaxMusic3Engine:
         generator.manual_seed(int(seed))
 
         start = time.time()
+
+        # Pre-process lyrics: the pipeline's _normalize_lyrics silently
+        # drops text on the same line as a [tag].  Splitting tag+text
+        # lines preserves the user's lyric content.  Empty lyrics
+        # (instrumental) become "[instrumental]" because the pipeline
+        # raises ValueError on a blank string.
+        # NOTE: _preprocess_lyrics must be called BEFORE the log statement
+        # below, which references len(processed_lyrics).  Calling it after
+        # was a NameError that broke all MiniMax-Music3 generations.
+        processed_lyrics = _preprocess_lyrics(lyrics)
+        if processed_lyrics != lyrics:
+            logger.debug("Lyrics preprocessed for MiniMax pipeline: %r -> %r", lyrics, processed_lyrics)
+
         logger.info(
             "Generating music: prompt_len=%d lyrics_len=%d duration=%.1fs steps=%d seed=%d",
             len(prompt), len(processed_lyrics), audio_duration, num_inference_steps, seed,
@@ -727,15 +735,6 @@ class MiniMaxMusic3Engine:
         #   generator: torch generator
         #   num_inference_steps: flow-matching Euler steps per chunk
         #   output_type: 'np' for ndarray, 'pt' for tensor
-        #
-        # Pre-process lyrics: the pipeline's _normalize_lyrics silently
-        # drops text on the same line as a [tag].  Splitting tag+text
-        # lines preserves the user's lyric content.  Empty lyrics
-        # (instrumental) become "[instrumental]" because the pipeline
-        # raises ValueError on a blank string.
-        processed_lyrics = _preprocess_lyrics(lyrics)
-        if processed_lyrics != lyrics:
-            logger.debug("Lyrics preprocessed for MiniMax pipeline: %r -> %r", lyrics, processed_lyrics)
 
         result = self.pipeline(
             prompt=prompt,
@@ -747,11 +746,17 @@ class MiniMaxMusic3Engine:
         )
 
         # Free GPU memory used by the AR language model and intermediate
-        # latents immediately — on limited-VRAM cards the Qwen3 KV cache
-        # and flow-matching activations can keep the GPU at capacity.
-        gc.collect()
+        # latents.  On AMD ROCm, empty_cache() can hang if called without
+        # prior synchronization — sync first, then release.
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            try:
+                torch.cuda.empty_cache()
+            except Exception as e:
+                logger.warning("empty_cache failed after MiniMax generation: %s", e)
 
         # The pipeline returns a numpy ndarray: shape (channels, samples) float32.
         # Sample rate is exposed on the pipeline; upstream card says 32kHz but
@@ -790,9 +795,8 @@ class MiniMaxMusic3Engine:
         # Attempt MP3 conversion using ffmpeg subprocess (pydub not installed).
         mp3_path = self._try_convert_to_mp3(output_path)
 
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        # Backend cleanup handles gc.collect()/empty_cache() after
+        # the AudioBackend.unload() call, so we don't duplicate it here.
 
         return mp3_path if mp3_path else output_path
 

@@ -93,6 +93,7 @@ def get_default_config() -> Dict[str, Any]:
             "cancel_on_disconnect": False,
             "max_cached_models": 2,
             "vram_evict_threshold_gb": 2.0,
+            "max_cpu_cached_models": 8,
         },
         "storage": {
             "images_directory": "./images",

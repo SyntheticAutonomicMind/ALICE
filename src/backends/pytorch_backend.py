@@ -48,22 +48,25 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _CachedModel:
-    """Holds a cached model's pipeline and associated per-model state.
+   """Holds a cached model's pipeline and associated per-model state.
 
-    When a model is loaded into the cache, all its state (pipeline,
-    CompelForSDXL instance, compiled UNet, etc.) is stored here.
-    The "active" instance variables on PyTorchBackend are kept in sync
-    with whichever _CachedModel is currently most-recently-used.
-    """
-    pipeline: Any
-    model_path: Path
-    model_type: str
-    device_map_active: bool
-    is_single_file_sdxl: bool
-    compel: Optional[Any] = None
-    unet_compiled: bool = False
-    original_unet: Optional[Any] = None
-    loaded_at: float = field(default_factory=time.time)
+   When a model is loaded into the cache, all its state (pipeline,
+   CompelForSDXL instance, compiled UNet, etc.) is stored here.
+   The "active" instance variables on PyTorchBackend are kept in sync
+   with whichever _CachedModel is currently most-recently-used.
+   """
+   pipeline: Any
+   model_path: Path
+   model_type: str
+   device_map_active: bool
+   is_single_file_sdxl: bool
+   compel: Optional[Any] = None
+   unet_compiled: bool = False
+   original_unet: Optional[Any] = None
+   loaded_at: float = field(default_factory=time.time)
+   # Estimated VRAM footprint (bytes) after loading.  Used to decide
+   # how many models can coexist in GPU memory without guessing.
+   vram_footprint_bytes: int = 0
 
 # AMD ROCm gfx1103 (Phoenix APU) compatibility settings
 # CRITICAL: MIOPEN_DEBUG_FIND_ALL=0 prevents GPU hangs during MIOpen solver search
@@ -512,6 +515,7 @@ class PyTorchBackend(BaseBackend):
         max_concurrent_generations: int = 1,
         max_cached_models: int = 2,
         vram_evict_threshold_gb: float = 2.0,
+        max_cpu_cached_models: int = 8,
     ):
         """
         Initialize generator service.
@@ -538,6 +542,7 @@ class PyTorchBackend(BaseBackend):
             max_concurrent_generations: Maximum concurrent generation requests
             max_cached_models: Maximum models to keep in GPU memory simultaneously (LRU eviction)
             vram_evict_threshold_gb: Free VRAM (GB) below which cached models are evicted (0=disabled)
+            max_cpu_cached_models: Max models to keep in CPU RAM after VRAM eviction
         """
         self.images_dir = Path(images_dir)
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -582,6 +587,17 @@ class PyTorchBackend(BaseBackend):
         self._model_cache: "OrderedDict[str, _CachedModel]" = OrderedDict()
         self._max_cached_models: int = max_cached_models
         self._vram_evict_threshold_gb: float = vram_evict_threshold_gb
+        
+        # CPU-offload cache: models evicted from VRAM are stored in CPU RAM
+        # for fast reload without hitting disk.  On systems with 112GB of RAM,
+        # keeping several full pipelines in CPU memory is trivial.
+        self._cpu_cache: "OrderedDict[str, _CachedModel]" = OrderedDict()
+        self._max_cpu_cached_models: int = max_cpu_cached_models
+        
+        # Periodic gc counter — full gc.collect() runs every N generations,
+        # not every generation, to avoid blocking the event loop.
+        self._gc_counter: int = 0
+        self._gc_interval: int = 5
         
         # Concurrency control
         self._model_lock: asyncio.Lock = asyncio.Lock()  # Protects model loading operations
@@ -638,6 +654,11 @@ class PyTorchBackend(BaseBackend):
     def loaded_models(self) -> List[str]:
         """Get list of all cached model paths (most recently used first)."""
         return list(reversed(self._model_cache.keys()))
+
+    @property
+    def cpu_cached_models(self) -> List[str]:
+        """Get list of models warm in CPU RAM (evicted from VRAM)."""
+        return list(reversed(self._cpu_cache.keys()))
     
     def get_queue_depth(self) -> int:
         """Get current number of pending generation requests."""
@@ -986,32 +1007,56 @@ class PyTorchBackend(BaseBackend):
         threshold_bytes = int(self._vram_evict_threshold_gb * (1024 ** 3))
         return free < threshold_bytes
     
-    def _evict_lru(self, count: int = 1) -> int:
-        """Evict least-recently-used models from the cache.
-        
+    def _evict_lru(self, count: int = 1, move_to_cpu: bool = True) -> int:
+        """Evict least-recently-used models from the GPU VRAM cache.
+
+        When ``move_to_cpu`` is True (the default) evicted models are
+        offloaded to CPU RAM instead of being deleted, so they can be
+        quickly reloaded to VRAM without re-reading from disk.  On systems
+        with ample system RAM (e.g. 112 GB APU) this keeps many models
+        warm in CPU memory while only the active model occupies VRAM.
+
         Args:
-            count: Number of LRU models to evict (may evict fewer if cache is smaller)
-        
+            count: Number of LRU models to evict (may evict fewer).
+            move_to_cpu: If True, store evicted models in the CPU cache
+                instead of deleting them outright.
+
         Returns:
-            Number of models actually evicted
+            Number of models actually evicted from VRAM.
         """
         evicted = 0
         for _ in range(min(count, len(self._model_cache))):
             # OrderedDict: first item is LRU
             lru_key, lru_model = self._model_cache.popitem(last=False)
             logger.info("Evicting LRU cached model: %s", lru_model.model_path.name)
-            
-            # Clean up the evicted model's resources
-            del lru_model.pipeline
-            if lru_model.compel is not None:
-                del lru_model.compel
-                lru_model.compel = None
-            
+
+            if move_to_cpu:
+                self._move_model_to_cpu(lru_key, lru_model)
+            else:
+                del lru_model.pipeline
+                if lru_model.compel is not None:
+                    del lru_model.compel
+                    lru_model.compel = None
+
             evicted += 1
-        
+
         if evicted > 0 and self._device == "cuda":
-            torch.cuda.empty_cache()
-        
+            # Sync + empty_cache in a thread to avoid blocking the event
+            # loop on AMD ROCm (HIP allocator can deadlock).
+            def _evict_cleanup():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+                try:
+                    torch.cuda.empty_cache()
+                except Exception as e:
+                    logger.warning("empty_cache failed during eviction: %s", e)
+            try:
+                asyncio.create_task(asyncio.to_thread(_evict_cleanup))
+            except RuntimeError:
+                pass
+
         # If we evicted the active model, set a new active one
         if self._current_model not in self._model_cache and len(self._model_cache) > 0:
             self._set_active(next(reversed(self._model_cache)))
@@ -1025,8 +1070,71 @@ class PyTorchBackend(BaseBackend):
             self._compel = None
             self._unet_compiled = False
             self._original_unet = None
-        
+
         return evicted
+
+    def _move_model_to_cpu(self, model_key: str, cached: _CachedModel) -> None:
+        """Offload a cached model's pipeline to CPU RAM.
+
+        The pipeline is moved to CPU, freeing GPU VRAM while keeping the
+        weights in system RAM for fast reload.  On systems with ample RAM
+        (e.g. 112 GB APU) this lets dozens of models stay warm.
+        """
+        logger.info("Offloading model to CPU RAM: %s", cached.model_path.name)
+        try:
+            # Move pipeline to CPU — free GPU memory while keeping weights
+            # in system RAM for fast reload.
+            cached.pipeline = cached.pipeline.to("cpu")
+            # Free compel and compiled unet references (GPU-specific)
+            if cached.compel is not None:
+                del cached.compel
+                cached.compel = None
+            if cached.original_unet is not None:
+                del cached.original_unet
+                cached.original_unet = None
+            cached.unet_compiled = False
+            cached.vram_footprint_bytes = 0  # No longer in VRAM
+        except Exception as e:
+            logger.warning("Failed to offload %s to CPU: %s. Deleting instead.",
+                           cached.model_path.name, e)
+            del cached.pipeline
+            if cached.compel is not None:
+                del cached.compel
+                cached.compel = None
+            cached.pipeline = None
+            return
+
+        # Enforce CPU cache size limit
+        self._cpu_cache[model_key] = cached
+        self._cpu_cache.move_to_end(model_key)
+        while len(self._cpu_cache) > self._max_cpu_cached_models:
+            cpu_key, cpu_model = self._cpu_cache.popitem(last=False)
+            logger.info("Evicting CPU-cached model (CPU cache full): %s",
+                        cpu_model.model_path.name)
+            if cpu_model.pipeline is not None:
+                del cpu_model.pipeline
+
+    def _move_model_to_gpu(self, model_key: str) -> bool:
+        """Attempt to reload a CPU-cached model into GPU VRAM.
+
+        Returns True if the model was found in the CPU cache and moved to GPU,
+        False if it was not in the CPU cache (caller should load from disk).
+        """
+        if model_key not in self._cpu_cache:
+            return False
+
+        cached = self._cpu_cache.pop(model_key)
+        logger.info("Reloading CPU-cached model to GPU: %s", cached.model_path.name)
+        try:
+            cached.pipeline = cached.pipeline.to(self._device)
+            cached.vram_footprint_bytes = self._estimate_vram_footprint(cached.pipeline)
+        except Exception as e:
+            logger.warning("Failed to reload %s to GPU: %s. Will load from disk.",
+                           cached.model_path.name, e)
+            del cached.pipeline
+            return False
+
+        return True
     
     def _set_active(self, model_key: str) -> None:
         """Set the active model state from the cache.
@@ -1058,6 +1166,68 @@ class PyTorchBackend(BaseBackend):
         cached.original_unet = self._original_unet
         cached.loaded_at = time.time()
 
+    def _estimate_vram_footprint(self, pipeline: Any) -> int:
+        """Estimate the VRAM footprint of a loaded pipeline in bytes."""
+        if self._device == "cuda":
+            try:
+                return torch.cuda.memory_allocated()
+            except Exception:
+                pass
+        return 0
+
+    def _estimate_model_vram(self, model_path: Path, dtype: Any) -> int:
+        """Estimate VRAM needed for a model based on file size and dtype.
+
+        Falls back to a heuristic when the model isn't loaded yet.
+        File size ≈ weight size; VRAM footprint ≈ 1.3x (VAE, scheduler,
+        activation buffers).
+        """
+        if model_path.is_file():
+            file_bytes = model_path.stat().st_size
+            return int(file_bytes * 1.3)
+        elif model_path.is_dir():
+            total = sum(f.stat().st_size for f in model_path.rglob("*") if f.is_file())
+            return int(total * 1.3)
+        return 0
+
+    async def _cleanup_after_generation(self) -> None:
+        """Non-blocking GPU memory cleanup after a generation.
+
+        On AMD ROCm, both gc.collect() and torch.cuda.empty_cache() can
+        block the event loop for seconds or deadlock against the HIP
+        command processor when called synchronously.  Runs cleanup in a
+        thread pool with a synchronization barrier and timeout.
+
+        gc.collect() runs only every _gc_interval generations;
+        torch.cuda.empty_cache() runs every time.
+        """
+        self._gc_counter += 1
+        do_full_gc = (self._gc_counter % self._gc_interval == 0)
+
+        if self._device != "cuda":
+            if do_full_gc:
+                await asyncio.to_thread(gc.collect)
+            return
+
+        def _cleanup_sync():
+            try:
+                torch.cuda.synchronize()
+            except Exception as e:
+                logger.debug("GPU sync failed during cleanup: %s", e)
+            if do_full_gc:
+                gc.collect()
+            try:
+                torch.cuda.empty_cache()
+            except Exception as e:
+                logger.warning("torch.cuda.empty_cache() failed: %s", e)
+
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(_cleanup_sync), timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("GPU cleanup timed out after 30s, skipping")
+
     async def load_model(self, model_path: Path) -> None:
         """
         Load a model into memory.
@@ -1082,7 +1252,7 @@ class PyTorchBackend(BaseBackend):
             logger.debug("Model already cached: %s", model_key)
             return
 
-        # Slow path: need to load from disk
+        # Slow path: need to load from disk or CPU cache
         # Use model_lock to serialize model loading across all requests
         async with self._model_lock:
             # Check again inside lock (another request might have loaded it)
@@ -1092,33 +1262,85 @@ class PyTorchBackend(BaseBackend):
                 logger.debug("Model already cached by concurrent request: %s", model_key)
                 return
 
+            # Check CPU cache — a previously evicted model may be warm in RAM
+            if model_key in self._cpu_cache:
+                logger.info("Model found in CPU cache, reloading to GPU: %s", model_key)
+                cached_cpu = self._cpu_cache.pop(model_key)
+                try:
+                    cached_cpu.pipeline = cached_cpu.pipeline.to(self._device)
+                    cached_cpu.vram_footprint_bytes = self._estimate_vram_footprint(cached_cpu.pipeline)
+                    self._model_cache[model_key] = cached_cpu
+                    self._set_active(model_key)
+                    self._apply_memory_optimizations()
+                    if self._current_model_type == "sdxl":
+                        try:
+                            from compel import CompelForSDXL
+                            self._compel = CompelForSDXL(self._pipeline, device=self._device)
+                        except Exception as e:
+                            logger.warning("Failed to re-init CompelForSDXL: %s", e)
+                    self._sync_active_to_cache(model_key)
+                    logger.info("Model reloaded from CPU cache: %s", model_key)
+                    return
+                except Exception as e:
+                    logger.warning("CPU->GPU reload failed for %s: %s. Loading from disk.",
+                                   model_path.name, e)
+                    self._cpu_cache.pop(model_key, None)
+                    if cached_cpu.pipeline is not None:
+                        del cached_cpu.pipeline
+
             logger.info("Loading model: cache_size=%d, max=%d, requested=%s",
                         len(self._model_cache), self._max_cached_models, model_key)
 
-            # Evict LRU models if cache is at capacity
-            if len(self._model_cache) >= self._max_cached_models:
-                logger.info("Cache full (%d/%d), evicting LRU model", len(self._model_cache), self._max_cached_models)
-                self._evict_lru(1)
+            # Estimate VRAM needed for the new model
+            dtype = torch.float16
+            if self.force_bfloat16:
+                dtype = torch.bfloat16
+            elif self.force_float32 or self._device == "cpu":
+                dtype = torch.float32
+            elif self._device == "mps":
+                dtype = torch.float32
+            estimated_vram = self._estimate_model_vram(model_path, dtype)
+            logger.info("Estimated VRAM for %s: %.1f GB", model_path.name,
+                        estimated_vram / (1024**3))
 
-            # Additional VRAM-based eviction: if free VRAM is below threshold,
-            # evict more LRU models to make room
-            while self._should_evict_vram() and len(self._model_cache) > 0:
-                logger.info("VRAM below threshold (%.1f GB), evicting LRU model", self._vram_evict_threshold_gb)
-                evicted = self._evict_lru(1)
-                if evicted == 0:
-                    break
-                # Stop evicting if we'd go below 1 cached model
-                if len(self._model_cache) == 0:
-                    break
+            # Adaptive eviction: evict LRU models until the new model fits
+            # or we hit the max_cached_models limit.
+            while len(self._model_cache) >= self._max_cached_models:
+                logger.info("Cache full (%d/%d), evicting LRU model",
+                            len(self._model_cache), self._max_cached_models)
+                self._evict_lru(1, move_to_cpu=True)
+
+            # VRAM-based eviction: evict more if free VRAM is below threshold
+            free_vram = self._get_free_vram_bytes()
+            if free_vram is not None and self._vram_evict_threshold_gb > 0:
+                threshold_bytes = int(self._vram_evict_threshold_gb * (1024**3))
+                # Evict if even after freeing everything we wouldn't have
+                # enough room for the new model + threshold margin.
+                while free_vram is not None and (
+                    free_vram < threshold_bytes
+                    or (free_vram < estimated_vram + threshold_bytes
+                        and len(self._model_cache) > 0)
+                ) and len(self._model_cache) > 0:
+                    logger.info("VRAM insufficient (free=%.1f GB, need=%.1f GB), "
+                                "evicting LRU model",
+                                free_vram / (1024**3),
+                                (estimated_vram + threshold_bytes) / (1024**3))
+                    evicted = self._evict_lru(1, move_to_cpu=True)
+                    if evicted == 0:
+                        break
+                    free_vram = self._get_free_vram_bytes()
 
             # Load model in thread pool
             logger.info("Loading model in thread pool: %s", model_path)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             pipeline, model_type, device_map_applied, is_single_file_sdxl = await loop.run_in_executor(
                 None,
                 self._load_model_blocking,
                 model_path
             )
+
+            # Estimate actual VRAM footprint after loading
+            vram_footprint = self._estimate_vram_footprint(pipeline)
 
             # Create cached model entry
             cached = _CachedModel(
@@ -1127,6 +1349,7 @@ class PyTorchBackend(BaseBackend):
                 model_type=model_type,
                 device_map_active=device_map_applied,
                 is_single_file_sdxl=is_single_file_sdxl,
+                vram_footprint_bytes=vram_footprint,
             )
             self._model_cache[model_key] = cached
 
@@ -1293,12 +1516,13 @@ class PyTorchBackend(BaseBackend):
             raise
     async def _unload_model_internal(self) -> None:
         """Unload all cached models without acquiring lock (internal use when lock already held)."""
-        if len(self._model_cache) == 0:
+        if len(self._model_cache) == 0 and len(self._cpu_cache) == 0:
             return
 
-        logger.info("Unloading %d cached model(s)", len(self._model_cache))
+        logger.info("Unloading %d VRAM model(s), %d CPU model(s)",
+                    len(self._model_cache), len(self._cpu_cache))
 
-        # Clear all cached models
+        # Clear all VRAM cached models
         for model_key, cached in self._model_cache.items():
             if cached.compel is not None:
                 del cached.compel
@@ -1306,6 +1530,15 @@ class PyTorchBackend(BaseBackend):
             del cached.pipeline
 
         self._model_cache.clear()
+
+        # Clear CPU cache
+        for model_key, cached in self._cpu_cache.items():
+            if cached.compel is not None:
+                del cached.compel
+                cached.compel = None
+            if cached.pipeline is not None:
+                del cached.pipeline
+        self._cpu_cache.clear()
 
         # Reset active model state
         self._pipeline = None
@@ -1318,9 +1551,21 @@ class PyTorchBackend(BaseBackend):
         self._unet_compiled = False
         self._original_unet = None
 
-        # Clear GPU cache
+        # Clear GPU cache — run in thread to avoid blocking event loop
         if self._device == "cuda":
-            torch.cuda.empty_cache()
+            def _unload_cleanup():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+                try:
+                    torch.cuda.empty_cache()
+                except Exception as e:
+                    logger.warning("torch.cuda.empty_cache() failed during unload: %s", e)
+            try:
+                asyncio.create_task(asyncio.to_thread(_unload_cleanup))
+            except RuntimeError:
+                pass
 
         logger.info("All models unloaded")
     
@@ -1338,19 +1583,41 @@ class PyTorchBackend(BaseBackend):
 
             # Per-model eviction: remove only the requested cached entry
             target_key = str(Path(model_path))
-            if target_key not in self._model_cache:
+            evicted_from_vram = target_key in self._model_cache
+            evicted_from_cpu = target_key in self._cpu_cache
+
+            if evicted_from_vram:
+                cached = self._model_cache.pop(target_key)
+                if cached.compel is not None:
+                    del cached.compel
+                    cached.compel = None
+                del cached.pipeline
+            if evicted_from_cpu:
+                cached = self._cpu_cache.pop(target_key)
+                if cached.compel is not None:
+                    del cached.compel
+                    cached.compel = None
+                if cached.pipeline is not None:
+                    del cached.pipeline
+
+            if not evicted_from_vram and not evicted_from_cpu:
                 logger.debug("Model not in cache, nothing to evict: %s", target_key)
                 return
 
-            logger.info("Evicting cached model: %s", Path(model_path).name)
-            cached = self._model_cache.pop(target_key)
-            if cached.compel is not None:
-                del cached.compel
-                cached.compel = None
-            del cached.pipeline
-
             if self._device == "cuda":
-                torch.cuda.empty_cache()
+                def _per_model_cleanup():
+                    try:
+                        torch.cuda.synchronize()
+                    except Exception:
+                        pass
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception as e:
+                        logger.warning("torch.cuda.empty_cache() failed: %s", e)
+                try:
+                    asyncio.create_task(asyncio.to_thread(_per_model_cleanup))
+                except RuntimeError:
+                    pass
 
             # If we evicted the active model, point active state at another cached model
             # or reset it to None if the cache is empty.
@@ -1732,7 +1999,7 @@ class PyTorchBackend(BaseBackend):
                             self._pipeline.scheduler = original_scheduler
                 
                 # Run generation
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 try:
                     result = await loop.run_in_executor(None, _generate)
                 except CancellationError:
@@ -1813,13 +2080,10 @@ class PyTorchBackend(BaseBackend):
         finally:
             # Free GPU memory after each generation to prevent accumulation
             # that leads to crashes after ~20+ images or during model switching.
-            # torch.cuda.empty_cache() releases unused cached blocks from the
-            # caching allocator (intermediate tensors, VAE outputs, etc.).
-            # gc.collect() breaks reference cycles in diffusers/dynamo objects
-            # that prevent tensor deallocation.
-            if self._device == "cuda":
-                torch.cuda.empty_cache()
-            gc.collect()
+            # Runs in a thread pool to avoid blocking the event loop; on AMD
+            # ROCm, gc.collect() and torch.cuda.empty_cache() can deadlock
+            # when called synchronously.
+            await self._cleanup_after_generation()
             
             # Always decrement queue counter, even on error
             async with self._queue_lock:

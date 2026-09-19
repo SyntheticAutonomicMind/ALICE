@@ -84,6 +84,7 @@ class GenerationConfig(BaseModel):
     # Multi-model caching (PyTorch backend only)
     max_cached_models: int = Field(default=2, ge=1, le=16, description="Maximum number of models to keep in GPU memory simultaneously (PyTorch backend only). When limit is reached, least-recently-used model is evicted.")
     vram_evict_threshold_gb: float = Field(default=2.0, ge=0.0, description="Minimum free VRAM in GB before evicting cached models (PyTorch backend only). Set to 0 to disable VRAM-based eviction (relies on max_cached_models only).")
+    max_cpu_cached_models: int = Field(default=8, ge=0, le=64, description="Maximum models to keep in CPU RAM after VRAM eviction (PyTorch backend only). 0 disables CPU offload entirely. Set high (e.g. 16) to keep many models warm in system RAM for instant reload to GPU.")
 
 
 class StorageConfig(BaseModel):

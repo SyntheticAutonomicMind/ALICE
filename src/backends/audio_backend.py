@@ -341,15 +341,34 @@ class AudioBackend:
         return self._engine
 
     async def unload(self) -> None:
-        """Drop the loaded model and free VRAM."""
+        """Drop the loaded model and free VRAM.
+
+        Cleanup runs in a thread pool to avoid blocking the event loop
+        on AMD ROCm, where gc.collect() and torch.cuda.empty_cache()
+        can both hang.
+        """
         async with self._engine_lock:
             if self._engine is not None:
                 logger.info("AudioBackend unloading engine")
                 self._engine.unload_model()
                 self._engine = None
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+
+        def _cleanup_sync():
+            gc.collect()
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+                try:
+                    torch.cuda.empty_cache()
+                except Exception as e:
+                    logger.warning("empty_cache failed during audio unload: %s", e)
+
+        try:
+            await asyncio.wait_for(asyncio.to_thread(_cleanup_sync), timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.warning("Audio backend cleanup timed out, skipping")
 
     # -- generation ----------------------------------------------------------
 

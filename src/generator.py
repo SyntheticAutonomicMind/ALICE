@@ -60,6 +60,7 @@ class GeneratorService:
         max_concurrent_generations: int = 1,
         max_cached_models: int = 2,
         vram_evict_threshold_gb: float = 2.0,
+        max_cpu_cached_models: int = 8,
     ):
         """
         Initialize generator service with backend.
@@ -117,6 +118,7 @@ class GeneratorService:
             max_concurrent_generations=max_concurrent_generations,
             max_cached_models=max_cached_models,
             vram_evict_threshold_gb=vram_evict_threshold_gb,
+            max_cpu_cached_models=max_cpu_cached_models,
         )
         
         logger.info("Generator initialized with backend: %s", self._backend.get_backend_name())

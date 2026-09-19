@@ -42,6 +42,7 @@ generation:
   cancel_on_disconnect: false
   max_cached_models: 3
   vram_evict_threshold_gb: 2.0
+  max_cpu_cached_models: 8
   enable_mmap: false
   keep_clip_on_cpu: false
   diffusion_conv_direct: false
