@@ -41,6 +41,26 @@ os.environ.setdefault("OMP_NUM_THREADS", str(_torch_threads))
 os.environ.setdefault("MKL_NUM_THREADS", str(_torch_threads))
 os.environ.setdefault("TORCH_NUM_THREADS", str(_torch_threads))
 
+# Enable Triton persistent kernel cache so torch.compile graphs survive
+# process restarts.  TRITON_CACHE_DIR was already set above to a writable
+# location; here we enable the persistent cache that stores compiled
+# kernels keyed by source hash.
+os.environ.setdefault("TRITON_CACHE_PERSISTENT", "1")
+# Triton codegen parallelizes across threads; match our torch thread budget.
+os.environ.setdefault("TRITON_NUM_THREADS", str(_torch_threads))
+
+# Set TORCH_HOME so torch.hub (and thus the Inductor cache) write to a
+# writable location under systemd's ProtectHome=yes.  Under the alice
+# user, HOME=/opt/alice but ProtectHome may block writes there.
+_torch_cache_dir = Path("/var/lib/alice/.cache/torch")
+if "TORCH_HOME" not in os.environ:
+    try:
+        _torch_cache_dir.mkdir(parents=True, exist_ok=True)
+        if os.access(_torch_cache_dir, os.W_OK):
+            os.environ["TORCH_HOME"] = str(_torch_cache_dir)
+    except (PermissionError, OSError):
+        pass
+
 import torch
 from PIL import Image
 
