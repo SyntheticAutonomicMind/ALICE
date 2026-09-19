@@ -807,18 +807,41 @@ class PyTorchBackend(BaseBackend):
                     except (ValueError, IOError):
                         pass
                 
-                # Memory usage
-                mem_info_file = device_dir / "mem_info_vram_used"
-                mem_total_file = device_dir / "mem_info_vram_total"
-                
-                if mem_info_file.exists() and mem_total_file.exists():
+                # Memory usage — on AMD APUs the "VRAM" is shared system RAM.
+                # sysfs reports the stolen VDRAM separately from GTT; the
+                # real total available to the GPU is vram_total + gtt_total.
+                mem_vram_used = device_dir / "mem_info_vram_used"
+                mem_vram_total = device_dir / "mem_info_vram_total"
+                mem_gtt_used = device_dir / "mem_info_gtt_used"
+                mem_gtt_total = device_dir / "mem_info_gtt_total"
+
+                vram_used = vram_total = gtt_used = gtt_total = 0
+                has_vram = mem_vram_used.exists() and mem_vram_total.exists()
+                has_gtt = mem_gtt_used.exists() and mem_gtt_total.exists()
+
+                if has_vram:
                     try:
-                        used = int(mem_info_file.read_text().strip())
-                        total = int(mem_total_file.read_text().strip())
-                        stats["memory_used"] = f"{used / (1024**3):.1f} GB"
-                        stats["memory_total"] = f"{total / (1024**3):.1f} GB"
+                        vram_used = int(mem_vram_used.read_text().strip())
+                        vram_total = int(mem_vram_total.read_text().strip())
                     except (ValueError, IOError):
                         pass
+                if has_gtt:
+                    try:
+                        gtt_used = int(mem_gtt_used.read_text().strip())
+                        gtt_total = int(mem_gtt_total.read_text().strip())
+                    except (ValueError, IOError):
+                        pass
+
+                # Combine VRAM + GTT for the total addressable GPU memory.
+                # On APs, this is the sum of dedicated VRAM and shared
+                # system RAM (GTT).  If only one is available, use that.
+                total = vram_total + gtt_total
+                used = vram_used + gtt_used
+                if total > 0:
+                    stats["memory_used"] = f"{used / (1024**3):.1f} GB"
+                    stats["memory_total"] = f"{total / (1024**3):.1f} GB"
+                    if "utilization" not in stats and total > 0:
+                        stats["utilization"] = min(1.0, used / total) if total > 0 else 0.0
                 
                 if stats:
                     return stats
@@ -982,17 +1005,34 @@ class PyTorchBackend(BaseBackend):
                 return int(vram_total) - int(vram_used)
         except Exception:
             pass
-        # Fallback: sysfs
+        # Fallback: sysfs — combine VRAM + GTT for APUs
         try:
             drm_path = Path("/sys/class/drm")
             for card_dir in sorted(drm_path.glob("card*")):
                 device_dir = card_dir / "device"
                 vendor_file = device_dir / "vendor"
                 if vendor_file.exists() and vendor_file.read_text().strip() == "0x1002":
-                    mem_used = (device_dir / "mem_info_vram_used")
-                    mem_total = (device_dir / "mem_info_vram_total")
-                    if mem_used.exists() and mem_total.exists():
-                        return int(mem_total.read_text().strip()) - int(mem_used.read_text().strip())
+                    vram_used = gtt_used = 0
+                    vram_total = gtt_total = 0
+                    for label, attr in [("vram_used", "mem_info_vram_used"),
+                                        ("vram_total", "mem_info_vram_total"),
+                                        ("gtt_used", "mem_info_gtt_used"),
+                                        ("gtt_total", "mem_info_gtt_total")]:
+                        f = device_dir / attr
+                        if f.exists():
+                            try:
+                                val = int(f.read_text().strip())
+                                if label == "vram_used": vram_used = val
+                                elif label == "vram_total": vram_total = val
+                                elif label == "gtt_used": gtt_used = val
+                                elif label == "gtt_total": gtt_total = val
+                            except (ValueError, IOError):
+                                pass
+                    # Total available = vram_total + gtt_total; used = vram_used + gtt_used
+                    total = vram_total + gtt_total
+                    used = vram_used + gtt_used
+                    if total > 0:
+                        return total - used
         except Exception:
             pass
         return None
