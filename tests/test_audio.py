@@ -454,6 +454,59 @@ def test_preprocess_lyrics_no_change_for_plain_text():
     assert _preprocess_lyrics(raw) == raw
 
 
+def test_instrumental_prompt_augmented():
+    """When [instrumental] lyrics are passed, the prompt gets an 'instrumental,
+    no vocals' cue so the MiniMax model doesn't generate vocals.
+
+    Per the MiniMax Music 3 prompting guide: 'For instrumental music, say so
+    explicitly and name the instrument carrying the lead melodic role.'
+    """
+    from src.audio_engine import MiniMaxMusic3Engine
+
+    # We test the logic by inspecting the processed prompt before the
+    # pipeline call.  Since the engine's generate() calls load_model()
+    # before we can check, we verify the augmentation via a mock.
+    engine = MiniMaxMusic3Engine(output_dir=Path("/tmp/test_audio_minimax"))
+    # Bypass model loading and pipeline import — we only want to test
+    # the prompt augmentation logic.
+    engine.load_model = MagicMock()
+    engine._initialized = True
+
+    # Mock the pipeline to capture the call args
+    captured = {}
+
+    def fake_call(**kwargs):
+        captured.update(kwargs)
+        import numpy as np
+        mock_result = MagicMock()
+        mock_result.audios = [np.zeros((2, 100))]
+        return mock_result
+
+    mock_pipeline = MagicMock()
+    mock_pipeline.sampling_rate = 44100
+    mock_pipeline.side_effect = fake_call
+    engine.pipeline = mock_pipeline
+
+    try:
+        engine.generate(
+            prompt="upbeat jazz fusion",
+            lyrics="[instrumental]",
+            audio_duration=10.0,
+            num_inference_steps=20,
+        )
+    except (AttributeError, TypeError, ValueError):
+        # We don't care about downstream errors — we just want to see the
+        # prompt that was passed to the pipeline.
+        pass
+
+    assert "instrumental" in captured.get("prompt", "").lower(), (
+        f"Prompt was not augmented for instrumental request: {captured.get('prompt', '')}"
+    )
+    assert "instrumental" in captured.get("lyrics", "").lower(), (
+        f"Lyrics should preserve [instrumental] tag: {captured.get('lyrics', '')}"
+    )
+
+
 def test_audio_models_list_includes_engine_and_lyrics_flags():
     """AudioModelInfo serialises engine and supports_lyrics flags."""
     from src.backends.audio_backend import AudioBackend

@@ -397,9 +397,18 @@ def _preprocess_lyrics(lyrics: Optional[str]) -> str:
 
     Empty or whitespace-only lyrics (including ``None``) are replaced with
     ``"[instrumental]"`` because the pipeline raises ``ValueError`` when
-    ``lyrics.strip()`` is falsy.
+    ``lyrics.strip()`` is falsy.  The literal marker ``[instrumental]`` (case-
+    insensitive, optionally bracketed) is also normalized so users can
+    explicitly request instrumental output without worrying about pipeline
+    validation.
     """
     if not lyrics or not lyrics.strip():
+        return "[instrumental]"
+
+    # Recognize explicit "instrumental" markers from the user and normalize
+    # them to "[instrumental]" so the pipeline treats them as vocal-free.
+    stripped = lyrics.strip().lower()
+    if stripped in ("[instrumental]", "instrumental", "[no vocals]", "[no vocal]"):
         return "[instrumental]"
 
     lines = []
@@ -721,6 +730,18 @@ class MiniMaxMusic3Engine:
         processed_lyrics = _preprocess_lyrics(lyrics)
         if processed_lyrics != lyrics:
             logger.debug("Lyrics preprocessed for MiniMax pipeline: %r -> %r", lyrics, processed_lyrics)
+
+        # If the user explicitly requested instrumental (or left lyrics empty),
+        # augment the caption with "instrumental version, no vocals" and name
+        # the lead instrument.  The prompting guide states: "For instrumental
+        # music, say so explicitly and name the instrument carrying the lead
+        # melodic role."  The [instrumental] structural tag is preserved in the
+        # lyrics (it's a valid section tag per the guide), but the caption must
+        # also state it — otherwise the Qwen3 AR model defaults to generating
+        # vocals based on genre defaults.
+        is_instrumental = processed_lyrics == "[instrumental]"
+        if is_instrumental:
+            prompt = f"{prompt.strip()}, instrumental version with no vocals, lead instrument: piano"
 
         logger.info(
             "Generating music: prompt_len=%d lyrics_len=%d duration=%.1fs steps=%d seed=%d",
