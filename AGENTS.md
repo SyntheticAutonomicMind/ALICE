@@ -8,11 +8,11 @@
 
 ## Project Overview
 
-**ALICE** (Artificial Latent Image Composition Engine) is a remote Stable Diffusion service built for privacy, performance, and simplicity.
+**ALICE** (Artificial Latent Interpretive Creation Engine) is a remote Stable Diffusion and audio generation service built for privacy, performance, and simplicity.
 
 - **Language:** Python 3.10+
 - **Architecture:** FastAPI web service with PyTorch/Diffusers backend
-- **Philosophy:** Privacy-first, local-first AI image generation
+- **Philosophy:** Privacy-first, local-first AI image and audio generation
 - **Part of:** Synthetic Autonomic Mind ecosystem
 
 **Key Technologies:**

@@ -51,7 +51,7 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 ARG GPU
 
 LABEL org.opencontainers.image.title="ALICE"
-LABEL org.opencontainers.image.description="Artificial Latent Image Composition Engine - Remote Stable Diffusion Service"
+LABEL org.opencontainers.image.description="Artificial Latent Interpretive Creation Engine - Remote Stable Diffusion and Audio Generation Service"
 LABEL org.opencontainers.image.url="https://github.com/SyntheticAutonomicMind/ALICE"
 LABEL org.opencontainers.image.source="https://github.com/SyntheticAutonomicMind/ALICE"
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"
