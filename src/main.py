@@ -324,20 +324,6 @@ async def lifespan(app: FastAPI):
                 "huggingface_hub may emit permission-denied warnings"
             )
     
-    # Pre-warm the first available model so the first generation request
-    # doesn't wait for model load. This eliminates the latency spike on
-    # the first request after startup or after a model cache eviction.
-    if models and generator is not None:
-        try:
-            first_model_path = Path(models[0].path)
-            logger.info("Pre-warming model on startup: %s", first_model_path)
-            _warm_start = time.time()
-            await generator.load_model(first_model_path)
-            _warm_elapsed = time.time() - _warm_start
-            logger.info("Pre-warmed model %s in %.2fs", first_model_path, _warm_elapsed)
-        except Exception as e:
-            logger.warning("Pre-warming failed (non-critical, first request will load on demand): %s", e)
-    
     # Start model cache sync if enabled
     sync_task = None
     if model_cache_service and config.model_cache.sync_on_startup:
