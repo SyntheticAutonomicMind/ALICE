@@ -222,13 +222,73 @@
             color: var(--primary);
             font-weight: 500;
         }
+
+        /* Music guide tables */
+        .music-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .music-table th,
+        .music-table td {
+            border: 1px solid var(--border);
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+        }
+
+        .music-table th {
+            color: var(--primary);
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .music-table td {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .music-table tbody tr:nth-child(even) {
+            background: rgba(0, 0, 0, 0.02);
+        }
+
+        .music-table code {
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+
+        .tag-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 0.5rem;
+            margin: 1rem 0;
+        }
+
+        .tag-item {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            text-align: center;
+        }
+
+        .tag-item.invalid {
+            border-color: #ef4444;
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.05);
+        }
     </style>
 </head>
 <body>
     <nav id="main-nav"></nav>
 <div class="guide-container">
         <h1>Ultimate Prompt Engineering Guide</h1>
-        <p>Master the art of crafting effective prompts for Stable Diffusion models using proven techniques and the Three-Act Structure.</p>
+        <p>Master the art of crafting effective prompts for Stable Diffusion and MiniMax Music 3 using proven techniques and professional best practices.</p>
 
         <!-- Core Principles Section -->
         <div class="principles-box">
@@ -283,6 +343,7 @@
             <button class="model-tab" data-tab="zimage">z-image-turbo</button>
             <button class="model-tab" data-tab="framework">Scene Development</button>
             <button class="model-tab" data-tab="advanced">Advanced Techniques</button>
+            <button class="model-tab" data-tab="music">MiniMax Music 3</button>
         </div>
 
         <!-- SD 1.5 Content -->
@@ -514,6 +575,601 @@
                 </div>
                 <p style="margin-top: 1.5rem; font-style: italic; color: var(--text-secondary);">
                     <strong>Remember:</strong> Prompt engineering is iterative. The perfect prompt often requires 5-15 generations with small adjustments. Document what changes produce what effects to build your personal prompting style.
+                </p>
+            </div>
+        </div>
+
+        <!-- MiniMax Music 3 Content -->
+        <div class="model-content" id="music-content">
+            <div class="section">
+                <h2 class="section-title">MiniMax Music 3</h2>
+                <p>MiniMax Music 3 is an open-weights text-to-music model that generates complete, structurally coherent songs from a <strong>music description</strong> (the <code>prompt</code> field) and optional <strong>lyrics</strong> (the <code>lyrics</code> field). It uses a Qwen3-8B language model for long-range structure, flow-matching diffusion for audio synthesis, and a DAC vocoder. Generation supports up to 360 seconds (6 minutes) per clip.</p>
+
+                <div class="emphasis-guide">
+                    <p><strong>ALICE API Mapping:</strong> The <em>Music Description</em> textarea on the <a href="/web/audio.html">Music page</a> maps to the <code>prompt</code> parameter. The <em>Lyrics</em> textarea maps to the <code>lyrics</code> parameter. Leave lyrics empty for instrumental output.</p>
+                    <ul style="margin: 0.5rem 0 0 0;">
+                        <li><strong>Max duration:</strong> 360 seconds (6 minutes)</li>
+                        <li><strong>Default steps:</strong> 30 (flow-matching Euler steps per chunk)</li>
+                        <li><strong>CFG scale:</strong> Ignored &mdash; MiniMax-Music3 uses flow-matching, not classifier-free guidance</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="principles-box">
+                <h3>Core Principles: The Music Prompt Workflow</h3>
+                <p style="font-size: 1.1rem; font-weight: 500; color: var(--text-primary); margin: 1rem 0;">VOCAL <span style="color: var(--accent);">&rarr;</span> STYLE <span style="color: var(--accent);">&rarr;</span> TEMPO <span style="color: var(--accent);">&rarr;</span> ARRANGEMENT <span style="color: var(--accent);">&rarr;</span> PRODUCTION <span style="color: var(--accent);">&rarr;</span> CONSTRAINTS</p>
+                <p>This ordering gives you a practical workflow for organizing your music description. It is not a claim about the model's internal training format &mdash; it is a way to make sure you cover every dimension that matters.</p>
+
+                <div class="principle-item">
+                    <h4>VOCAL</h4>
+                    <p><strong>Purpose:</strong> Define voice type, register, timbre, delivery, processing, and harmony.</p>
+                    <p><strong>Effect:</strong> Establishes who is singing and how, before genre sets the context.</p>
+                    <p><span class="highlight">For instrumental music</span>, explicitly omit vocals: <code>Instrumental, no lead vocal.</code> Name the instrument carrying the lead melodic role.</p>
+                </div>
+
+                <div class="principle-item">
+                    <h4>STYLE</h4>
+                    <p><strong>Purpose:</strong> Set primary genre, optional secondary influence, and subgenre.</p>
+                    <p><strong>Effect:</strong> Gives the model a clear musical target. One strong primary identity works better than a long genre chain.</p>
+                </div>
+
+                <div class="principle-item">
+                    <h4>TEMPO / TIME FEEL</h4>
+                    <p><strong>Purpose:</strong> Define BPM, key, or rubato duration and dynamic arc.</p>
+                    <p><strong>Effect:</strong> Anchors the timing and energy trajectory of the piece.</p>
+                </div>
+
+                <div class="principle-item">
+                    <h4>ARRANGEMENT</h4>
+                    <p><strong>Purpose:</strong> Describe change over time &mdash; what enters, leaves, builds, drops, and breaks down.</p>
+                    <p><strong>Effect:</strong> Prevents sparse or static arrangements by specifying section-by-section development.</p>
+                </div>
+
+                <div class="principle-item">
+                    <h4>PRODUCTION</h4>
+                    <p><strong>Purpose:</strong> Define sonic character, spatial profile, dynamics, and recording aesthetic.</p>
+                    <p><strong>Effect:</strong> Polishes the final sound and prevents contradictory audio choices.</p>
+                </div>
+
+                <div class="principle-item">
+                    <h4>CONSTRAINTS</h4>
+                    <p><strong>Purpose:</strong> State only important exclusions.</p>
+                    <p><strong>Effect:</strong> Prevents predictable unwanted conventions without micromanaging every musical decision.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title">Structured Caption Format</h2>
+                <p>For maximum control, organize your music description into labeled blocks. This matches the Structured Caption format from MiniMax's official <code>music-caption-rewriter</code> skill.</p>
+
+                <h3>The Schema</h3>
+                <div class="schema-box">GLOBAL METADATA
+Style: [primary genre + optional secondary influence/subgenre]
+Tempo / Time feel: [BPM + key OR rubato/free time + duration/arc]
+Mood: [emotional character + trajectory]
+
+VOCAL DETAILS
+Vocal: [type + register/timbre]
+Delivery: [phrasing + dynamics]
+Processing: [dry/doubled/distorted/etc.]
+Harmony: [harmonies/ad-libs/choir]
+
+ARRANGEMENT
+Intro: [what enters, how it develops]
+Verse: [instruments, development]
+Chorus: [full arrangement, key changes]
+...
+
+PRODUCTION
+[sonic character + spatial profile + dynamics]
+
+CONSTRAINTS
+[only critical exclusions]</div>
+
+                <div class="negative-prompt-box">
+                    <h4>Important: Two separate inputs</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">The structured caption above goes in the <strong>Music Description</strong> (prompt) field. The <strong>Lyrics</strong> field is where you put actual lyrics with structural tags like <code>[Verse]</code>, <code>[Chorus]</code>. See the <em>Section Tags in Lyrics</em> section below.</p>
+                </div>
+            </div>
+
+            <!-- Vocal Details -->
+            <div class="section">
+                <h2 class="section-title">Vocal Details</h2>
+                <p>For vocal-driven music, specify five dimensions: <strong>type + register/timbre + delivery + processing + harmony</strong>.</p>
+
+                <h3>Weak vs. Strong Vocal Descriptors</h3>
+                <div class="example-box">
+                    <div class="example-label">Weak</div>
+                    <div class="example-prompt">Female vocals</div>
+                </div>
+                <div class="example-box">
+                    <div class="example-label">Stronger</div>
+                    <div class="example-prompt">Female mezzo-soprano, warm and breathy, intimate close-mic delivery; opens into a powerful belt in the chorus, subtle vibrato, stacked thirds and octave doubles.</div>
+                </div>
+
+                <h3>Vocal Dimensions</h3>
+                <table class="music-table">
+                    <thead>
+                        <tr>
+                            <th>Dimension</th>
+                            <th>Examples</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Register</td>
+                            <td>low, mid, high, chest, head, falsetto</td>
+                        </tr>
+                        <tr>
+                            <td>Timbre</td>
+                            <td>warm, bright, nasal, breathy, airy, raspy, gravelly, metallic</td>
+                        </tr>
+                        <tr>
+                            <td>Delivery</td>
+                            <td>conversational, restrained, soaring, belted, shouted, whispered, snarling</td>
+                        </tr>
+                        <tr>
+                            <td>Rap</td>
+                            <td>clipped, laid-back, aggressive, rhythmic, triplet, double-time</td>
+                        </tr>
+                        <tr>
+                            <td>Harsh</td>
+                            <td>growled, guttural, screamed, shrieked, distorted</td>
+                        </tr>
+                        <tr>
+                            <td>Harmony</td>
+                            <td>thirds, sixths, octaves, SATB, gang vocals, call-and-response</td>
+                        </tr>
+                        <tr>
+                            <td>Processing</td>
+                            <td>dry, doubled, distorted, filtered, vocoder, pitch-shifted, reverb-heavy</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Genre + Vocal Identity Together</h3>
+                <p>Some genres encode the vocal identity in their DNA. When that's the case, specify both.</p>
+                <table class="music-table">
+                    <thead>
+                        <tr>
+                            <th>Genre</th>
+                            <th>Vocal Descriptor</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Country</td>
+                            <td>Weathered male baritone, pronounced Southern twang, conversational delivery</td>
+                        </tr>
+                        <tr>
+                            <td>Gospel</td>
+                            <td>Resonant female soprano, powerful belt, expressive melisma, full SATB call-and-response</td>
+                        </tr>
+                        <tr>
+                            <td>Drill</td>
+                            <td>Low male rap, clipped rhythmic phrasing, restrained delivery, occasional double-time bursts</td>
+                        </tr>
+                        <tr>
+                            <td>Black metal</td>
+                            <td>Shrieked harsh vocal, high register, sustained and rhythmic, lightly doubled</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Section Tags in Lyrics -->
+            <div class="section">
+                <h2 class="section-title">Section Tags in Lyrics</h2>
+                <p>MiniMax-Music3 recognizes structural section tags inside the <strong>Lyrics</strong> field. These tell the model where to place vocal sections, instrumental breaks, and transitions in the song timeline.</p>
+
+                <h3>Supported Tags</h3>
+                <p>Place each tag on its own line in the lyrics field:</p>
+                <div class="tag-grid">
+                    <div class="tag-item">[Intro]</div>
+                    <div class="tag-item">[Verse]</div>
+                    <div class="tag-item">[Pre-Chorus]</div>
+                    <div class="tag-item">[Chorus]</div>
+                    <div class="tag-item">[Post-Chorus]</div>
+                    <div class="tag-item">[Bridge]</div>
+                    <div class="tag-item">[Instrumental]</div>
+                    <div class="tag-item">[Solo]</div>
+                    <div class="tag-item">[Outro]</div>
+                </div>
+
+                <h3>Tags to Avoid</h3>
+                <p>Do not invent tags from other models. These are not recognized by MiniMax-Music3:</p>
+                <div class="tag-grid">
+                    <div class="tag-item invalid">[Drop]</div>
+                    <div class="tag-item invalid">[Hook]</div>
+                    <div class="tag-item invalid">[Rap Verse]</div>
+                    <div class="tag-item invalid">[Growl]</div>
+                    <div class="tag-item invalid">[Breakdown]</div>
+                </div>
+                <p>Describe those musical functions in the <strong>music description</strong> (prompt) instead. For example: <span class="highlight">Bridge strips to piano and vocal before rebuilding into a heavy half-time final section.</span></p>
+
+                <h3>Lyrics Formatting</h3>
+                <div class="example-box">
+                    <div class="example-label">Correct: tags on their own lines</div>
+                    <div class="example-prompt">[Intro]
+(soft piano, ambient atmosphere)
+
+[Verse]
+Morning light through the window pane
+Every whisper calls your name
+
+[Chorus]
+We are infinite, we are the stars
+
+[Outro]
+(fade out, piano and strings)</div>
+                </div>
+                <p>ALICE automatically splits lines that put text on the same line as a tag (e.g. <code>[verse] My heart beats fast</code> becomes two lines), but it's best to format lyrics correctly yourself.</p>
+            </div>
+
+            <!-- Tempo / Time Feel -->
+            <div class="section">
+                <h2 class="section-title">Tempo / Time Feel</h2>
+                <p>For fixed-tempo music, specify BPM and key:</p>
+                <div class="schema-box">128 BPM, G minor
+
+104 BPM, A minor</div>
+
+                <h3>When BPM Does Not Fit</h3>
+                <p>For styles with fluid timing, do not force BPM. Use duration, rubato, and texture arc instead:</p>
+                <div class="schema-box">Slow, rubato, ~7-minute arc, sparse -&gt; gradually dense.</div>
+
+                <p>Useful alternatives to BPM:</p>
+                <ul>
+                    <li>Approximate duration</li>
+                    <li>Rubato / free time</li>
+                    <li>Groove density</li>
+                    <li>Pulse strength</li>
+                    <li>Dynamic arc</li>
+                    <li>Texture density</li>
+                    <li>Rate of harmonic change</li>
+                </ul>
+            </div>
+
+            <!-- Arrangement -->
+            <div class="section">
+                <h2 class="section-title">Arrangement</h2>
+                <p>Describe <strong>change</strong>, not just inventory. Tell the model how the piece evolves from section to section.</p>
+
+                <h3>Weak vs. Strong Arrangement</h3>
+                <div class="example-box">
+                    <div class="example-label">Weak</div>
+                    <div class="example-prompt">Guitar, bass, drums, piano, synth.</div>
+                </div>
+                <div class="example-box">
+                    <div class="example-label">Stronger</div>
+                    <div class="example-prompt">Verse: fingerpicked guitar + vocal. Pre-chorus: add bass and rising pads. Chorus: full drums, electric guitars and stacked harmonies. Bridge: strip to piano and vocal, then rebuild into final chorus.</div>
+                </div>
+
+                <h3>Development Patterns</h3>
+                <p>Common arcs for arrangement evolution:</p>
+                <ul>
+                    <li>Sparse <span class="highlight">&rarr;</span> dense</li>
+                    <li>Dry <span class="highlight">&rarr;</span> spacious</li>
+                    <li>Acoustic <span class="highlight">&rarr;</span> electronic</li>
+                    <li>Solo <span class="highlight">&rarr;</span> full ensemble</li>
+                    <li>Half-time <span class="highlight">&rarr;</span> double-time</li>
+                    <li>Verse <span class="highlight">&rarr;</span> lift <span class="highlight">&rarr;</span> chorus</li>
+                    <li>Build <span class="highlight">&rarr;</span> drop <span class="highlight">&rarr;</span> breakdown <span class="highlight">&rarr;</span> final drop</li>
+                </ul>
+            </div>
+
+            <!-- Production -->
+            <div class="section">
+                <h2 class="section-title">Production</h2>
+                <p>Use production language to define the sonic target. This is what the final mix should <em>feel</em> like.</p>
+
+                <div class="example-box">
+                    <div class="example-label">Modern hi-fi</div>
+                    <p class="negative-prompt">Wide stereo, tight low end, crisp transients, controlled dynamics, glossy master.</p>
+                </div>
+
+                <div class="example-box">
+                    <div class="example-label">Raw live-room</div>
+                    <p class="negative-prompt">Tape saturation, natural dynamics, minimal processing, audible room character.</p>
+                </div>
+
+                <div class="example-box">
+                    <div class="example-label">Lo-fi degraded</div>
+                    <p class="negative-prompt">Soft transients, tape hiss, degraded texture, restrained high end, unpolished master.</p>
+                </div>
+
+                <div class="negative-prompt-box">
+                    <h4>Avoid contradictions</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">Do not pair contradictory production terms unless the contrast is intentional. <span class="highlight">Intimate dry vocal with huge distant reverb</span> gives the model competing targets.</p>
+                </div>
+            </div>
+
+            <!-- Constraints -->
+            <div class="section">
+                <h2 class="section-title">Constraints and Exclusions</h2>
+                <p>State only important exclusions &mdash; the conventions you need to suppress, not every instrument you don't want.</p>
+
+                <h3>Effective Exclusions</h3>
+                <div class="example-prompt">No trap hi-hats, no obvious autotune, no glossy pop synths.
+No clean vocals, no polished pop production, no bright synth leads.
+No pristine mastering, no polished live drums.
+No drum kit, no electric guitar, no obvious pop structure.</div>
+                <p>Do not exclude everything. The goal is to prevent important unwanted defaults, not to micromanage every musical decision.</p>
+            </div>
+
+            <!-- Vocal Presets -->
+            <div class="section">
+                <h2 class="section-title">Quick Vocal Presets</h2>
+                <p>Use these as starting points. Adapt to your specific needs.</p>
+
+                <table class="music-table">
+                    <thead>
+                        <tr>
+                            <th>Goal</th>
+                            <th>Preset</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Female clean</td>
+                            <td>Clear female mezzo-soprano, warm-bright timbre, articulate forward delivery</td>
+                        </tr>
+                        <tr>
+                            <td>Female breathy</td>
+                            <td>Warm female alto, low-mid register, intimate breathy delivery, close-mic</td>
+                        </tr>
+                        <tr>
+                            <td>Female belt</td>
+                            <td>Powerful female soprano, resonant chest/head blend, controlled belt, melismatic</td>
+                        </tr>
+                        <tr>
+                            <td>Female harsh</td>
+                            <td>Low female false-cord growl, guttural mid-low register, sustained and rhythmic, lightly doubled/distorted</td>
+                        </tr>
+                        <tr>
+                            <td>Male clean</td>
+                            <td>Warm male baritone, smooth intimate delivery, close-mic</td>
+                        </tr>
+                        <tr>
+                            <td>Male tenor</td>
+                            <td>Clear male tenor, emotional delivery, slightly strained upper register</td>
+                        </tr>
+                        <tr>
+                            <td>Male twang</td>
+                            <td>Weathered male baritone, pronounced Southern twang, conversational delivery</td>
+                        </tr>
+                        <tr>
+                            <td>Male hardcore</td>
+                            <td>Mid-range male scream, strained/shouted, short rhythmic phrases, minimally processed</td>
+                        </tr>
+                        <tr>
+                            <td>Male harsh</td>
+                            <td>Deep guttural growl, low register, sustained phrases, distorted/doubled</td>
+                        </tr>
+                        <tr>
+                            <td>Falsetto</td>
+                            <td>Airy male falsetto, high register, thin floating tone, textural</td>
+                        </tr>
+                        <tr>
+                            <td>Rap</td>
+                            <td>Deep male rap, gravelly timbre, clipped rhythmic phrasing, triplet/double-time variation</td>
+                        </tr>
+                        <tr>
+                            <td>Sing-rap</td>
+                            <td>Melodic sing-rap, rhythmic phrasing, heavily tuned vocal, layered hook</td>
+                        </tr>
+                        <tr>
+                            <td>Choir</td>
+                            <td>Full SATB choir, broad dynamics, layered and spatially wide</td>
+                        </tr>
+                        <tr>
+                            <td>Gang vocals</td>
+                            <td>Raw shouted unison, tightly stacked, energetic</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Genre Examples -->
+            <div class="section">
+                <h2 class="section-title">Genre Examples</h2>
+                <p>These starting prompts are formatted as Structured Captions. Adapt the genre, vocals, and arrangement to your needs.</p>
+
+                <div class="example-box">
+                    <div class="example-label">Alternative R&amp;B with trip-hop influence</div>
+                    <div class="example-prompt">GLOBAL METADATA
+Style: Alternative R&amp;B with trip-hop influence
+Tempo / Time feel: 86 BPM, F minor
+Mood: Intimate and nocturnal, gradually becoming dramatic
+
+VOCAL DETAILS
+Vocal: Breathy female alto, warm and close
+Delivery: Conversational in verses, stronger sustained notes in chorus
+Processing: Subtle saturation, restrained reverb
+Harmony: Layered thirds and distant doubles
+
+ARRANGEMENT
+Intro: Sparse piano motif, filtered fade in
+Verse: Rhodes + sparse percussion
+Pre-Chorus: Sub-bass and filtered drums enter
+Chorus: Full beat, synth pad and vocal stacks
+Bridge: Rhodes and vocal only
+Final section: Full arrangement returns with expanded harmonies
+
+PRODUCTION
+Warm analog saturation, deep controlled sub, wide but dark stereo field
+
+CONSTRAINTS
+No bright pop synths, no rock guitars</div>
+                </div>
+
+                <div class="example-box">
+                    <div class="example-label">Brutal death metal with technical death metal influence</div>
+                    <div class="example-prompt">GLOBAL METADATA
+Style: Brutal death metal with technical death metal influence
+Tempo / Time feel: ~200 BPM, drop-A feel
+Mood: Violent, claustrophobic, relentless
+
+VOCAL DETAILS
+Vocal: Deep low-register male false-cord growl, guttural
+Delivery: Sustained gutturals alternating with short rhythmic screams
+Processing: Light vocal doubling and distortion
+Harmony: Occasional layered vocal hits
+
+ARRANGEMENT
+Intro: Tremolo riff with distant feedback
+Verse: Blast beats and sustained gutturals
+Bridge: Faster technical transition
+Instrumental: Chaotic guitar lead passage
+Chorus: Half-time crushing breakdown with vocal accents
+Outro: Final breakdown and abrupt stop
+
+PRODUCTION
+Dense distorted guitars, extremely tight low end, aggressive transients, controlled saturation, wide guitars
+
+CONSTRAINTS
+No clean singing, no pop chorus, no symphonic pads</div>
+                </div>
+
+                <div class="example-box">
+                    <div class="example-label">UK drill with dark contemporary hip-hop influence</div>
+                    <div class="example-prompt">GLOBAL METADATA
+Style: UK drill with dark contemporary hip-hop influence
+Tempo / Time feel: 142 BPM, F minor
+Mood: Cold, tense, nocturnal
+
+VOCAL DETAILS
+Vocal: Low male rap, dry and close
+Delivery: Clipped consonants, restrained intensity, short pauses, occasional double-time bursts
+Processing: Mostly dry lead with sparse filtered ad-libs
+Harmony: Whispered ad-libs panned wide; restrained melodic hook
+
+ARRANGEMENT
+Verse: Sparse piano motif and sub bass
+Pre-Chorus: Hats and percussion gradually increase
+Chorus: Full drill rhythm and melodic hook
+Bridge: Beat strips back to piano and vocal
+Final section: Full rhythm returns with additional ad-libs
+
+PRODUCTION
+Deep controlled sub, dry vocal front-and-center, dark narrow verse image opening into a wider hook
+
+CONSTRAINTS
+No sung pop chorus, no excessive vocal runs</div>
+                </div>
+
+                <div class="example-box">
+                    <div class="example-label">Cinematic orchestral (instrumental)</div>
+                    <div class="example-prompt">GLOBAL METADATA
+Style: Cinematic orchestral with contemporary classical influence
+Tempo / Time feel: ~90 BPM, minor key, restrained-to-triumphant arc
+Mood: Contemplative, building to triumphant
+
+VOCAL DETAILS
+Instrumental, no lead vocal
+
+ARRANGEMENT
+Intro: Solo cello, sparse motif
+Verse: Add low strings, distant thunder
+Pre-Chorus: Brass enters, timpani rolls
+Chorus: Full orchestra, taiko and harp, heroic melody
+Bridge: Strip back to harp and solo violin
+Final section: Full orchestra returns, key change up a half-step
+
+PRODUCTION
+Large concert-hall space, strong dynamic range, no electronic instruments
+
+CONSTRAINTS
+No percussion (except orchestral), no electronic synths, no rock instruments</div>
+                </div>
+            </div>
+
+            <!-- Instrumental Music -->
+            <div class="section">
+                <h2 class="section-title">Instrumental Music</h2>
+                <p>For instrumental-forward music, remove vocal instructions and focus on arrangement and texture.</p>
+
+                <h3>Why name a lead instrument?</h3>
+                <p>ALICE detects empty lyrics and automatically augments the prompt with <code>instrumental version with no vocals, lead instrument: piano</code>. You can override the lead instrument by stating it explicitly in your description.</p>
+
+                <div class="example-box">
+                    <div class="example-label">Dark ambient (instrumental)</div>
+                    <div class="example-prompt">Dark ambient with drone and contemporary classical influence. Rubato, ~8-minute gradual arc, cold and isolated. Arrangement: near-silent granular textures -&gt; low drone -&gt; sparse harmonic fragments -&gt; increasing textural density -&gt; broad sustained climax -&gt; gradual dissolution. Production: huge stereo field, very long reverberation, deep sub frequencies, soft transients, subtle tape degradation. Constraints: instrumental only, no percussion, no obvious rhythmic pulse, no lead melody.</div>
+                </div>
+            </div>
+
+            <!-- Best Practices -->
+            <div class="section">
+                <h2 class="section-title">Best Practices</h2>
+
+                <h3>Specify What Matters Most</h3>
+                <p>Do not treat vocal specificity as universally more important than genre. Use vocal specificity for vocal-driven music. Use genre specificity for strongly genre-coded music. Use arrangement/texture specificity for instrumental-forward music. Use both genre and vocal identity when the genre encodes the vocal style.</p>
+
+                <h3>Describe Change, Not Just Inventory</h3>
+                <p>Prefer <span class="highlight">Verse sparse -&gt; chorus full -&gt; bridge stripped -&gt; final chorus expanded.</span> over <span class="highlight">Guitar, bass, drums, piano, synth, strings, pads, percussion...</span></p>
+
+                <h3>Prefer Clear Genre Relationships</h3>
+                <p>Prefer <span class="highlight">Alternative rock with post-punk elements.</span> over <span class="highlight">Rock + pop + metal + electronic + indie + cinematic.</span></p>
+
+                <h3>Match Production to Style</h3>
+                <p>Production terms strongly change the sonic target:</p>
+                <ul>
+                    <li><span class="highlight">pristine / hi-fi / polished</span></li>
+                    <li><span class="highlight">raw / live / saturated / lo-fi</span></li>
+                </ul>
+                <p>Avoid combinations such as <span class="highlight">Intimate dry vocal with huge distant reverb</span> unless the contrast is intentional.</p>
+
+                <h3>Prompt Length Trade-offs</h3>
+                <table class="music-table">
+                    <thead>
+                        <tr>
+                            <th>Use shorter prompts when:</th>
+                            <th>Use longer prompts when:</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Genre identity is conventional</td>
+                            <td>You need explicit sectional development</td>
+                        </tr>
+                        <tr>
+                            <td>Arrangement is straightforward</td>
+                            <td>Arrangement is unusually dense</td>
+                        </tr>
+                        <tr>
+                            <td>You want fewer competing instructions</td>
+                            <td>Several transitions matter</td>
+                        </tr>
+                        <tr>
+                            <td>You are rapidly iterating</td>
+                            <td>Instrument roles need to be controlled</td>
+                        </tr>
+                        <tr>
+                            <td>Model tends to produce overly sparse arrangements</td>
+                            <td>You want a specific dynamic or textural arc</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Prevent Unwanted Conventions</h3>
+                <p>State only the conventions you need to suppress, not everything. <span class="highlight">No trap hi-hats, no obvious autotune, no glossy pop synths.</span> is targeted. <span class="highlight">No trap hi-hats, no autotune, no synths, no drums, no bass, no guitar, no piano, no strings...</span> is micromanagement.</p>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title">Final Checklist Before Generation</h2>
+                <div class="checklist">
+                    <ul>
+                        <li>Music description specifies genre, mood, and vocal identity</li>
+                        <li>Tempo/time feel or duration is defined</li>
+                        <li>Arrangement describes change between sections</li>
+                        <li>Production terms match the style (not contradictory)</li>
+                        <li>Only critical exclusions are stated</li>
+                        <li>Lyrics (if any) use supported section tags on their own lines</li>
+                        <li>Instrumental tracks explicitly say "no vocals" + name lead instrument</li>
+                    </ul>
+                </div>
+                <p style="margin-top: 1.5rem; font-style: italic; color: var(--text-secondary);">
+                    <strong>Remember:</strong> Music generation is iterative. The perfect track often requires 5-15 generations with small adjustments. Document what changes produce what effects to build your personal music prompting style.
                 </p>
             </div>
         </div>
