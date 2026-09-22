@@ -68,109 +68,63 @@ install_alice() {
         # Determine PyTorch version based on GPU architecture
         local gfx_arch=$(echo "$gpu_env" | grep PYTORCH_ROCM_ARCH | sed 's/export PYTORCH_ROCM_ARCH=//' | tr -d '"')
         
-        if [[ "$gfx_arch" == "gfx1103" ]]; then
-            # Install PyTorch with TheRock gfx110X-all ROCm support
-            # TheRock builds include proper gfx1103 (Phoenix APU) kernels
-            # The official PyTorch ROCm packages do NOT include gfx1103 and cause segfaults
-            # See: https://github.com/ROCm/TheRock/blob/main/RELEASES.md
-            log_info "Installing PyTorch with TheRock ROCm support (gfx110X family)..."
-            log_info "This includes native gfx1103 (Phoenix/780M) support!"
-            # CRITICAL: Do NOT use --pre flag! It installs incompatible nightly builds.
-            # Use only --index-url to get stable 2.10.0 builds.
+        if [[ "$gfx_arch" == "gfx1103" || "$gfx_arch" == "gfx1151" ]]; then
+            # Phoenix (gfx1103) and Strix Halo (gfx1151) are supported by
+            # the ROCm 10.0.0 multi-arch stable index via device extras.
+            # This replaces the legacy TheRock nightly indices and all
+            # their workarounds (--pre, --no-deps, manual rocm-sdk-libraries,
+            # and the torchvision::nms _meta_registrations patch).
+            log_info "Detected AMD GPU ($gfx_arch) - using ROCm 10.0.0 multi-arch packages"
             "${ALICE_DIR}/venv/bin/pip" install \
-                --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ \
-                torch torchaudio torchvision
-        elif [[ "$gfx_arch" == "gfx1151" ]]; then
-            # Strix Halo (Ryzen AI Max 300 series, e.g. 8060S Graphics).
-            # The gfx110X-all wheel index does NOT include gfx1151 kernels;
-            # using it on Strix Halo results in hipErrorInvalidImage on the
-            # first GPU op.  The dedicated gfx1151 wheel index is required.
-            # The rocm-sdk-libraries-gfx1151 package has to be installed
-            # explicitly because the gfx1151 torch wheel is built for it.
-            log_info "Installing PyTorch with TheRock ROCm support for Strix Halo (gfx1151)..."
-            log_info "RDNA 3.5 wheels (Radeon 8060S, Ryzen AI Max+ 395, etc.)"
-            "${ALICE_DIR}/venv/bin/pip" install \
-                --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ \
-                --no-deps \
-                torch torchaudio torchvision
-            # The gfx1151 wheel doesn't pull the ROCm runtime libraries via
-            # pip's dependency resolver (it's a different layout), so install
-            # them explicitly.  Pin to the matching 7.13 wheel so torch's
-            # expected ROCm version matches what is actually on disk.
-            "${ALICE_DIR}/venv/bin/pip" install \
-                --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ \
-                --no-deps \
-                "rocm-sdk-libraries-gfx1151==7.13.0a20260501"
-            # transformers 5.x is needed so diffusers modular_pipelines can
-            # import get_cached_repo_tree from huggingface_hub.
-            "${ALICE_DIR}/venv/bin/pip" install --no-deps "transformers>=5.0" huggingface-hub
+                --index-url https://stable.repo.amd.com/rocm/whl-next/ \
+                "torch[device-${gfx_arch}]==2.13.0+rocm10.0.0" \
+                "torchvision[device-${gfx_arch}]==0.28.0+rocm10.0.0" \
+                "torchaudio==2.11.0.2+rocm10.0.0"
         elif [[ "$gfx_arch" == "gfx90c" ]]; then
-            # Cezanne/Renoir APUs (Ryzen 5000/4000 series)
-            # These APUs need special handling similar to gfx1103:
-            # - force_float32 (no bf16 support)
-            # - device_map sequential (prevent memory fragmentation crashes)
-            # - vae_decode_cpu (prevent GPU hangs during VAE decode)
-            # Python 3.13 doesn't have ROCm wheels yet, check Python version
-            local python_version=$("${ALICE_DIR}/venv/bin/python" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-            if [[ "$python_version" == "3.13" ]]; then
-                log_warn "Python 3.13 detected - PyTorch ROCm not available yet"
-                log_warn "Installing CPU-only PyTorch. For GPU support:"
-                log_warn "  1. Create venv with Python 3.11: python3.11 -m venv venv"
-                log_warn "  2. Reinstall with ROCm 6.1: pip install torch --index-url https://download.pytorch.org/whl/rocm6.1"
-                "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-                USE_GPU=false  # Update flag to reflect CPU mode
-            else
-                log_info "Installing PyTorch with ROCm 6.1 support (gfx90c Cezanne/Renoir)..."
-                log_info "Note: gfx90c requires same crash-prevention settings as gfx1103"
-                "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.1
-            fi
+            # Cezanne/Renoir APUs (Ryzen 5000/4000 series) are not
+            # supported by ROCm 10.0.0.  Fall back to CPU-only.
+            log_warn "Detected AMD APU ($gfx_arch) - not supported by ROCm 10.0.0, using CPU-only PyTorch"
+            "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+            USE_GPU=false
         else
-            # Other AMD GPUs - use official ROCm 6.2
-            log_info "Installing PyTorch with ROCm 6.2 support ($gfx_arch)..."
-            "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+            # Other AMD GPUs (RDNA2/RDNA3/CDNA) - use ROCm 10.0.0 multi-arch
+            # with device-all for broad architecture coverage.
+            log_info "Detected AMD GPU ($gfx_arch) - using ROCm 10.0.0 multi-arch packages"
+            "${ALICE_DIR}/venv/bin/pip" install \
+                --index-url https://stable.repo.amd.com/rocm/whl-next/ \
+                "torch[device-all]==2.13.0+rocm10.0.0" \
+                "torchvision[device-all]==0.28.0+rocm10.0.0" \
+                "torchaudio==2.11.0.2+rocm10.0.0"
         fi
     else
         # Install CPU-only PyTorch
-        log_info "Installing PyTorch 2.6.0 (CPU only)..."
-        "${ALICE_DIR}/venv/bin/pip" install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
+        log_info "Installing latest PyTorch (CPU only)..."
+        "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
     fi
     
-    # Install other dependencies with exact tested versions
+    # Install remaining dependencies (latest compatible versions)
     log_info "Installing remaining dependencies..."
     "${ALICE_DIR}/venv/bin/pip" install \
-        # diffusers: use the latest git main so MiniMax-Music3 (diffusers PR
-        # #14456) is importable.  Pinned releases are otherwise too old.
+        # diffusers: use the latest git main so MiniMax-Music3 and other
+        # latest pipelines are importable.  Pinned releases may be too old.
         "diffusers @ git+https://github.com/huggingface/diffusers" \
-        transformers==4.57.3 \
-        accelerate==1.12.0 \
-        safetensors==0.7.0 \
-        compel==2.3.1 \
-        pillow==12.0.0 \
-        pyyaml==6.0.3 \
-        psutil==7.1.3 \
-        pydantic==2.12.5 \
-        pydantic-settings==2.1.0 \
-        fastapi==0.104.1 \
-        uvicorn==0.24.0 \
-        aiofiles==23.2.1 \
-        aiohttp==3.9.3 \
-        python-multipart==0.0.6 \
-        huggingface-hub==0.36.0
-    
-    # CRITICAL WORKAROUND: Fix torchvision::nms operator bug in TheRock gfx110X builds
-    # The gfx110X-all nightly builds have a broken torchvision package where the
-    # torchvision::nms operator is not properly registered, causing import failures.
-    # This patches the _meta_registrations.py file to comment out the broken decorators.
-    if [[ "$gfx_arch" == "gfx1103" ]]; then
-        log_info "Applying torchvision::nms workaround for gfx110X builds..."
-        local torchvision_meta="${ALICE_DIR}/venv/lib/python*/site-packages/torchvision/_meta_registrations.py"
-        if [[ -f $(echo $torchvision_meta) ]]; then
-            sed -i '163,175s/^/#/' $(echo $torchvision_meta)
-            log_info "Torchvision patch applied successfully"
-        else
-            log_warn "Could not find torchvision _meta_registrations.py - patch skipped"
-        fi
-    fi
+        transformers>=5.0 \
+        accelerate>=1.12.0 \
+        safetensors>=0.7.0 \
+        compel>=2.3.1 \
+        pillow>=12.0.0 \
+        pyyaml>=6.0.3 \
+        psutil>=7.1.3 \
+        pydantic>=2.12.5 \
+        pydantic-settings>=2.1.0 \
+        fastapi>=0.104.1 \
+        uvicorn>=0.24.0 \
+        aiofiles>=23.2.1 \
+        aiohttp>=3.9.3 \
+        python-multipart>=0.0.6 \
+        huggingface-hub>=1.0.0 \
+        einops \
+        stable-audio-tools
     
     # Create config file if it doesn't exist
     if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
@@ -230,9 +184,11 @@ generation:
   enable_model_cpu_offload: false
   enable_sequential_cpu_offload: false
   attention_slice_size: "auto"
-  vae_decode_cpu: $(if [[ "$gfx_arch" == "gfx1103" ]] || [[ "$gfx_arch" == "gfx90c" ]]; then echo "true"; else echo "false"; fi)
+  # VAE decode on CPU prevents GPU hangs on AMD gfx1103 and gfx1151
+  vae_decode_cpu: $(if [[ "$gfx_arch" == "gfx1103" ]] || [[ "$gfx_arch" == "gfx1151" ]] || [[ "$gfx_arch" == "gfx90c" ]]; then echo "true"; else echo "false"; fi)
   
   # Performance optimization settings (PyTorch 2.0+)
+  # Disabled on SteamOS to avoid stability issues with ROCm + systemd
   enable_torch_compile: false
   torch_compile_mode: "reduce-overhead"
 

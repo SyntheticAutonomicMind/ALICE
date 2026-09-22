@@ -15,7 +15,7 @@
 #   docker run --gpus all -p 8080:8080 -v alice-models:/data/models alice:cuda
 
 ARG GPU=cpu
-ARG PYTHON_VERSION=3.11
+ARG PYTHON_VERSION=3.13
 
 # =============================================================================
 # Stage 1: Builder - install dependencies
@@ -65,7 +65,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -r alice && useradd -r -g alice -d /app -s /sbin/nologin alice
 
 # Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/lib/python${PYTHON_VERSION}/site-packages /usr/local/lib/python${PYTHON_VERSION}/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Create application directory structure

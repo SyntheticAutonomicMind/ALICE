@@ -156,6 +156,20 @@ if "PYTORCH_HIP_ALLOC_CONF" in os.environ and "PYTORCH_ALLOC_CONF" not in os.env
     os.environ["PYTORCH_ALLOC_CONF"] = os.environ["PYTORCH_HIP_ALLOC_CONF"]
     logger.info("Migrated PYTORCH_HIP_ALLOC_CONF to PYTORCH_ALLOC_CONF")
 
+# Set MIOPEN_CACHE_DIR to a writable location — MIOpen (ROCm's cuDNN
+# equivalent) tries to cache kernel search results under $HOME/.config/miopen
+# by default, which fails under systemd ProtectHome=yes or when HOME is
+# not writable by the alice user.
+if "MIOPEN_CACHE_DIR" not in os.environ:
+    try:
+        from ..config import config as _alice_config
+        _miopen_cache = _alice_config.models.directory.parent / ".cache" / "miopen"
+        _miopen_cache.mkdir(parents=True, exist_ok=True)
+        if os.access(_miopen_cache, os.W_OK):
+            os.environ["MIOPEN_CACHE_DIR"] = str(_miopen_cache)
+    except Exception:
+        pass  # MIOpen will use its default location
+
 # Suppress specific non-actionable warning messages at the Python warnings level
 import warnings
 warnings.filterwarnings("ignore", message=".*failed while executing.*")

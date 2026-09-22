@@ -25,6 +25,7 @@ it into the rest of ALICE.
 from __future__ import annotations
 
 import gc
+import json
 import logging
 import os
 import random
@@ -182,8 +183,31 @@ class ALICEAudioEngine:
 
         from stable_audio_tools import get_pretrained_model
 
-        logger.info("Loading audio model: %s", model_repo)
-        model, model_config = get_pretrained_model(model_repo)
+        local_path = Path(model_repo)
+        if local_path.is_dir():
+            # Load from a local model directory instead of HF hub.
+            # get_pretrained_model only accepts HF repo ids, so we
+            # replicate its logic using local file paths.
+            from stable_audio_tools.models.pretrained import (
+                create_model_from_config,
+                load_ckpt_state_dict,
+            )
+
+            logger.info("Loading audio model from local path: %s", local_path)
+            model_config_path = local_path / "model_config.json"
+            with open(model_config_path) as f:
+                model_config = json.load(f)
+            model = create_model_from_config(model_config)
+
+            ckpt_name = "model.safetensors"
+            if not (local_path / ckpt_name).exists():
+                ckpt_name = "model.ckpt"
+            model.load_state_dict(
+                load_ckpt_state_dict(str(local_path / ckpt_name))
+            )
+        else:
+            logger.info("Loading audio model: %s", model_repo)
+            model, model_config = get_pretrained_model(model_repo)
         model = model.to(self.device)
         try:
             model.eval()

@@ -209,49 +209,40 @@ create_venv() {
             GPU_TYPE="amd"
 
             # Source the AMD GPU detection script so we install the correct
-            # wheel index for the actual silicon under the hood (gfx1103
-            # for Phoenix, gfx1151 for Strix Halo, gfx90c for Cezanne/Renoir,
-            # etc.).  Falls back to rocm6.2 when the detected arch isn't in
-            # the per-special-cases list below.
+            # ROCm 10.0.0 multi-arch packages for the detected GPU architecture
+            # (gfx1103 for Phoenix, gfx1151 for Strix Halo, etc.).
             SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
             source "${SCRIPT_DIR}/detect_amd_gpu.sh"
             local gpu_env=$(detect_amd_gpu)
             local gfx_arch=$(echo "$gpu_env" | grep PYTORCH_ROCM_ARCH | sed 's/export PYTORCH_ROCM_ARCH=//' | tr -d '"')
 
-            if [[ "$gfx_arch" == "gfx1103" ]]; then
-                print_status "Phoenix APU (gfx1103) detected - using TheRock gfx110X-all nightly builds"
-                print_status "Installing from gfx110X-all nightly index (required for gfx1103 support)"
-                "${INSTALL_DIR}/venv/bin/pip" install --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/ --pre torch torchaudio torchvision
-
-                # CRITICAL WORKAROUND: Fix torchvision::nms operator bug in TheRock gfx110X builds
-                # The gfx110X-all nightly builds have a broken torchvision package where the
-                # torchvision::nms operator is not properly registered, causing import failures.
-                # This patches the _meta_registrations.py file to comment out the broken decorators.
-                print_status "Applying torchvision::nms workaround for gfx110X builds..."
-                local torchvision_meta="${INSTALL_DIR}/venv/lib/python*/site-packages/torchvision/_meta_registrations.py"
-                if ls $torchvision_meta 2>/dev/null; then
-                    sed -i '163,175s/^/#/' ${INSTALL_DIR}/venv/lib/python*/site-packages/torchvision/_meta_registrations.py
-                    print_status "Torchvision patch applied successfully"
-                else
-                    print_warning "Could not find torchvision _meta_registrations.py - patch skipped"
-                fi
-            elif [[ "$gfx_arch" == "gfx1151" ]]; then
-                # Strix Halo (Ryzen AI Max 300 series, e.g. 8060S Graphics).
-                # Dedicated gfx1151 wheel index required - the gfx110X-all
-                # index does NOT include gfx1151 kernels and triggers
-                # hipErrorInvalidImage on first op.
-                print_status "Strix Halo (gfx1151) detected - using TheRock gfx1151 nightly builds"
-                print_status "Installing from gfx1151 nightly index (RDNA 3.5 / 8060S Graphics)"
-                "${INSTALL_DIR}/venv/bin/pip" install --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ --no-deps torch torchaudio torchvision
-                # The ROCm runtime libraries don't get pulled by the gfx1151
-                # torch wheel alone; install them explicitly at a matching version.
-                "${INSTALL_DIR}/venv/bin/pip" install --index-url https://rocm.nightlies.amd.com/v2/gfx1151/ --no-deps "rocm-sdk-libraries-gfx1151==7.13.0a20260501"
-                # diffusers 0.40.x modular_pipelines needs huggingface_hub>=1.23
-                # and the Qwen3 tokenizer import requires transformers>=5.0.
-                "${INSTALL_DIR}/venv/bin/pip" install --no-deps "transformers>=5.0" "huggingface-hub>=1.23.0"
+            if [[ "$gfx_arch" == "gfx1103" || "$gfx_arch" == "gfx1151" ]]; then
+                # Phoenix (gfx1103) and Strix Halo (gfx1151) are supported by
+                # the ROCm 10.0.0 multi-arch stable index via device extras.
+                # This replaces the legacy TheRock nightly indices and all
+                # their workarounds (--pre, --no-deps, manual rocm-sdk-libraries,
+                # and the torchvision::nms _meta_registrations patch).
+                print_status "Detected AMD GPU ($gfx_arch) - using ROCm 10.0.0 multi-arch packages"
+                "${INSTALL_DIR}/venv/bin/pip" install \
+                    --index-url https://stable.repo.amd.com/rocm/whl-next/ \
+                    "torch[device-${gfx_arch}]==2.13.0+rocm10.0.0" \
+                    "torchvision[device-${gfx_arch}]==0.28.0+rocm10.0.0" \
+                    "torchaudio==2.11.0.2+rocm10.0.0"
+            elif [[ "$gfx_arch" == "gfx90c" ]]; then
+                # Cezanne/Renoir APUs (Ryzen 5000/4000 series) are not
+                # supported by ROCm 10.0.0.  Fall back to CPU-only.
+                print_warning "Detected AMD APU ($gfx_arch) - not supported by ROCm 10.0.0, using CPU-only PyTorch"
+                "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+                GPU_TYPE="cpu"
             else
-                # Standard ROCm installation
-                "${INSTALL_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+                # Other AMD GPUs (RDNA2/RDNA3/CDNA) - use ROCm 10.0.0 multi-arch
+                # with device-all for broad architecture coverage.
+                print_status "Detected AMD GPU ($gfx_arch) - using ROCm 10.0.0 multi-arch packages"
+                "${INSTALL_DIR}/venv/bin/pip" install \
+                    --index-url https://stable.repo.amd.com/rocm/whl-next/ \
+                    "torch[device-all]==2.13.0+rocm10.0.0" \
+                    "torchvision[device-all]==0.28.0+rocm10.0.0" \
+                    "torchaudio==2.11.0.2+rocm10.0.0"
             fi
         elif lspci 2>/dev/null | grep -iq "vga.*nvidia"; then
             print_status "NVIDIA GPU detected - installing PyTorch with CUDA support"
@@ -322,12 +313,25 @@ install_systemd_service() {
     # Install main service
     cp "${SOURCE_DIR}/${APP_NAME}.service" /etc/systemd/system/
     
-    # Override health check port if SteamOS uses non-default port
-    if grep -q "steamos" /etc/os-release 2>/dev/null; then
-        local config_port=$(grep "port:" "${CONFIG_DIR}/config.yaml" | head -1 | awk '{print $2}')
-        if [[ -n "$config_port" && "$config_port" != "8090" ]]; then
-            sed -i "s|localhost:8090|localhost:${config_port}|g" "/etc/systemd/system/${APP_NAME}.service"
-        fi
+    # Override health check port if config uses a non-default port
+    local config_port=$(grep "^  port:" "${CONFIG_DIR}/config.yaml" 2>/dev/null | head -1 | awk '{print $2}')
+    if [[ -n "$config_port" && "$config_port" != "8090" ]]; then
+        sed -i "s|localhost:8080|localhost:${config_port}|g" "/etc/systemd/system/${APP_NAME}.service"
+    fi
+    
+    # Set AMD GPU environment variables based on detected architecture
+    # PYTORCH_ROCM_ARCH and HSA_OVERRIDE_GFX_VERSION must be set before
+    # the Python process starts (they affect HSA runtime initialization)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "${SCRIPT_DIR}/detect_amd_gpu.sh"
+    local gpu_env=$(detect_amd_gpu 2>/dev/null)
+    local rocm_arch=$(echo "$gpu_env" | grep PYTORCH_ROCM_ARCH | sed 's/export PYTORCH_ROCM_ARCH=//' | tr -d '"')
+    local hsa_ver=$(echo "$gpu_env" | grep HSA_OVERRIDE_GFX_VERSION | sed 's/export HSA_OVERRIDE_GFX_VERSION=//' | tr -d '"')
+    
+    if [[ -n "$rocm_arch" && -n "$hsa_ver" ]]; then
+        # Insert GPU environment variables after the MIOPEN_DEBUG_FIND_ALL line
+        sed -i "/Environment=\"MIOPEN_DEBUG_FIND_ALL=0\"/a Environment=\"PYTORCH_ROCM_ARCH=${rocm_arch}\"\nEnvironment=\"HSA_OVERRIDE_GFX_VERSION=${hsa_ver}\"" "/etc/systemd/system/${APP_NAME}.service"
+        print_status "Set ROCm GPU environment: PYTORCH_ROCM_ARCH=${rocm_arch}, HSA_OVERRIDE_GFX_VERSION=${hsa_ver}"
     fi
     
     systemctl daemon-reload

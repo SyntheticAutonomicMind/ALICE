@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import inspect
 import logging
 import os
 import time
@@ -330,13 +331,21 @@ class AudioBackend:
                     torch.cuda.empty_cache()
             if self._engine is None:
                 engine_cls = _resolve_engine_class(model_id)
-                self._engine = engine_cls(
-                    output_dir=self.output_dir,
-                    force_fp32=self.config.generation.force_float32,
-                    vae_decode_cpu=self.config.generation.vae_decode_cpu,
-                    force_float32=self.config.generation.force_float32,
-                    force_bfloat16=self.config.generation.force_bfloat16,
-                )
+                # Different audio engines accept different constructor
+                # kwargs (e.g. ALICEAudioEngine has no force_bfloat16).
+                # Filter to only the parameters the selected class accepts.
+                engine_kwargs = {
+                    "output_dir": self.output_dir,
+                    "force_fp32": self.config.generation.force_float32,
+                    "vae_decode_cpu": self.config.generation.vae_decode_cpu,
+                    "force_bfloat16": self.config.generation.force_bfloat16,
+                }
+                sig = inspect.signature(engine_cls.__init__)
+                engine_kwargs = {
+                    k: v for k, v in engine_kwargs.items()
+                    if k in sig.parameters
+                }
+                self._engine = engine_cls(**engine_kwargs)
                 self._engine_model_id = model_id
         return self._engine
 

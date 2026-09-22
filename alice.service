@@ -20,17 +20,11 @@ Environment="PYTHONUNBUFFERED=1"
 Environment="CUDA_VISIBLE_DEVICES=0"
 
 # For AMD GPUs (ROCm)
+# HSA_OVERRIDE_GFX_VERSION and PYTORCH_ROCM_ARCH are set below
+# by the install script based on detected GPU architecture.
 Environment="HIP_VISIBLE_DEVICES=0"
-Environment="HSA_OVERRIDE_GFX_VERSION=11.0.0"
-
-# PyTorch HIP memory management - reduce fragmentation for SDXL
-# Note: PYTORCH_ALLOC_CONF is the modern name (PYTORCH_HIP_ALLOC_CONF is deprecated)
 Environment="PYTORCH_ALLOC_CONF=expandable_segments:True"
-
-# For AMD Phoenix APU (gfx1103) - CRITICAL for preventing GPU hangs
-# MIOPEN_DEBUG_FIND_ALL=0 disables MIOpen solver search that causes GPU hangs
 Environment="MIOPEN_DEBUG_FIND_ALL=0"
-Environment="PYTORCH_ROCM_ARCH=gfx1103"
 
 # Start command
 ExecStart=/opt/alice/venv/bin/python -m src.main
@@ -40,7 +34,7 @@ ExecReload=/bin/kill -HUP $MAINPID
 
 # Health check before marking service as started
 # Waits up to 120s for the /health endpoint to respond
-ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf http://localhost:8090/livez >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 120); do curl -sf http://localhost:8080/livez >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
 
 # Restart configuration
 Restart=always
