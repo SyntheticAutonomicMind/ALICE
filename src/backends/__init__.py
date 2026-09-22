@@ -33,12 +33,26 @@ def detect_amd_gpu() -> Optional[Dict[str, Any]]:
     gpu_name = None
     try:
         import subprocess
-        result = subprocess.run(["lspci"], capture_output=True, text=True, timeout=3)
+        result = subprocess.run(["lspci"], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             for line in result.stdout.splitlines():
                 lower = line.lower()
-                if ("amd" in lower or "ati" in lower or "radeon" in lower) and "vga" in lower:
-                    gpu_name = line.split(":", 1)[-1].strip()
+                # AMD GPUs may show as "VGA compatible controller" or
+                # "Display controller" depending on the PCIe device class.
+                if ("amd" in lower or "ati" in lower or "radeon" in lower) and (
+                    "vga" in lower or "display controller" in lower
+                ):
+                    # PCI lines look like: "67:00.0 Display controller: Advanced Micro..."
+                    # or "01:00.0 VGA compatible controller: Advanced Micro..."
+                    # Split on the device class prefix (after the bus address)
+                    gpu_name = line
+                    for prefix in ("Display controller: ", "VGA compatible controller: "):
+                        idx = gpu_name.find(prefix)
+                        if idx >= 0:
+                            gpu_name = gpu_name[idx + len(prefix):].strip()
+                            break
+                    # Strip "Advanced Micro Devices, Inc. [AMD/ATI] " prefix
+                    gpu_name = gpu_name.replace("Advanced Micro Devices, Inc. [AMD/ATI] ", "").strip()
                     break
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
@@ -83,15 +97,16 @@ def detect_amd_gpu() -> Optional[Dict[str, Any]]:
                     "0x7489": "gfx1100",
                     "0x748a": "gfx1101",  # Navi 32
                     "0x748b": "gfx1102",  # Navi 33 (Phoenix Point)
-                    "0x74a1": "gfx1103",  # Phoenix APU
-                    "0x74b1": "gfx1151",  # Strix Halo
-                    "0x74c1": "gfx1200",  # RDNA 4
-                    "0x74c2": "gfx1201",
+                    "0x1586": "gfx1151",  # Strix Halo (8050S, 8060S)
+                    "0x15b8": "gfx1151",  # Strix Halo variant
+                    "0x15bc": "gfx1200",  # RDNA 4 (Navi 44)
+                    "0x15bd": "gfx1201",  # RDNA 4 (Navi 48)
                 }
                 generation = _AMD_DEVICE_MAP.get(dev_id.lower(), "gfx_unknown")
 
                 # Determine if APU (integrated graphics)
-                _APU_DEV_IDS = {"0x74a1", "0x74b1", "0x74b2", "0x74b5"}
+                # 0x1586 = Strix Halo (7840U, 8050S, 8060S) — it's an APU
+                _APU_DEV_IDS = {"0x1586", "0x15b8"}
                 is_apu = dev_id.lower() in _APU_DEV_IDS
                 break
     except Exception:
@@ -109,9 +124,9 @@ def detect_amd_gpu() -> Optional[Dict[str, Any]]:
         elif "8050" in name_lower or "halo" in name_lower:
             generation = "gfx1151"
             is_apu = True
-        elif "navi 31" in name_lower or "7900" in name_lower:
+        elif "navi 31" in name_lower or "7900" in name_lower or "8070" in name_lower:
             generation = "gfx1100"
-        elif "navi 32" in name_lower or "7800" in name_lower or "7700" in name_lower:
+        elif "navi 32" in name_lower or "7800" in name_lower or "7700" in name_lower or "8060" in name_lower:
             generation = "gfx1101"
         elif "navi 33" in name_lower or "7600" in name_lower or "7500" in name_lower:
             generation = "gfx1102"
@@ -119,8 +134,19 @@ def detect_amd_gpu() -> Optional[Dict[str, Any]]:
     if generation is None:
         return None
 
+    # If we have a generation from sysfs but no friendly name from lspci,
+    # set a readable name based on the generation code.
     if gpu_name is None:
-        gpu_name = generation
+        _GEN_NAMES = {
+            "gfx1103": "AMD Radeon 780M (Phoenix APU)",
+            "gfx1102": "AMD Radeon 8050S (Phoenix Point)",
+            "gfx1151": "AMD Radeon 8060S (Strix Halo)",
+            "gfx1100": "AMD Radeon RX 7900 (Navi 31)",
+            "gfx1101": "AMD Radeon RX 7800 (Navi 32)",
+            "gfx1200": "AMD Radeon RX 8800 (Navi 44)",
+            "gfx1201": "AMD Radeon RX 8700 (Navi 48)",
+        }
+        gpu_name = _GEN_NAMES.get(generation, generation)
 
     return {
         "name": gpu_name,
@@ -164,7 +190,11 @@ def log_gpu_recommendations() -> None:
             "  generation:\n"
             "    force_bfloat16: true  # Best APU performance at BF16\n"
             "    vae_decode_cpu: true   # Prevents VAE decode GPU hang\n"
-            "    backend: auto         # PyTorch (ROCm) works well here",
+            "    backend: auto         # PyTorch (ROCm) works well here\n"
+            "  Environment:\n"
+            "    PYTORCH_ROCM_ARCH=gfx1151  (or gfx1102 for Phoenix Point)\n"
+            "    MIOPEN_DEBUG_FIND_ALL=0\n"
+            "    PYTORCH_ALLOC_CONF=expandable_segments:True",
             name,
         )
     else:
