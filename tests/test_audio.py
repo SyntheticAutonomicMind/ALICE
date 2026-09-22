@@ -418,32 +418,32 @@ def test_preprocess_lyrics_handles_multiple_consecutive_tags():
 
 
 def test_preprocess_lyrics_empty_returns_instrumental():
-    """Empty string becomes '[instrumental]' so the pipeline doesn't raise."""
+    """Empty string becomes the structural tag set '[Intro]\n[Instrumental]\n[Solo]\n[Outro]' so the pipeline doesn't raise."""
     from src.audio_engine import _preprocess_lyrics
 
-    assert _preprocess_lyrics("") == "[instrumental]"
+    assert _preprocess_lyrics("") == "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
 
 
 def test_preprocess_lyrics_whitespace_returns_instrumental():
-    """Whitespace-only lyrics also become '[instrumental]'."""
+    """Whitespace-only lyrics also become the full structural tag set."""
     from src.audio_engine import _preprocess_lyrics
 
-    assert _preprocess_lyrics("   \n  \t  ") == "[instrumental]"
+    assert _preprocess_lyrics("   \n  \t  ") == "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
 
 
 def test_preprocess_lyrics_none_returns_instrumental():
-    """None is treated as empty and becomes '[instrumental]'."""
+    """None is treated as empty and becomes the full structural tag set."""
     from src.audio_engine import _preprocess_lyrics
 
-    assert _preprocess_lyrics(None) == "[instrumental]"
+    assert _preprocess_lyrics(None) == "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
 
 
 def test_preprocess_lyrics_already_has_instrumental_preserved():
-    """A standalone [instrumental] tag is kept unchanged."""
+    """A standalone [instrumental] tag is normalized to the full structural tag set."""
     from src.audio_engine import _preprocess_lyrics
 
     result = _preprocess_lyrics("[instrumental]")
-    assert result == "[instrumental]"
+    assert result == "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
 
 
 def test_preprocess_lyrics_no_change_for_plain_text():
@@ -455,11 +455,14 @@ def test_preprocess_lyrics_no_change_for_plain_text():
 
 
 def test_instrumental_prompt_augmented():
-    """When [instrumental] lyrics are passed, the prompt gets an 'instrumental,
-    no vocals' cue so the MiniMax model doesn't generate vocals.
+    """When [instrumental] lyrics are passed, the prompt gets the standard
+    "Vocal Details: Purely instrumental track, no vocals." cue so the MiniMax
+    model doesn't generate vocals.
 
-    Per the MiniMax Music 3 prompting guide: 'For instrumental music, say so
-    explicitly and name the instrument carrying the lead melodic role.'
+    Per the MiniMax-Music3 prompting guide: the lyrics/input field must
+    contain ONLY structural tags ([Intro], [Instrumental], [Solo], [Outro]),
+    and the caption must explicitly state "Vocal Details: Purely instrumental
+    track, no vocals."  Both signals are needed — neither alone is sufficient.
     """
     from src.audio_engine import MiniMaxMusic3Engine
 
@@ -499,11 +502,11 @@ def test_instrumental_prompt_augmented():
         # prompt that was passed to the pipeline.
         pass
 
-    assert "instrumental" in captured.get("prompt", "").lower(), (
-        f"Prompt was not augmented for instrumental request: {captured.get('prompt', '')}"
+    assert "Vocal Details: Purely instrumental track, no vocals." in captured.get("prompt", ""), (
+        f"Prompt was not augmented with standard vocal-details phrase: {captured.get('prompt', '')}"
     )
-    assert "instrumental" in captured.get("lyrics", "").lower(), (
-        f"Lyrics should preserve [instrumental] tag: {captured.get('lyrics', '')}"
+    assert "[instrumental]" in captured.get("lyrics", "").lower(), (
+        f"Lyrics should contain [Instrumental] structural tag: {captured.get('lyrics', '')}"
     )
 
 

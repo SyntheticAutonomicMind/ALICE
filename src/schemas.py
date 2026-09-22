@@ -559,14 +559,15 @@ class AudioGenerationRequest(BaseModel):
     cfg_scale: Optional[float] = Field(default=None, ge=0.0, le=20.0, description="Classifier-free guidance scale (Stable Audio only; MiniMax-Music3 ignores it)", alias="cfg_scale")
     seed: Optional[int] = Field(default=None, ge=0, description="Reproducibility seed")
     response_format: Optional[str] = Field(default="url", description="'url' (default) or 'b64_json'")
-    # Lyrics with optional [verse]/[chorus] structure tags.  Only used by
+    # Lyrics with [verse]/[chorus] structure tags.  Only used by
     # MiniMax-Music3; Stable Audio Open 1.0 ignores this field.
     lyrics: Optional[str] = Field(default=None, max_length=8000, description="Lyrics to sing (MiniMax-Music3 only); empty for instrumental")
     # When True, forces instrumental generation: lyrics are set to empty
-    # (which _preprocess_lyrics normalizes to [instrumental]) and the engine
-    # augments the caption with "instrumental version with no vocals" per the
-    # prompting guide.  Both the [instrumental] lyrics tag and the caption
-    # augmentation are needed - neither alone is sufficient.
+    # (which _preprocess_lyrics normalizes to the structural tag set
+    # [Intro]\n[Instrumental]\n[Solo]\n[Outro]) and the engine augments the
+    # caption with "Vocal Details: Purely instrumental track, no vocals." per
+    # the prompting guide.  Both the structural tags in the lyrics field and
+    # the caption augmentation are needed - neither alone is sufficient.
     is_instrumental: Optional[bool] = Field(default=None, description="Force instrumental output (MiniMax-Music3); overrides lyrics field")
     # OpenAI compat fields that we accept but ignore for music generation
     voice: Optional[str] = Field(default=None, description="Ignored; accepted for OpenAI API shape compatibility")

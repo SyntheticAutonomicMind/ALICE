@@ -3803,10 +3803,11 @@ async def create_audio_generation(
 
     # When is_instrumental is True, force instrumental mode by clearing
     # the lyrics field.  The engine's _preprocess_lyrics converts empty
-    # lyrics to "[instrumental]", and the engine augments the caption
-    # with "instrumental version with no vocals" - the [instrumental] tag
-    # alone is insufficient; the caption augmentation is the primary
-    # vocal-suppression signal per the prompting guide.
+    # lyrics to the full structural tag set "[Intro]\n[Instrumental]\n[Solo]\n[Outro]",
+    # and the engine augments the caption with "Vocal Details: Purely
+    # instrumental track, no vocals." per the prompting guide - the structural
+    # tags alone are insufficient; the caption augmentation is the primary
+    # vocal-suppression signal.
     is_instrumental = request.is_instrumental or False
     if is_instrumental:
         lyrics = ""
