@@ -3801,6 +3801,18 @@ async def create_audio_generation(
     if not prompt or not prompt.strip():
         raise HTTPException(status_code=400, detail="Field 'prompt' (or 'input') is required")
 
+    # When is_instrumental is True, force instrumental mode by clearing
+    # the lyrics field.  The engine's _preprocess_lyrics converts empty
+    # lyrics to "[instrumental]", and the engine augments the caption
+    # with "instrumental version with no vocals" - the [instrumental] tag
+    # alone is insufficient; the caption augmentation is the primary
+    # vocal-suppression signal per the prompting guide.
+    is_instrumental = request.is_instrumental or False
+    if is_instrumental:
+        lyrics = ""
+    else:
+        lyrics = request.lyrics or ""
+
     model_id = request.model or config.audio.default_model
     metadata = AudioBackend.get_model_metadata(model_id)
 
@@ -3819,8 +3831,8 @@ async def create_audio_generation(
 
     request_id = f"audio-{uuid.uuid4().hex[:12]}"
     logger.info(
-        "[%s] audio generation request: model=%s seconds=%s steps=%s user=%s",
-        request_id, model_id, seconds, steps, getattr(current_user, "id", "?"),
+        "[%s] audio generation request: model=%s seconds=%s steps=%s instrumental=%s user=%s",
+        request_id, model_id, seconds, steps, is_instrumental, getattr(current_user, "id", "?"),
     )
 
     cancellation_registry = get_cancellation_registry()
@@ -3843,7 +3855,7 @@ async def create_audio_generation(
                     steps=steps,
                     cfg_scale=cfg_scale,
                     seed=request.seed,
-                    lyrics=request.lyrics or "",
+                    lyrics=lyrics,
                     unload_after_generate=config.audio.unload_after_generate,
                     request_id=request_id,
                     cancellation_check=cancellation_check,
