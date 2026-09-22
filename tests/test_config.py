@@ -12,6 +12,11 @@ import pytest
 import tempfile
 from pathlib import Path
 
+from src.config import (
+    ServerConfig, ModelsConfig, GenerationConfig,
+    StorageConfig, LoggingConfig, ModelCacheConfig, AudioConfig,
+)
+
 
 def test_config_loads_defaults():
     """Test configuration loads with default values."""
@@ -115,7 +120,7 @@ def test_config_logging_defaults():
     
     logging = LoggingConfig()
     
-    assert logging.level == "INFO"
+    assert logging.level == "WARNING"
 
 
 def test_config_invalid_yaml():
@@ -210,7 +215,7 @@ def test_config_cancel_on_disconnect_yaml(monkeypatch, tmp_path):
 
 def test_config_migration_sync():
     """Test that get_default_config in config_migration stays in sync with GenerationConfig."""
-    from src.config import GenerationConfig
+    from src.config import GenerationConfig, AudioConfig, ServerConfig, ModelsConfig, StorageConfig, LoggingConfig, ModelCacheConfig
     from src.config_migration import get_default_config
 
     defaults = get_default_config()
@@ -224,5 +229,88 @@ def test_config_migration_sync():
     model_fields = getattr(GenerationConfig, "model_fields", None) or getattr(GenerationConfig, "__fields__", {})
     missing_fields = set(model_fields.keys()) - set(gen_defaults.keys())
     assert not missing_fields, f"Missing fields in config_migration.py get_default_config(): {missing_fields}"
+
+
+@pytest.mark.parametrize("model_cls,section", [
+    (ServerConfig, "server"),
+    (ModelsConfig, "models"),
+    (GenerationConfig, "generation"),
+    (StorageConfig, "storage"),
+    (LoggingConfig, "logging"),
+    (ModelCacheConfig, "model_cache"),
+    (AudioConfig, "audio"),
+])
+def test_config_defaults_sync(model_cls, section):
+    """Test that every Pydantic field default matches get_default_config() value.
+
+    This catches drift between config.py (Pydantic models) and
+    config_migration.py (get_default_config). Fields with default_factory
+    or env-var-based defaults are skipped.
+    """
+    from src.config_migration import get_default_config
+    defaults = get_default_config()
+    section_defaults = defaults.get(section, {})
+    fields = getattr(model_cls, "model_fields", None) or getattr(model_cls, "__fields__", {})
+
+    for fname, field_info in fields.items():
+        if fname not in section_defaults:
+            continue  # Key-existence is checked by test_config_migration_sync
+        # Skip fields with default_factory (e.g. cancel_on_disconnect reads env var)
+        if field_info.default_factory is not None:
+            continue
+        pydantic_default = field_info.default
+        migration_default = section_defaults[fname]
+        # Path defaults in config.py vs strings in config_migration — normalize
+        from pathlib import Path
+        if isinstance(pydantic_default, Path) and not isinstance(migration_default, Path):
+            migration_default = Path(migration_default)
+        # None == None, True == True, etc.
+        assert pydantic_default == migration_default, (
+            f"Default mismatch in {section}.{fname}: "
+            f"config.py={pydantic_default!r} vs config_migration.py={migration_default!r}"
+        )
+
+
+def test_audio_timeout_default():
+    """Test that the audio request_timeout_seconds default is sufficient for music generation."""
+    from src.config import AudioConfig
+    audio = AudioConfig()
+    assert audio.request_timeout_seconds == 1800  # 30 min — covers MiniMax-Music3 full songs
+
+
+def test_config_migration_preserves_comments(tmp_path):
+    """Test that migrate_config preserves YAML comments."""
+    from src.config_migration import migrate_config
+    from ruamel.yaml import YAML
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.indent(mapping=2, sequence=4, offset=2)
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "# My custom config\n"
+        "# This is a comment I want to keep\n"
+        "server:\n"
+        "  host: 0.0.0.0\n"
+        "  port: 8090\n"
+        "generation:\n"
+        "  default_steps: 25\n"
+        "  # My custom generation settings\n"
+        "  force_float32: true\n",
+        encoding="utf-8",
+    )
+
+    result = migrate_config(config_path=str(config_file), backup=True)
+    assert result["migrated"]
+
+    # Read the file back and verify comments are preserved
+    content = config_file.read_text(encoding="utf-8")
+    assert "My custom config" in content, "Top-level comment was stripped!"
+    assert "This is a comment I want to keep" in content, "Second comment was stripped!"
+    assert "My custom generation settings" in content, "Inline section comment was stripped!"
+    # Verify user values are preserved
+    assert "port: 8090" in content
+    assert "force_float32: true" in content
 
 

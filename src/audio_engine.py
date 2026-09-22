@@ -89,15 +89,18 @@ def detect_device(force_cpu: bool = False) -> torch.device:
     return torch.device("cpu")
 
 
-def detect_dtype(device: torch.device, force_fp32: bool = False) -> torch.dtype:
+def detect_dtype(device: torch.device, force_fp32: bool = False, force_bfloat16: bool = False) -> torch.dtype:
     """
     Pick the autocast dtype for the chosen device.
 
     On gfx1103 (Phoenix APU) FP16/FP16 VAE decode can crash the GPU; users
     running there already set `force_float32` in image generation.  We
     mirror that knob here.  bfloat16 is also exposed as a fallback for
-    gfx1102.
+    gfx1102 (Phoenix Point / Strix Halo) where it gives the best APU
+    performance.
     """
+    if force_bfloat16:
+        return torch.bfloat16
     if force_fp32:
         return torch.float32
     if device.type == "cuda":
@@ -129,6 +132,7 @@ class ALICEAudioEngine:
         device: Optional[torch.device] = None,
         force_fp32: bool = False,
         vae_decode_cpu: bool = False,
+        force_bfloat16: bool = False,
     ):
         """
         Args:
@@ -136,6 +140,7 @@ class ALICEAudioEngine:
             device: Torch device.  Auto-detected if None.
             force_fp32: Force float32 dtype (mimic image backend knob).
             vae_decode_cpu: Decode VAE on CPU (AMD gfx1103 workaround).
+            force_bfloat16: Prefer bfloat16 (better for AMD gfx1102 / Strix Halo).
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -143,7 +148,7 @@ class ALICEAudioEngine:
         self.device = device or detect_device()
         self.force_fp32 = force_fp32
         self.vae_decode_cpu = vae_decode_cpu
-        self.dtype = detect_dtype(self.device, force_fp32=force_fp32)
+        self.dtype = detect_dtype(self.device, force_fp32=force_fp32, force_bfloat16=force_bfloat16)
 
         self.model: Optional[Any] = None
         self.model_config: Optional[Dict[str, Any]] = None

@@ -41,7 +41,8 @@ def test_health_endpoint(client):
     assert "gpuAvailable" in data
     assert "modelsLoaded" in data
     assert "version" in data
-    assert data["version"] == "1.0.0"
+    from src import __version__
+    assert data["version"] == __version__
 
 
 def test_health_response_types(client):

@@ -462,6 +462,7 @@ class AudioBackend:
                         raise RuntimeError("Audio generation cancelled before start")
 
                     engine = await self._get_engine(model_id)
+                    gen_start = time.time()
                     logger.info(
                         "[%s] audio generate: model=%s seconds=%d steps=%d cfg=%.2f",
                         request_id, model_id, seconds, steps, cfg_scale,
@@ -506,11 +507,10 @@ class AudioBackend:
                             pass
                         raise RuntimeError("Audio generation cancelled mid-flight")
 
-                    # Resolve generation start time for elapsed tracking
-                    gen_start = time.time()
+                    # Resolve total generation time (includes model load + inference + decode)
+                    elapsed = time.time() - gen_start
                     stat = audio_path.stat()
                     rel = audio_path.name
-                    elapsed = time.time() - gen_start
                     return AudioGenerationResult(
                         audio_path=audio_path,
                         url=f"/v1/audio/{rel}",

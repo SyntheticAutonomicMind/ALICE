@@ -39,12 +39,13 @@ from .auth import AuthManager, SESSION_TIMEOUT_SECONDS, SESSION_INACTIVITY_TIMEO
 from .gallery import GalleryManager, ImageRecord, AudioRecord
 from .cancellation import get_cancellation_registry, CancellationError
 from .updater import init_update_manager, shutdown_update_manager, get_update_manager
-from .config_migration import migrate_config
+from .config_migration import migrate_config, read_config_file, write_config_file
 from . import __version__
 from .backends.audio_backend import (
     AudioBackend,
     register_eviction_callback as register_audio_eviction_callback,
 )
+from .backends import log_gpu_recommendations, detect_amd_gpu
 from .schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -123,7 +124,17 @@ async def lifespan(app: FastAPI):
     logger.info("ALICE starting up...")
     _startup_time = time.time()
     
-    # Run config migration to add any new settings from this version
+    # Warn about deprecated auto_unload_timeout
+    if config.models.auto_unload_timeout and config.models.auto_unload_timeout > 0:
+        logger.warning(
+            "models.auto_unload_timeout is set to %d but is DEPRECATED and ignored. "
+            "Model caching is controlled by max_cached_models and vram_evict_threshold_gb.",
+            config.models.auto_unload_timeout,
+        )
+
+    # Log AMD GPU recommendations before initializing backends
+    # (uses lspci/sysfs, no torch import needed)
+    log_gpu_recommendations()
     try:
         migration = migrate_config()
         if migration["migrated"]:
@@ -3263,8 +3274,6 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
     Returns the saved config as a dictionary (passwords/keys redacted).
     This ensures changes are visible immediately after saving, even before restart.
     """
-    import yaml
-    
     # Find config file path - check ALICE_CONFIG env var first, then known paths
     env_config = os.environ.get("ALICE_CONFIG")
     
@@ -3285,10 +3294,9 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
     if not config_file:
         raise HTTPException(status_code=500, detail="Config file not found")
     
-    # Read saved config from file
+    # Read saved config from file (preserving comments)
     try:
-        with open(config_file) as f:
-            saved_config = yaml.safe_load(f) or {}
+        saved_config = read_config_file(config_file)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read config: {str(e)}")
     
@@ -3299,6 +3307,7 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
     storage_cfg = saved_config.get("storage", {})
     logging_cfg = saved_config.get("logging", {})
     audio_cfg = saved_config.get("audio", {})
+    model_cache_cfg = saved_config.get("model_cache", {})
     
     return {
         "server": {
@@ -3324,7 +3333,7 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
             "default_width": generation_cfg.get("default_width", 512),
             "default_height": generation_cfg.get("default_height", 512),
             "max_concurrent": generation_cfg.get("max_concurrent", 1),
-            "request_timeout": generation_cfg.get("request_timeout", 600),
+            "request_timeout": generation_cfg.get("request_timeout", 300),
             "backend": generation_cfg.get("backend", "auto"),
             "sdcpp_binary": str(generation_cfg.get("sdcpp_binary")) if generation_cfg.get("sdcpp_binary") else None,
             "sdcpp_threads": generation_cfg.get("sdcpp_threads", 8),
@@ -3373,9 +3382,17 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
             "default_cfg_scale": audio_cfg.get("default_cfg_scale", 7.0),
             "max_concurrent": audio_cfg.get("max_concurrent", 1),
             "unload_after_generate": audio_cfg.get("unload_after_generate", True),
-            "request_timeout_seconds": audio_cfg.get("request_timeout_seconds", 900),
+            "request_timeout_seconds": audio_cfg.get("request_timeout_seconds", 1800),
             "force_fp32": audio_cfg.get("force_fp32", False),
             "vae_decode_cpu": audio_cfg.get("vae_decode_cpu", False),
+        },
+        "model_cache": {
+            "enabled": model_cache_cfg.get("enabled", True),
+            "database_path": str(model_cache_cfg.get("database_path", "./data/model_cache.db")),
+            "sync_on_startup": model_cache_cfg.get("sync_on_startup", False),
+            "sync_interval_hours": model_cache_cfg.get("sync_interval_hours", 24),
+            "civitai_page_limit": model_cache_cfg.get("civitai_page_limit"),
+            "huggingface_limit": model_cache_cfg.get("huggingface_limit", 10000),
         },
     }
 
@@ -3398,8 +3415,6 @@ async def update_config(
             "models.civitai_api_key": "your-key-here"
         }
     """
-    import yaml
-    
     # Find config file path - check ALICE_CONFIG env var first, then known paths
     env_config = os.environ.get("ALICE_CONFIG")
     
@@ -3420,9 +3435,8 @@ async def update_config(
     if not config_file:
         raise HTTPException(status_code=500, detail="Config file not found")
     
-    # Read current config
-    with open(config_file) as f:
-        current_config = yaml.safe_load(f) or {}
+    # Read current config (preserving comments)
+    current_config = read_config_file(config_file)
     
     # Apply updates
     changes_made = []
@@ -3448,10 +3462,9 @@ async def update_config(
         
         logger.info("Config updated: %s = %s", key, "***" if "key" in setting.lower() or "token" in setting.lower() else value)
     
-    # Write updated config
+    # Write updated config (preserving comments)
     try:
-        with open(config_file, "w") as f:
-            yaml.dump(current_config, f, default_flow_style=False, sort_keys=False)
+        write_config_file(config_file, current_config)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save config: {str(e)}")
     

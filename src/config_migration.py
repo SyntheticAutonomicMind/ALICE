@@ -22,7 +22,6 @@ Design principles:
   - Log all changes clearly
 """
 
-import copy
 import logging
 import os
 import shutil
@@ -30,11 +29,56 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from ruamel.yaml import YAML as _RuamelYAML
+    _HAS_RUAMEL = True
+except ImportError:
+    _HAS_RUAMEL = False
+
 import yaml
 
 from . import __version__
 
 logger = logging.getLogger(__name__)
+
+
+def _get_rt_yaml():
+    """Return a configured ruamel YAML instance for round-trip (comment-preserving) I/O."""
+    yaml_rt = _RuamelYAML()
+    yaml_rt.preserve_quotes = True
+    yaml_rt.indent(mapping=2, sequence=4, offset=2)
+    return yaml_rt
+
+
+def read_config_file(path: Path) -> Any:
+    """Read a YAML config file, preserving comments when ruamel.yaml is available.
+
+    Returns a CommentedMap (ruamel) or plain dict (pyyaml fallback).
+    """
+    if _HAS_RUAMEL:
+        try:
+            with open(path) as f:
+                return _get_rt_yaml().load(f) or {}
+        except Exception as e:
+            logger.warning("ruamel read failed for %s: %s. Falling back to pyyaml.", path, e)
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def write_config_file(path: Path, config: Any) -> None:
+    """Write a YAML config file, preserving comments when ruamel.yaml is available.
+
+    Falls back to pyyaml (which strips comments) if ruamel is not installed.
+    """
+    if _HAS_RUAMEL:
+        try:
+            with open(path, "w") as f:
+                _get_rt_yaml().dump(config, f)
+            return
+        except Exception as e:
+            logger.warning("ruamel write failed for %s: %s. Falling back to pyyaml.", path, e)
+    with open(path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
 def get_default_config() -> Dict[str, Any]:
@@ -90,7 +134,8 @@ def get_default_config() -> Dict[str, Any]:
             "vae_conv_direct": True,
             "circular": False,
             "enable_flash_attention": True,
-            "cancel_on_disconnect": False,
+            "cancel_on_disconnect": os.environ.get("ALICE_CANCEL_ON_DISCONNECT", "false").lower()
+        in ("true", "1", "yes"),
             "max_cached_models": 2,
             "vram_evict_threshold_gb": 2.0,
             "max_cpu_cached_models": 8,
@@ -127,7 +172,7 @@ def get_default_config() -> Dict[str, Any]:
             "default_cfg_scale": 7.0,
             "max_concurrent": 1,
             "unload_after_generate": True,
-            "request_timeout_seconds": 900,
+            "request_timeout_seconds": 1800,
             "force_fp32": False,
             "vae_decode_cpu": False,
         },
@@ -208,13 +253,29 @@ def migrate_config(
         logger.debug("Config file not found at %s, skipping migration", path)
         return result
 
-    # Load the current config
-    try:
-        with open(path) as f:
-            user_config = yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.error("Failed to read config file %s: %s", path, e)
-        return result
+    # Load the current config — use ruamel for comment-preserving round-trip
+    user_config = None
+    yaml_rt = None
+    if _HAS_RUAMEL:
+        yaml_rt = _RuamelYAML()
+        yaml_rt.preserve_quotes = True
+        yaml_rt.indent(mapping=2, sequence=4, offset=2)
+        try:
+            with open(path) as f:
+                user_config = yaml_rt.load(f)
+                if user_config is None:
+                    user_config = {}
+        except Exception as e:
+            logger.error("Failed to read config file %s: %s", path, e)
+            return result
+    else:
+        logger.warning("ruamel.yaml not installed; config migration will strip comments. Install ruamel.yaml to fix.")
+        try:
+            with open(path) as f:
+                user_config = yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.error("Failed to read config file %s: %s", path, e)
+            return result
 
     # Get defaults and find missing keys
     defaults = get_default_config()
@@ -244,45 +305,51 @@ def migrate_config(
         except Exception as e:
             logger.warning("Failed to create config backup: %s", e)
 
-    # Apply missing keys to user config
-    merged = copy.deepcopy(user_config)
+    # Apply missing keys directly to the loaded config object.
+    # With ruamel's CommentedMap this preserves existing comments;
+    # with a plain dict (pyyaml fallback) it just adds the keys.
     for section, key, value in missing:
         if section == "root":
-            # Top-level key
-            merged[key] = value
+            user_config[key] = value
         else:
             # Nested key - ensure parent exists
             parts = section.split(".")
-            target = merged
+            target = user_config
             for part in parts:
                 if part not in target:
                     target[part] = {}
                 target = target[part]
             target[key] = value
 
-    # Write updated config
+    # Write updated config — preserving comments when ruamel is available
     try:
-        # Read the original file to try to preserve structure
-        with open(path) as f:
-            original_content = f.read()
-
-        # Append new keys as a comment-annotated block at the end of their sections
-        # For simplicity, we rewrite the entire YAML but this preserves all user values
-        with open(path, "w") as f:
-            # Add a migration header comment
-            f.write(f"# Configuration migrated to version {__version__}\n")
-            f.write(f"# Added {len(missing)} new setting(s) with defaults\n")
-            f.write(f"# Original backed up to: {result.get('backup_path', 'N/A')}\n")
-            f.write("#\n")
-
-            # Write the merged config
-            yaml.dump(
-                merged,
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-                allow_unicode=True,
-            )
+        if yaml_rt is not None:
+            # ruamel round-trip: preserves comments, key order, and quoting.
+            # We prepend the migration header manually (instead of
+            # yaml_set_start_comment which would overwrite existing
+            # top-level comments) so user annotations survive.
+            with open(path, "w") as f:
+                f.write(
+                    f"# Configuration migrated to version {__version__}\n"
+                    f"# Added {len(missing)} new setting(s) with defaults\n"
+                    f"# Original backed up to: {result.get('backup_path', 'N/A')}\n"
+                    f"#\n"
+                )
+                yaml_rt.dump(user_config, f)
+        else:
+            # Fallback: pyyaml strips comments but still writes valid YAML
+            with open(path, "w") as f:
+                f.write(f"# Configuration migrated to version {__version__}\n")
+                f.write(f"# Added {len(missing)} new setting(s) with defaults\n")
+                f.write(f"# Original backed up to: {result.get('backup_path', 'N/A')}\n")
+                f.write("#\n")
+                yaml.dump(
+                    user_config,
+                    f,
+                    default_flow_style=False,
+                    sort_keys=False,
+                    allow_unicode=True,
+                )
 
         result["migrated"] = True
         logger.info(
@@ -303,130 +370,4 @@ def migrate_config(
     return result
 
 
-def migrate_config_preserving_format(
-    config_path: Optional[str] = None,
-    backup: bool = True,
-) -> Dict[str, Any]:
-    """Migrate config by appending missing keys to the end of each section.
-
-    This method preserves the user's original YAML formatting, comments,
-    and ordering by appending new keys to the end of the file as an
-    addendum block, rather than rewriting the entire file.
-
-    Args:
-        config_path: Path to the config file.
-        backup: Whether to create a backup.
-
-    Returns:
-        Migration results dict.
-    """
-    result = {
-        "migrated": False,
-        "added": [],
-        "config_path": None,
-        "backup_path": None,
-        "version": __version__,
-    }
-
-    if config_path is None:
-        config_path = os.environ.get("ALICE_CONFIG", "./config.yaml")
-
-    path = Path(config_path)
-    result["config_path"] = str(path)
-
-    if not path.exists():
-        return result
-
-    try:
-        with open(path) as f:
-            user_config = yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.error("Failed to read config: %s", e)
-        return result
-
-    defaults = get_default_config()
-    missing = find_missing_keys(user_config, defaults)
-
-    if not missing:
-        return result
-
-    # Create backup
-    if backup:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-        backup_path = path.with_suffix(f".{timestamp}.bak")
-        try:
-            shutil.copy2(path, backup_path)
-            result["backup_path"] = str(backup_path)
-        except Exception as e:
-            logger.warning("Could not backup config: %s", e)
-
-    # Group missing keys by top-level section
-    by_section: Dict[str, List[Tuple[str, Any]]] = {}
-    for section, key, value in missing:
-        if section == "root":
-            by_section.setdefault("_root", []).append((key, value))
-        else:
-            # Use just the top-level section name
-            top_section = section.split(".")[0]
-            by_section.setdefault(top_section, []).append((key, value))
-
-    # Append new keys to the file
-    try:
-        with open(path, "a") as f:
-            f.write(f"\n# --- New settings added by ALICE {__version__} ---\n")
-
-            for section, keys in by_section.items():
-                if section == "_root":
-                    for key, value in keys:
-                        f.write(f"\n{key}: {_yaml_value(value)}\n")
-                        result["added"].append(key)
-                else:
-                    # Check if the section already exists in the file
-                    if section in user_config:
-                        # Append under the existing section
-                        # We write as top-level because YAML doesn't support
-                        # appending to nested blocks easily. Instead, we use
-                        # the merge pattern where the last occurrence wins.
-                        # Actually, YAML doesn't support merging like that.
-                        # Use the full rewrite approach instead.
-                        pass
-                    else:
-                        # New section entirely
-                        f.write(f"\n{section}:\n")
-                        for key, value in keys:
-                            f.write(f"  {key}: {_yaml_value(value)}\n")
-                            result["added"].append(f"{section}.{key}")
-
-            # For keys in existing sections, we need the full rewrite approach
-            needs_rewrite = any(
-                section in user_config
-                for section in by_section
-                if section != "_root"
-            )
-
-            if needs_rewrite:
-                # Fall back to full rewrite for keys in existing sections
-                return migrate_config(config_path=str(path), backup=False, dry_run=False)
-
-        result["migrated"] = True
-        logger.info("Config migrated: %d new setting(s)", len(result["added"]))
-    except Exception as e:
-        logger.error("Config migration failed: %s", e)
-
-    return result
-
-
-def _yaml_value(value: Any) -> str:
-    """Format a Python value as a YAML string."""
-    if value is None:
-        return "null"
-    elif isinstance(value, bool):
-        return "true" if value else "false"
-    elif isinstance(value, str):
-        if any(c in value for c in ":{}[]#&*!|>'\"%@`"):
-            return f'"{value}"'
-        return value
-    elif isinstance(value, (int, float)):
-        return str(value)
-    else:
-        return yaml.dump(value, default_flow_style=True).strip()
+__all__ = ["get_default_config", "find_missing_keys", "migrate_config"]

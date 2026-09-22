@@ -106,20 +106,31 @@ if "MIOPEN_DEBUG_FIND_ALL" not in os.environ:
     os.environ["MIOPEN_DEBUG_FIND_ALL"] = "0"
     logger.info("Set MIOPEN_DEBUG_FIND_ALL=0 for AMD GPU compatibility")
 
-# Disable cuDNN/MIOpen which can cause GPU hangs on gfx1103
-# This forces fallback to non-accelerated convolution paths
+# AMD-specific workarounds: only apply when the GPU is actually AMD.
+# torch.cuda.is_available() is True for both NVIDIA (CUDA) and AMD (ROCm),
+# so we check the device name before disabling cuDNN or SDPA optimizations.
+# Applying these to NVIDIA GPUs would silently disable cuDNN and flash
+# attention, causing a significant performance regression.
+_is_amd_gpu = False
 if torch.cuda.is_available():
-    torch.backends.cudnn.enabled = False
-    logger.info("Disabled cuDNN/MIOpen for AMD GPU compatibility")
+    try:
+        _gpu_name = torch.cuda.get_device_name(0).lower()
+        _is_amd_gpu = "radeon" in _gpu_name or "amd" in _gpu_name or "gfx" in _gpu_name
+    except Exception:
+        pass
 
-# Disable problematic SDPA backends for AMD GPU compatibility
-# Flash and memory-efficient attention can cause GPU hangs on ROCm
-if torch.cuda.is_available():
+if _is_amd_gpu:
+    # Disable cuDNN/MIOpen which can cause GPU hangs on AMD gfx1103
+    torch.backends.cudnn.enabled = False
+    logger.info("Disabled cuDNN/MIOpen for AMD GPU compatibility (device: %s)", torch.cuda.get_device_name(0))
+
+    # Disable problematic SDPA backends for AMD GPU compatibility
+    # Flash and memory-efficient attention can cause GPU hangs on ROCm
     try:
         torch.backends.cuda.enable_flash_sdp(False)
         torch.backends.cuda.enable_mem_efficient_sdp(False)
         torch.backends.cuda.enable_math_sdp(True)
-        logger.info("Configured SDPA: disabled flash/mem_efficient, enabled math-only")
+        logger.info("Configured SDPA: disabled flash/mem_efficient, enabled math-only (AMD GPU)")
     except Exception as e:
         logger.debug("Could not configure SDPA backends: %s", e)
 

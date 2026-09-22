@@ -33,7 +33,7 @@ class ServerConfig(BaseModel):
 class ModelsConfig(BaseModel):
     """Model management configuration."""
     directory: Path = Field(default=Path("./models"), description="Models directory path")
-    auto_unload_timeout: int = Field(default=0, description="Disabled by default. Models are NOT unloaded based on idle time — they persist in cache until evicted by memory pressure (vram_evict_threshold_gb / max_cached_models) or explicitly requested via the API. Set to a positive value for backward compatibility (currently ignored).")
+    auto_unload_timeout: int = Field(default=0, description="DEPRECATED: This setting is currently ignored. Models are unloaded based on memory pressure (vram_evict_threshold_gb / max_cached_models), not idle time. A deprecation warning is logged at startup if set > 0.")
     default_model: Optional[str] = Field(default=None, description="Default model name")
     civitai_api_key: Optional[str] = Field(default=None, description="CivitAI API key for downloads")
     huggingface_token: Optional[str] = Field(default=None, description="HuggingFace token for private models")
@@ -131,7 +131,7 @@ class AudioConfig(BaseModel):
         default=True,
         description="Drop the audio model after each generation so image generation can resume without manual eviction.  Disable if you plan to chain many audio requests and want to amortise load cost.",
     )
-    request_timeout_seconds: int = Field(default=300, ge=30, le=3600, description="Per-request timeout for audio generation")
+    request_timeout_seconds: int = Field(default=1800, ge=30, le=7200, description="Per-request timeout for audio generation (1800s default — MiniMax-Music3 full songs can take 15-20 min)")
     # Hardware knobs (mirror the image generation flags so we don't
     # surprise users on the same hardware).
     force_fp32: bool = Field(default=False, description="Force float32 (rare; required for some AMD APUs)")
