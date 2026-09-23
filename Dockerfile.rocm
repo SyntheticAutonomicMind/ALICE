@@ -62,13 +62,21 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Create a constraints file so build-isolation environments also get
 # setuptools<81 (pip's build isolation ignores the main environment's
-# setuptools, and setuptools 81+ lacks pkg_resources).
-RUN echo "setuptools<81" > /tmp/constraints.txt
-ENV PIP_CONSTRAINT=/tmp/constraints.txt
+# setuptools, and setuptools 81+ removed pkg_resources which
+# pandas needs at build time).
+RUN echo "setuptools<81" > /build/constraints.txt
+ENV PIP_CONSTRAINT=/build/constraints.txt
+# Disable build isolation so the main environment's setuptools<81 is used.
+# Build deps (numpy, Cython, etc.) are pre-installed below since pandas 2.0.2
+# (pinned by stable-audio-tools) has no Python 3.13 wheel and must build from
+# source.
+RUN pip install --no-cache-dir numpy cython
 
-# Install remaining dependencies
+# Install remaining dependencies with --no-build-isolation so the
+# pre-installed setuptools<81 is used instead of the isolated env's
+# setuptools which lacks pkg_resources.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --no-build-isolation -r requirements.txt
 
 # =============================================================================
 # Stage 2: Runtime
