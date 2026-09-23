@@ -33,7 +33,6 @@ ARG TORCHAUDIO_VERSION
 
 # Install Python 3.13 from deadsnakes PPA (Ubuntu 24.04 only ships 3.12).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/* && \
     add-apt-repository -y ppa:deadsnakes/ppa && \
@@ -43,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python${PYTHON_VERSION}-venv \
     python${PYTHON_VERSION}-dev \
     python3-pip \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Use the specified Python version
@@ -102,10 +102,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1
 
 # Create non-root user (with video/render group for GPU access)
-RUN groupadd -r alice && useradd -r -g alice -G video,render -d /app -s /sbin/nologin alice
+RUN groupadd -r alice && \
+    getent group video || groupadd -r video && \
+    getent group render || groupadd -r render && \
+    useradd -r -g alice -G video,render -d /app -s /sbin/nologin alice
 
 # Copy Python packages from builder.
-# Copy the entire python3.x lib directory to handle patch-versioned paths.
+# Copy the entire Python lib directory to handle patch-versioned paths
+# (e.g., python3.13 vs python3.13.15).
 COPY --from=builder /usr/local/lib/python${PYTHON_VERSION} /usr/local/lib/python${PYTHON_VERSION}
 COPY --from=builder /usr/local/bin /usr/local/bin
 
