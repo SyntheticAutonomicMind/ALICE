@@ -1078,6 +1078,25 @@ async def get_generation_defaults():
     }
 
 
+@app.get("/v1/audio/defaults")
+async def get_audio_defaults():
+    """
+    Get audio generation default settings.
+
+    Returns default values for model, duration, steps, guidance, etc.
+    Public endpoint - no auth required.
+    """
+    return {
+        "model": config.audio.default_model,
+        "seconds": config.audio.default_seconds,
+        "steps": config.audio.default_steps,
+        "cfg_scale": config.audio.default_cfg_scale,
+        "max_concurrent": config.audio.max_concurrent,
+        "unload_after_generate": config.audio.unload_after_generate,
+        "request_timeout_seconds": config.audio.request_timeout_seconds,
+    }
+
+
 @app.get("/v1/models", response_model=ModelsResponse)
 async def list_models(access: AccessLevel = Depends(require_access_level(AccessLevel.ANONYMOUS))):
     """
@@ -1686,22 +1705,25 @@ async def chat_completions(
 
         # Define internal generation & gallery worker function
         async def _generate_and_save_to_gallery():
-            image_paths, metadata = await generator.generate(
-                model_path=Path(model_info.path),
-                prompt=prompt,
-                negative_prompt=gen_negative_prompt or "",
-                steps=gen_steps,
-                guidance_scale=gen_guidance_scale,
-                width=gen_width,
-                height=gen_height,
-                seed=gen_seed,
-                scheduler=gen_scheduler,
-                num_images=gen_num_images or 1,
-                lora_paths=lora_paths if lora_paths else None,
-                lora_scales=lora_scales,
-                cancellation_token=cancellation_token,
-                input_images=input_images,
-                strength=gen_strength,
+            image_paths, metadata = await asyncio.wait_for(
+                generator.generate(
+                    model_path=Path(model_info.path),
+                    prompt=prompt,
+                    negative_prompt=gen_negative_prompt or "",
+                    steps=gen_steps,
+                    guidance_scale=gen_guidance_scale,
+                    width=gen_width,
+                    height=gen_height,
+                    seed=gen_seed,
+                    scheduler=gen_scheduler,
+                    num_images=gen_num_images or 1,
+                    lora_paths=lora_paths if lora_paths else None,
+                    lora_scales=lora_scales,
+                    cancellation_token=cancellation_token,
+                    input_images=input_images,
+                    strength=gen_strength,
+                ),
+                timeout=config.generation.request_timeout,
             )
 
             # Build image URLs and record in gallery
@@ -1804,6 +1826,12 @@ async def chat_completions(
         if not cancel_on_disconnect:
             logger.info("Request %s HTTP connection cancelled; background generation remains shielded and will finish saving.", request_id)
         raise
+    except asyncio.TimeoutError:
+        logger.warning("Image generation timed out after %ss: %s", config.generation.request_timeout, request_id)
+        raise HTTPException(
+            status_code=504,
+            detail=f"Image generation timed out after {config.generation.request_timeout}s. Consider increasing generation.request_timeout in config.",
+        )
     except CancellationError as e:
         # Request was explicitly cancelled - return 499 (Client Closed Request)
         logger.info("Request explicitly cancelled: %s", request_id)
@@ -2134,6 +2162,55 @@ async def gallery_delete_audio(
         raise HTTPException(status_code=404, detail="Audio not found")
 
     return DeleteAudioResponse(id=audio_id, deleted=True)
+
+
+@app.patch("/v1/gallery/audio/{audio_id}/privacy")
+async def gallery_update_audio_privacy(
+    audio_id: str,
+    request: UpdateImagePrivacyRequest,
+    current_user: Any = Depends(get_current_user),
+    access: AccessLevel = Depends(require_access_level(AccessLevel.USER)),
+):
+    """
+    Update audio privacy settings.
+
+    Only the owner or admins can update privacy settings.
+    """
+    if gallery_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    audio = gallery_manager.get_audio(audio_id)
+    if not audio:
+        raise HTTPException(status_code=404, detail="Audio not found")
+
+    # Check ownership
+    api_key_id = current_user.id if current_user else None
+    is_admin = current_user.get_access_level() == AccessLevel.ADMIN if current_user else False
+    is_owner = bool(api_key_id and audio.owner_api_key_id == api_key_id)
+
+    if not is_owner and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to modify this audio"
+        )
+
+    # Calculate expiration if making public
+    expires_at = None
+    if request.is_public and request.expires_in_hours:
+        expires_at = time.time() + (request.expires_in_hours * 3600)
+    elif request.is_public:
+        expires_at = time.time() + (config.storage.public_image_expiration_hours * 3600)
+
+    success = gallery_manager.update_audio_privacy(
+        audio_id=audio_id,
+        is_public=request.is_public,
+        expires_at=expires_at,
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update privacy")
+
+    return {"success": True, "is_public": request.is_public, "expires_at": expires_at}
 
 
 @app.patch("/v1/gallery/{image_id}/privacy")
@@ -3467,12 +3544,45 @@ async def update_config(
         write_config_file(config_file, current_config)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save config: {str(e)}")
-    
+
+    # Update in-memory config so runtime-effective settings (timeouts,
+    # max_concurrent, NSFW flag, etc.) take effect immediately without
+    # requiring a service restart.  Structural settings (backend, paths,
+    # log level) still require a restart but the file is already updated.
+    for key, value in updates.items():
+        parts = key.split(".")
+        if len(parts) != 2:
+            continue
+        section, setting = parts
+        section_obj = getattr(config, section, None)
+        if section_obj is not None and hasattr(section_obj, setting):
+            try:
+                type_hint = type(getattr(section_obj, setting))
+                if type_hint is bool and isinstance(value, str):
+                    setattr(section_obj, setting, value == "true")
+                elif type_hint is int and isinstance(value, str):
+                    setattr(section_obj, setting, int(float(value)))
+                elif type_hint is float and isinstance(value, str):
+                    setattr(section_obj, setting, float(value))
+                else:
+                    setattr(section_obj, setting, value)
+            except (ValueError, TypeError):
+                pass
+
+    # Reconfigure session timeout if it was changed
+    if "server.session_timeout_seconds" in updates:
+        try:
+            new_timeout = int(float(updates["server.session_timeout_seconds"]))
+            set_session_timeout(new_timeout)
+        except (ValueError, TypeError):
+            pass
+
     return {
         "status": "updated",
-        "message": "Configuration saved. Restart service for changes to take effect.",
+        "message": "Configuration saved. Settings marked [Live] take effect immediately; restart service for other changes.",
         "changes": changes_made,
         "config_file": str(config_file),
+        "live_updated": list(updates.keys()),
     }
 
 
@@ -3804,7 +3914,7 @@ async def create_audio_generation(
     # When is_instrumental is True, preserve any client-provided lyrics
     # (which may contain user-written structural tags).  The engine's
     # _preprocess_lyrics normalizes them to the structural tag set
-    # ([intro]\n[instrumental]\n[solo]\n[outro]) and augments the caption
+    # ([Intro]\n[Instrumental]\n[Solo]\n[Outro]) and augments the caption
     # with "Vocal Details: Purely instrumental track, no vocals." per the
     # prompting guide.  When lyrics are empty/None, the engine generates
     # the structural tags internally.

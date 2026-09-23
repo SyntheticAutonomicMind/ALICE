@@ -425,25 +425,25 @@ def _preprocess_lyrics(lyrics: Optional[str]) -> str:
     body text on the next line.  After this transform the pipeline keeps both.
 
     Empty or whitespace-only lyrics (including ``None``) are replaced with
-    ``"[intro]\\n[instrumental]\\n[solo]\\n[outro]"`` because the pipeline raises
+    ``"[Intro]\\n[Instrumental]\\n[Solo]\\n[Outro]"`` because the pipeline raises
     ``ValueError`` when ``lyrics.strip()`` is falsy, and the MiniMax-Music3
     prompting guide requires the lyrics field to contain structural tags
-    (e.g. ``[intro]``, ``[instrumental]``, ``[solo]``, ``[outro]``); a lone
-    ``[instrumental]`` tag is insufficient -- the full set of structural tags
+    (e.g. ``[Intro]``, ``[Instrumental]``, ``[Solo]``, ``[Outro]``); a lone
+    ``[Instrumental]`` tag is insufficient -- the full set of structural tags
     gives the model a clear section scaffold without any vocal content.
-    The literal marker ``[instrumental]`` (case-insensitive, optionally
+    The literal marker ``[Instrumental]`` (case-insensitive, optionally
     bracketed) is also normalized to the full structural tag set so users
     can explicitly request instrumental output without worrying about
     pipeline validation.
     """
     if not lyrics or not lyrics.strip():
-        return "[intro]\n[instrumental]\n[solo]\n[outro]"
+        return "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
 
     # Recognize explicit "instrumental" markers from the user and normalize
     # them to the full structural tag set so the pipeline treats them as vocal-free.
     stripped = lyrics.strip().lower()
     if stripped in ("[instrumental]", "instrumental", "[no vocals]", "[no vocal]"):
-        return "[intro]\n[instrumental]\n[solo]\n[outro]"
+        return "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
 
     lines = []
     for line in lyrics.split("\n"):
@@ -756,7 +756,7 @@ class MiniMaxMusic3Engine:
         # Pre-process lyrics: the pipeline's _normalize_lyrics silently
         # drops text on the same line as a [tag].  Splitting tag+text
         # lines preserves the user's lyric content.  Empty lyrics
-        # (instrumental) become "[intro]\n[instrumental]\n[solo]\n[outro]"
+        # (instrumental) become "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
         # because the pipeline raises ValueError on a blank string.
         # NOTE: _preprocess_lyrics must be called BEFORE the log statement
         # below, which references len(processed_lyrics).  Calling it after

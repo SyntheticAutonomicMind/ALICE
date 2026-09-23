@@ -473,7 +473,6 @@
                 </div>
                 
                 <div id="settings-form" style="display: none;">
-                    <!-- Server Settings -->
                     <div style="margin-bottom: 2rem;">
                         <h3 style="font-size: 1rem; color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -507,12 +506,12 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="setting-server-session-timeout">Session Timeout (seconds)</label>
+                                <label for="setting-server-session-timeout">Session Timeout (seconds) <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <input type="number" id="setting-server-session-timeout" data-key="server.session_timeout_seconds" min="60" max="86400" placeholder="900">
                                 <small style="color: var(--text-muted); font-size: 0.75rem;">Time before user is logged out due to inactivity (default: 900 = 15 min)</small>
                             </div>
                             <div class="form-group">
-                                <label for="setting-server-block-nsfw">Block NSFW Content</label>
+                                <label for="setting-server-block-nsfw">Block NSFW Content <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <select id="setting-server-block-nsfw" data-key="server.block_nsfw">
                                     <option value="true">Yes (Enabled - Safe)</option>
                                     <option value="false">No (Disabled - Unrestricted)</option>
@@ -534,11 +533,6 @@
                             <div class="form-group">
                                 <label for="setting-models-directory">Models Directory</label>
                                 <input type="text" id="setting-models-directory" data-key="models.directory">
-                            </div>
-                            <div class="form-group">
-                                <label for="setting-models-auto-unload">Auto Unload Timeout (seconds) <span style="color: var(--warning); font-size: 0.75rem;">DEPRECATED</span></label>
-                                <input type="number" id="setting-models-auto-unload" data-key="models.auto_unload_timeout" min="0" value="0">
-                                <small style="color: var(--text-muted); font-size: 0.75rem;">Deprecated: ignored. Model caching is controlled by Max Cached Models and VRAM Evict Threshold below.</small>
                             </div>
                             <div class="form-group">
                                 <label for="setting-models-default">Default Model</label>
@@ -625,11 +619,12 @@
                                 <input type="number" id="setting-gen-height" data-key="generation.default_height" min="256" max="2048" step="64">
                             </div>
                             <div class="form-group">
-                                <label for="setting-gen-timeout">Request Timeout (seconds)</label>
+                                <label for="setting-gen-timeout">Request Timeout (seconds) <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <input type="number" id="setting-gen-timeout" data-key="generation.request_timeout" min="60">
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Max seconds for image generation (default: 300). Increase for complex prompts or large images.</small>
                             </div>
                             <div class="form-group">
-                                <label for="setting-gen-max-concurrent">Max Concurrent</label>
+                                <label for="setting-gen-max-concurrent">Max Concurrent <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <input type="number" id="setting-gen-max-concurrent" data-key="generation.max_concurrent" min="1" max="10">
                             </div>
                             <div class="form-group">
@@ -858,7 +853,7 @@
                             </div>
                         </div>
                         <div class="form-group">
-                            <label for="setting-gen-cancel-on-disconnect">Cancel On Disconnect</label>
+                            <label for="setting-gen-cancel-on-disconnect">Cancel On Disconnect <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                             <select id="setting-gen-cancel-on-disconnect" data-key="generation.cancel_on_disconnect">
                                 <option value="false">No (complete in background)</option>
                                 <option value="true">Yes (cancel immediately)</option>
@@ -980,7 +975,7 @@
                         </h3>
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
                             <div class="form-group">
-                                <label for="setting-audio-enabled">Audio Generation</label>
+                                <label for="setting-audio-enabled">Audio Generation <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <select id="setting-audio-enabled" data-key="audio.enabled">
                                     <option value="true">Enabled</option>
                                     <option value="false">Disabled</option>
@@ -988,31 +983,31 @@
                                 <small style="color: var(--text-muted); font-size: 0.75rem;">Enable/disable the /v1/audio/* endpoints</small>
                             </div>
                             <div class="form-group">
-                                <label for="setting-audio-default-model">Default Model</label>
+                                <label for="setting-audio-default-model">Default Model <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <select id="setting-audio-default-model" data-key="audio.default_model">
                                     <option value="stable-audio-open-1.0">Stable Audio Open 1.0</option>
                                     <option value="minimax-music-3">MiniMax Music 3</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="setting-audio-default-seconds">Default Duration (sec)</label>
+                                <label for="setting-audio-default-seconds">Default Duration (sec) <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <input type="number" id="setting-audio-default-seconds" data-key="audio.default_seconds" min="1" max="360">
                             </div>
                             <div class="form-group">
-                                <label for="setting-audio-default-steps">Default Steps</label>
+                                <label for="setting-audio-default-steps">Default Steps <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <input type="number" id="setting-audio-default-steps" data-key="audio.default_steps" min="1" max="500">
                             </div>
                             <div class="form-group">
-                                <label for="setting-audio-default-cfg">Default Guidance</label>
+                                <label for="setting-audio-default-cfg">Default Guidance <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <input type="number" id="setting-audio-default-cfg" data-key="audio.default_cfg_scale" min="0" max="20" step="0.5">
                                 <small style="color: var(--text-muted); font-size: 0.75rem;">Stable Audio only; MiniMax ignores</small>
                             </div>
                             <div class="form-group">
-                                <label for="setting-audio-max-concurrent">Max Concurrent</label>
+                                <label for="setting-audio-max-concurrent">Max Concurrent <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <input type="number" id="setting-audio-max-concurrent" data-key="audio.max_concurrent" min="1" max="8">
                             </div>
                             <div class="form-group">
-                                <label for="setting-audio-unload">Unload After Generate</label>
+                                <label for="setting-audio-unload">Unload After Generate <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <select id="setting-audio-unload" data-key="audio.unload_after_generate">
                                     <option value="true">Yes (lower VRAM)</option>
                                     <option value="false">No (faster chaining)</option>
@@ -1020,9 +1015,9 @@
                                 <small style="color: var(--text-muted); font-size: 0.75rem;">Drop audio model after each generation</small>
                             </div>
                             <div class="form-group">
-                                <label for="setting-audio-timeout">Request Timeout (sec)</label>
+                                <label for="setting-audio-timeout">Request Timeout (sec) <span style="color: var(--success); font-size: 0.75rem;">[Live]</span></label>
                                 <input type="number" id="setting-audio-timeout" data-key="audio.request_timeout_seconds" min="30" max="7200">
-                                <small style="color: var(--text-muted); font-size: 0.75rem;">Per-request timeout (default: 1800s for music generation)</small>
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Per-request timeout for music generation (default: 1800s = 30 min). Increase for long MiniMax-Music3 songs.</small>
                             </div>
                             <div class="form-group">
                                 <label for="setting-audio-force-fp32">Force Float32</label>
@@ -1042,8 +1037,7 @@
                         </div>
                     </div>
                     <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 1rem; padding: 1rem; background: var(--bg-secondary); border-radius: var(--radius-md);">
-                        <strong>Note:</strong> Most changes require a service restart to take effect.
-                    </div>
+                        <strong>Note:</strong> Settings marked <span style="color: var(--success); font-weight: 600;">[Live]</span> take effect immediately. All other changes require a service restart.</div>
                 </div>
             </div>
         </div>
@@ -1587,7 +1581,6 @@
                     
                     // Models settings
                     document.getElementById('setting-models-directory').value = config.models.directory || '';
-                    document.getElementById('setting-models-auto-unload').value = config.models.auto_unload_timeout ?? 0;
                     document.getElementById('setting-models-default').value = config.models.default_model || '';
                     document.getElementById('setting-models-civitai-key').value = '';
                     document.getElementById('setting-models-hf-token').value = '';
@@ -1724,7 +1717,7 @@
                         throw fetchError;
                     }
                     
-                    Toast.success('Settings saved! Restart service for changes to take effect.');
+                    Toast.success('Settings saved! Changes marked [Live] take effect immediately; others require a restart.');
                     
                     // Reload settings to show saved values from config file
                     setTimeout(() => loadSettings(), 500);

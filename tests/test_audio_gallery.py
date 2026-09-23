@@ -340,7 +340,7 @@ class TestInstrumentalFallback:
     ``_preprocess_lyrics`` to:
     - Split ``[tag] text`` lines so body text survives ``_normalize_lyrics``
     - Replace empty/None lyrics with the structural tag set
-      ``[intro]\\n[instrumental]\\n[solo]\\n[outro]`` so the pipeline
+      ``[Intro]\\n[Instrumental]\\n[Solo]\\n[Outro]`` so the pipeline
       doesn't raise ValueError
 
     This replaces the older approach of passing ``""`` directly, which

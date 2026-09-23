@@ -449,8 +449,60 @@ But the stars are calling my name"></textarea>
                 }
             });
 
+            // Load audio generation defaults from server
+            async function loadDefaults() {
+                try {
+                    const defaults = await API.fetch('/v1/audio/defaults');
+                    if (defaults.seconds) document.getElementById('duration').value = defaults.seconds;
+                    if (defaults.steps) document.getElementById('steps').value = defaults.steps;
+                    if (defaults.cfg_scale !== undefined && defaults.cfg_scale !== null && defaults.cfg_scale !== '') {
+                        document.getElementById('cfg-scale').value = defaults.cfg_scale;
+                    }
+                } catch (e) {
+                    console.warn('Could not load audio defaults:', e);
+                }
+            }
+
+            // Apply regenerate settings from gallery
+            function applyRegenerateSettings(settings) {
+                if (settings.model) {
+                    const select = document.getElementById('audio-model');
+                    const option = Array.from(select.options).find(opt => opt.value === settings.model);
+                    if (option) {
+                        select.value = settings.model;
+                        updateModelInfo();
+                    }
+                }
+                if (settings.prompt) document.getElementById('prompt').value = settings.prompt;
+                if (settings.lyrics) document.getElementById('lyrics').value = settings.lyrics;
+                if (settings.seconds) document.getElementById('duration').value = settings.seconds;
+                if (settings.steps) document.getElementById('steps').value = settings.steps;
+                if (settings.cfg_scale !== undefined && settings.cfg_scale !== null && settings.cfg_scale !== '') {
+                    document.getElementById('cfg-scale').value = settings.cfg_scale;
+                }
+                if (settings.seed !== undefined && settings.seed !== null && settings.seed !== '') {
+                    document.getElementById('seed').value = settings.seed;
+                }
+            }
+
             // Initial load
             await loadAudioModels();
+            await loadDefaults();
+
+            // Check for regenerate settings from gallery
+            const regenerateSettings = sessionStorage.getItem('regenerate_audio_settings');
+            if (regenerateSettings) {
+                try {
+                    const settings = JSON.parse(regenerateSettings);
+                    sessionStorage.removeItem('regenerate_audio_settings');
+                    setTimeout(() => {
+                        applyRegenerateSettings(settings);
+                        Toast.success('Settings loaded from gallery');
+                    }, 500);
+                } catch (err) {
+                    console.error('Failed to parse regenerate settings:', err);
+                }
+            }
         });
     </script>
 </body>

@@ -274,6 +274,31 @@ class GalleryManager:
                 return True
             return False
 
+    def update_audio_privacy(self, audio_id: str, is_public: bool, expires_at: Optional[float] = None) -> bool:
+        """
+        Update audio privacy settings.
+
+        Args:
+            audio_id: Audio ID
+            is_public: Whether audio should be public
+            expires_at: Optional expiration timestamp (only for public audio)
+
+        Returns:
+            True if updated successfully, False if audio not found
+        """
+        with self._lock:
+            audio = self._audio.get(audio_id)
+            if not audio:
+                return False
+
+            audio.is_public = is_public
+            audio.expires_at = expires_at if is_public else None
+            self._save()
+
+            logger.info("Updated audio privacy: %s (public=%s, expires=%s)",
+                       audio_id, is_public, expires_at)
+            return True
+
     def cleanup_expired_audio(self, audio_dir: Path) -> int:
         """
         Clean up expired public audio files.
