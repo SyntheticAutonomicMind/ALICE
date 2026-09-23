@@ -66,9 +66,15 @@ RUN pip install --no-cache-dir --upgrade pip && \
 RUN echo "setuptools<81" > /build/constraints.txt
 ENV PIP_CONSTRAINT=/build/constraints.txt
 
-# Install remaining dependencies
+# Install remaining dependencies.
+# --no-build-isolation is used because some transitive dependencies
+# (e.g., flash-attn from stable-audio-tools) need torch available at
+# build time, which isn't possible in pip's isolated build environment.
+# Instead we pre-install build deps and use the main environment's packages.
+RUN pip install --no-cache-dir numpy cython packaging versioneer wheel setuptools
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --no-build-isolation -r requirements.txt
 
 # =============================================================================
 # Stage 2: Runtime
