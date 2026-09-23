@@ -55,10 +55,9 @@ WORKDIR /build
 # libraries automatically — no separate ROCm install is needed.
 # device-all covers gfx1103 (Phoenix), gfx1151 (Strix Halo),
 # RDNA2/RDNA3/CDNA, and all other supported AMD GPUs.
-# Use python3 -m pip to avoid issues with Debian-managed pip that
-# can't be upgraded (RECORD file not found).
+# ensurepip bootstraps pip for the deadsnakes Python 3.13 (Debian's
+# pip 24.0 can't be upgraded via --upgrade due to missing RECORD file).
 RUN python3 -m ensurepip --upgrade && \
-    python3 -m pip install --no-cache-dir --upgrade pip && \
     python3 -m pip install --no-cache-dir \
     --index-url https://stable.repo.amd.com/rocm/whl-next/ \
     "torch[device-all]==${TORCH_VERSION}" \
@@ -74,8 +73,8 @@ RUN python3 -m ensurepip --upgrade && \
 # remaining requirements which override pandas with a newer version.
 COPY requirements.txt .
 RUN echo "setuptools<81" > /build/constraints.txt && \
-    PIP_CONSTRAINT=/build/constraints.txt pip install --no-cache-dir --no-deps stable-audio-tools && \
-    PIP_CONSTRAINT=/build/constraints.txt pip install --no-cache-dir $(grep -vE "^#|^$|^stable-audio-tools" requirements.txt)
+    PIP_CONSTRAINT=/build/constraints.txt python3 -m pip install --no-cache-dir --no-deps stable-audio-tools && \
+    PIP_CONSTRAINT=/build/constraints.txt python3 -m pip install --no-cache-dir $(grep -vE "^#|^$|^stable-audio-tools" requirements.txt)
 
 # =============================================================================
 # Stage 2: Runtime
