@@ -10,10 +10,9 @@
 # The ROCm 10.0.0 multi-arch packages are installed via the stable.repo.amd.com
 # index with device-* extras that cover gfx1103, gfx1151, and all other
 # supported AMD GPU architectures.
-#
-# setuptools<81 is pinned because setuptools 81+ removed pkg_resources, which
-# is still needed at build time by some packages (e.g., pandas via
-# stable-audio-tools) on Python slim images where it was never bundled.
+# Note: setuptools<81 is set via PIP_CONSTRAINT in Dockerfiles (see
+# Dockerfile and Dockerfile.rocm) because setuptools 81+ removed
+# pkg_resources, which is needed at build time by some packages.
 
 # FastAPI and server
 fastapi>=0.104.1
@@ -62,4 +61,8 @@ einops
 # stable-audio-tools pins pandas==2.0.2, which has no Python 3.13 wheel
 # and fails to build from source.
 pandas>=2.2.3
+# stable-audio-tools is installed with --no-deps in Docker builds to avoid
+# pulling in flash-attn (requires CUDA_HOME at build time) and pandas==2.0.2
+# (no Python 3.13 wheel). Install manually if needed:
+#   pip install flash-attn  (requires CUDA toolkit + PyTorch)
 stable-audio-tools

@@ -31,34 +31,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Install PyTorch based on GPU argument.
-# setuptools<81 is pinned because setuptools 81+ removed pkg_resources,
-# which is needed at build time by some packages (e.g., pandas) when pip
-# uses build isolation. The constraint file ensures the build environment
-# also gets the pinned version.
+# Install PyTorch based on GPU argument
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir "setuptools<81" wheel && \
     if [ "$GPU" = "cuda" ]; then \
         pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124; \
     else \
         pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu; \
     fi
 
-# Create a constraints file to pin setuptools<81.
-# setuptools 81+ removed pkg_resources, which is needed at build time by
-# some packages (e.g., pandas) when pip uses build isolation.
-RUN echo "setuptools<81" > /build/constraints.txt
-ENV PIP_CONSTRAINT=/build/constraints.txt
-
 # Install remaining dependencies.
-# --no-build-isolation is used because some transitive dependencies
-# (e.g., flash-attn from stable-audio-tools) need torch available at
-# build time, which isn't possible in pip's isolated build environment.
-# Instead we pre-install build deps and use the main environment's packages.
-RUN pip install --no-cache-dir numpy cython packaging versioneer wheel setuptools
-
+# PIP_CONSTRAINT: pins setuptools<81 for build isolation environments
+# (setuptools 81+ removed pkg_resources, needed at build time by some packages).
+# stable-audio-tools is installed with --no-deps because its dynamic metadata
+# pulls in flash-attn>=2.5.0 (requires CUDA_HOME to build from source) and
+# pandas==2.0.2 (no Python 3.13 wheel). We install it separately, then install
+# the remaining requirements which override pandas with a newer version.
 COPY requirements.txt .
-RUN pip install --no-cache-dir --no-build-isolation -r requirements.txt
+RUN echo "setuptools<81" > /build/constraints.txt && \
+    PIP_CONSTRAINT=/build/constraints.txt pip install --no-cache-dir --no-deps stable-audio-tools && \
+    PIP_CONSTRAINT=/build/constraints.txt pip install --no-cache-dir $(grep -v "^stable-audio-tools" requirements.txt)
 
 # =============================================================================
 # Stage 2: Runtime - minimal image
