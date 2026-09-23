@@ -58,4 +58,8 @@ psutil>=7.1.3
 # No version pins: these packages must coexist with the platform-specific
 # PyTorch stack (ROCm on AMD, CUDA on NVIDIA, CPU on macOS).
 einops
+# Override pandas to a version with Python 3.13 wheels.
+# stable-audio-tools pins pandas==2.0.2, which has no Python 3.13 wheel
+# and fails to build from source.
+pandas>=2.2.3
 stable-audio-tools

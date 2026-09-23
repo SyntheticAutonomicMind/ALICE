@@ -44,12 +44,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
         pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu; \
     fi
 
-# Create a constraints file with two fixes:
-# 1. setuptools<81 (setuptools 81+ removed pkg_resources, needed by pandas
-#    at build time).
-# 2. pandas>=2.2.3 (stable-audio-tools pins pandas==2.0.2 which has no
-#    Python 3.13 wheel and must be built from source, which fails).
-RUN echo -e "setuptools<81\npandas>=2.2.3" > /build/constraints.txt
+# Create a constraints file to pin setuptools<81.
+# setuptools 81+ removed pkg_resources, which is needed at build time by
+# some packages (e.g., pandas) when pip uses build isolation.
+RUN echo "setuptools<81" > /build/constraints.txt
 ENV PIP_CONSTRAINT=/build/constraints.txt
 
 # Install remaining dependencies
