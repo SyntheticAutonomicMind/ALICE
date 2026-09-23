@@ -49,7 +49,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY requirements.txt .
 RUN echo "setuptools<81" > /build/constraints.txt && \
     PIP_CONSTRAINT=/build/constraints.txt pip install --no-cache-dir --no-deps stable-audio-tools && \
-    PIP_CONSTRAINT=/build/constraints.txt pip install --no-cache-dir $(grep -v "^stable-audio-tools" requirements.txt)
+    PIP_CONSTRAINT=/build/constraints.txt pip install --no-cache-dir $(grep -vE "^#|^$|^stable-audio-tools" requirements.txt)
 
 # =============================================================================
 # Stage 2: Runtime - minimal image
