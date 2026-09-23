@@ -50,6 +50,7 @@ WORKDIR /build
 # device-all covers gfx1103 (Phoenix), gfx1151 (Strix Halo),
 # RDNA2/RDNA3/CDNA, and all other supported AMD GPUs.
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir setuptools wheel && \
     pip install --no-cache-dir \
     --index-url https://stable.repo.amd.com/rocm/whl-next/ \
     "torch[device-all]==${TORCH_VERSION}" \
