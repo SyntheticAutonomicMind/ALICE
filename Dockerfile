@@ -31,7 +31,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Install PyTorch based on GPU argument
+# Install PyTorch based on GPU argument.
+# setuptools<81 is pinned because setuptools 81+ removed pkg_resources,
+# which is needed at build time by some packages (e.g., pandas) when pip
+# uses build isolation. The constraint file ensures the build environment
+# also gets the pinned version.
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir "setuptools<81" wheel && \
     if [ "$GPU" = "cuda" ]; then \
@@ -39,6 +43,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
     else \
         pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu; \
     fi
+
+# Create a constraints file so build-isolation environments also get
+# setuptools<81 (pip's build isolation ignores the main environment's
+# setuptools, and setuptools 81+ lacks pkg_resources).
+RUN echo "setuptools<81" > /tmp/constraints.txt
+ENV PIP_CONSTRAINT=/tmp/constraints.txt
 
 # Install remaining dependencies
 COPY requirements.txt .

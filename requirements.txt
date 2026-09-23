@@ -40,11 +40,6 @@ pillow>=12.0.0
 pyyaml>=6.0.3
 ruamel.yaml>=0.18.0
 
-# setuptools: pin <81 because setuptools 81+ removed pkg_resources, which
-# is still needed at build time by some packages (e.g., pandas) on Python
-# slim Docker images.
-setuptools<81
-
 # Async file handling
 aiofiles>=23.2.1
 

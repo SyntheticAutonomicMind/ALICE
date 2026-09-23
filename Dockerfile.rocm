@@ -48,7 +48,10 @@ WORKDIR /build
 # The ROCm pip packages include GPU-specific device code and runtime
 # libraries automatically — no separate ROCm install is needed.
 # device-all covers gfx1103 (Phoenix), gfx1151 (Strix Halo),
-# RDNA2/RDNA3/CDNA, and all other supported AMD GPUs.
+# RDNA2/RDA3/CDNA, and all other supported AMD GPUs.
+# setuptools<81 is pinned because setuptools 81+ removed pkg_resources,
+# which is needed at build time by some packages (e.g., pandas) when pip
+# uses build isolation.
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir "setuptools<81" wheel && \
     pip install --no-cache-dir \
@@ -56,6 +59,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
     "torch[device-all]==${TORCH_VERSION}" \
     "torchvision[device-all]==${TORCHVISION_VERSION}" \
     "torchaudio==${TORCHAUDIO_VERSION}"
+
+# Create a constraints file so build-isolation environments also get
+# setuptools<81 (pip's build isolation ignores the main environment's
+# setuptools, and setuptools 81+ lacks pkg_resources).
+RUN echo "setuptools<81" > /tmp/constraints.txt
+ENV PIP_CONSTRAINT=/tmp/constraints.txt
 
 # Install remaining dependencies
 COPY requirements.txt .
