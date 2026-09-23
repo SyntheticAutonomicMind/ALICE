@@ -105,11 +105,41 @@ audio requests and want to amortise the model load cost.  Image
 generation will still be safe - the eviction callback will drop
 the audio model on demand.
 
+### Instrumental generation (MiniMax-Music3)
+
+Generating truly vocal-free instrumental music with the open-weight
+MiniMax-Music3 checkpoint is not deterministic — the model's Qwen3 AR
+stage can produce wordless vocalizations even when the caption says
+"no vocals."  ALICE addresses this with a two-layer approach:
+
+1. **Prompt scaffolding** — when `is_instrumental=true` is sent, the
+   backend discards any client-provided lyrics and replaces them with
+   the structural tag set (`[Intro]\n[Instrumental]\n[Solo]\n[Outro]`).
+   The caption is augmented with "Vocal Details: Purely instrumental
+   track, no vocals." per the MiniMax-Music3 prompting guide.
+
+2. **Vocal-activity detection + seed retry** — after generation, a
+   lightweight spectral/formant detector (scipy + numpy only) runs on
+   the output WAV.  If vocals are detected, the result is discarded and
+   a new seed (+1000) is used for another attempt.  This repeats up to
+   `audio.instrumental_retry_attempts` (default 3).
+
+The response includes a `retries` field showing how many retries were
+performed.  Set `instrumental_retry_attempts: 0` to disable the retry
+loop (generation runs once and returns whatever the model produces).
+
 ## API
 
 ### `POST /v1/audio/generations`
 
 OpenAI-compatible shape.  Either `prompt` or `input` may be sent.
+
+The `is_instrumental` field is specific to MiniMax-Music3.  When `true`,
+ALICE discards any client-provided `lyrics` (replacing them with the
+structural tag scaffold `[Intro]\n[Instrumental]\n[Solo]\n[Outro]`),
+augments the caption with "Vocal Details: Purely instrumental track,
+no vocals.", and runs a post-generation vocal-activity check that
+retries with a new seed if vocals leak through.
 
 ```json
 {
@@ -119,6 +149,19 @@ OpenAI-compatible shape.  Either `prompt` or `input` may be sent.
   "steps": 100,
   "cfg_scale": 7.0,
   "seed": 42
+}
+```
+
+Instrumental MiniMax-Music3 request:
+
+```json
+{
+  "prompt": "instrumental jazz fusion with brushed drums and walking bass",
+  "model": "minimax-music-3",
+  "seconds": 180,
+  "steps": 30,
+  "seed": 42,
+  "is_instrumental": true
 }
 ```
 
@@ -135,9 +178,14 @@ Response:
   "cfg_scale": 7.0,
   "prompt": "A warm acoustic guitar loop, 90 BPM",
   "generation_time_seconds": 42.1,
-  "size_bytes": 2649600
+  "size_bytes": 2649600,
+  "retries": 0
 }
 ```
+
+The `retries` field indicates how many vocal-detection retries were
+performed (MiniMax-Music3 instrumental only).  `0` means no vocals were
+detected on the first attempt.
 
 ### `GET /v1/audio/models`
 
@@ -166,6 +214,15 @@ audio:
   request_timeout_seconds: 300
   force_fp32: false
   vae_decode_cpu: false
+  # Instrumental vocal-leak prevention (MiniMax-Music3 only).
+  # The open-weight model lacks a dedicated is_instrumental parameter.
+  # After generation, a lightweight spectral/formant VAD runs on the
+  # output WAV.  If vocals are detected, the generation is retried with
+  # a new seed (seed + 1000) up to this many times.  Set to 0 to disable.
+  instrumental_retry_attempts: 3
+  # Confidence threshold (0.0–1.0) for the vocal-activity detector.
+  # Scores at or above this value trigger a retry.
+  instrumental_vad_threshold: 0.55
 ```
 
 Audio output path is `storage.audio_directory` (defaults to

@@ -81,3 +81,6 @@ audio:
   request_timeout_seconds: 900
   force_fp32: false
   vae_decode_cpu: false
+  # Instrumental vocal-leak prevention (MiniMax-Music3 only).
+  instrumental_retry_attempts: 3
+  instrumental_vad_threshold: 0.55

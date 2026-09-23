@@ -435,12 +435,23 @@ def _preprocess_lyrics(lyrics: Optional[str]) -> str:
     bracketed) is also normalized to the full structural tag set so users
     can explicitly request instrumental output without worrying about
     pipeline validation.
+
+    These structural tags and the caption-level "no vocals" directive are
+    best-effort guidance for the open-weight model.  The open-weight
+    MiniMax-Music3 checkpoint (HF Diffusers) does not expose a dedicated
+    ``is_instrumental`` parameter like the hosted API does; the Qwen3 AR
+    model may still generate wordless vocalizations despite the scaffolding.
+    Callers that need guaranteed instrumental output should run a
+    post-generation vocal-activity check and retry with a new seed
+    (see ``AudioBackend.generate`` retry logic).
     """
     if not lyrics or not lyrics.strip():
         return "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
 
     # Recognize explicit "instrumental" markers from the user and normalize
-    # them to the full structural tag set so the pipeline treats them as vocal-free.
+    # them to the full structural tag set — the pipeline requires non-empty
+    # lyrics, and an empty/whitespace string raises ValueError.  This is
+    # best-effort scaffolding, not a guarantee that vocals won't be generated.
     stripped = lyrics.strip().lower()
     if stripped in ("[instrumental]", "instrumental", "[no vocals]", "[no vocal]"):
         return "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
@@ -718,6 +729,7 @@ class MiniMaxMusic3Engine:
         num_inference_steps: int = MINIMAX_MUSIC3_DEFAULT_STEPS,
         seed: Optional[int] = None,
         model_repo_or_path: str = MINIMAX_MUSIC3_DEFAULT_REPO,
+        is_instrumental: bool = False,
     ) -> Path:
         """
         Generate a stereo WAV from a music description + lyrics.
@@ -728,10 +740,20 @@ class MiniMaxMusic3Engine:
                 Empty string means instrumental.  Lines that put text on the
                 same line as a tag (e.g. ``[verse] My text``) are auto-split
                 by ``_preprocess_lyrics`` so the pipeline doesn't drop them.
+                Ignored when ``is_instrumental`` is True (lyrics are replaced
+                with the structural tag set).
             audio_duration: Target length in seconds (clamped to MAX).
             num_inference_steps: Flow-matching Euler steps per chunk.
             seed: Reproducibility seed.
             model_repo_or_path: HF repo id or local model directory.
+            is_instrumental: When True, discard any client-provided lyrics
+                and replace them with the structural tag scaffold
+                (``[Intro]\\n[Instrumental]\\n[Solo]\\n[Outro]``), and append
+                the caption-level "no vocals" directive to the prompt.
+                This is best-effort — the open-weight model may still
+                generate wordless vocalizations.  Callers should run a
+                post-generation vocal-activity check and retry with a new
+                seed when reliable instrumental output is required.
 
         Returns:
             Path to the generated audio file (MP3 if ffmpeg conversion
@@ -761,21 +783,31 @@ class MiniMaxMusic3Engine:
         # NOTE: _preprocess_lyrics must be called BEFORE the log statement
         # below, which references len(processed_lyrics).  Calling it after
         # was a NameError that broke all MiniMax-Music3 generations.
+        #
+        # When is_instrumental is True, discard any client-provided lyrics
+        # and replace them with the structural tag scaffold.  The open-weight
+        # model does not honor a dedicated is_instrumental parameter (unlike
+        # the hosted API), so the only available controls are the structural
+        # tags in the lyrics field plus the caption-level "no vocals"
+        # directive below — both are best-effort and may not fully suppress
+        # vocal generation.
+        if is_instrumental:
+            lyrics = ""
         processed_lyrics = _preprocess_lyrics(lyrics)
         if processed_lyrics != lyrics:
             logger.debug("Lyrics preprocessed for MiniMax pipeline: %r -> %r", lyrics, processed_lyrics)
 
-        # If the user explicitly requested instrumental (or left lyrics empty),
-        # augment the caption with the vocal-suppression phrase per the
-        # MiniMax-Music3 prompting guide.  The [Instrumental] structural tag
-        # is already in the lyrics field via _preprocess_lyrics, but the
-        # caption must also state it -- otherwise the Qwen3 AR model defaults
-        # to generating vocals based on genre defaults.
-        # Format: "Vocal Details: Purely instrumental track, no vocals."
-        # We append this to the prompt so the model receives the explicit
-        # no-vocals instruction in the caption.
-        is_instrumental = "[instrumental]" in processed_lyrics.lower()
-        if is_instrumental:
+        # If the user explicitly requested instrumental (or left lyrics
+        # empty / used the [Instrumental] tag), augment the caption with the
+        # vocal-suppression phrase per the MiniMax-Music3 prompting guide.
+        # The [Instrumental] structural tag is already in the lyrics field
+        # via _preprocess_lyrics, but the caption must also state it —
+        # otherwise the Qwen3 AR model defaults to generating vocals based
+        # on genre conventions.
+        # This is best-effort: the open-weight model may still produce
+        # wordless vocalizations despite this and the structural tags.
+        is_instrumental_inferred = is_instrumental or "[instrumental]" in processed_lyrics.lower()
+        if is_instrumental_inferred:
             prompt = f"{prompt.strip()}, Vocal Details: Purely instrumental track, no vocals."
 
         logger.info(

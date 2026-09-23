@@ -597,6 +597,7 @@ class AudioGenerationResponse(BaseModel):
     prompt: str = Field(..., description="Prompt used for the generation")
     generation_time_seconds: float = Field(..., description="Wall-clock time spent in the generation call")
     size_bytes: int = Field(..., description="Size of the generated WAV file on disk in bytes")
+    retries: int = Field(default=0, description="Number of vocal-detection retries performed (instrumental MiniMax-Music3 only)")
 
 
 class AudioModelInfo(BaseModel):

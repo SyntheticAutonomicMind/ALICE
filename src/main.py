@@ -3911,13 +3911,12 @@ async def create_audio_generation(
     if not prompt or not prompt.strip():
         raise HTTPException(status_code=400, detail="Field 'prompt' (or 'input') is required")
 
-    # When is_instrumental is True, preserve any client-provided lyrics
-    # (which may contain user-written structural tags).  The engine's
-    # _preprocess_lyrics normalizes them to the structural tag set
-    # ([Intro]\n[Instrumental]\n[Solo]\n[Outro]) and augments the caption
-    # with "Vocal Details: Purely instrumental track, no vocals." per the
-    # prompting guide.  When lyrics are empty/None, the engine generates
-    # the structural tags internally.
+    # When is_instrumental is True, the backend discards client-provided
+    # lyrics (replaces them with the structural tag scaffold
+    # [Intro]\n[Instrumental]\n[Solo]\n[Outro]), augments the caption with
+    # "Vocal Details: Purely instrumental track, no vocals.", and runs a
+    # post-generation vocal-activity check with seed-retry if the open-weight
+    # model leaks vocals.
     is_instrumental = request.is_instrumental or False
     lyrics = request.lyrics or ""
 
@@ -3964,6 +3963,7 @@ async def create_audio_generation(
                     cfg_scale=cfg_scale,
                     seed=request.seed,
                     lyrics=lyrics,
+                    is_instrumental=is_instrumental,
                     unload_after_generate=config.audio.unload_after_generate,
                     request_id=request_id,
                     cancellation_check=cancellation_check,
@@ -4040,6 +4040,7 @@ async def create_audio_generation(
             prompt=result.prompt,
             generation_time_seconds=elapsed,
             size_bytes=result.size_bytes,
+            retries=result.retries,
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Audio generation timed out")

@@ -32,6 +32,7 @@ import gc
 import inspect
 import logging
 import os
+import random
 import time
 import uuid
 from dataclasses import dataclass
@@ -51,6 +52,7 @@ from ..audio_engine import (
     MINIMAX_MUSIC3_DEFAULT_STEPS,
 )
 from ..config import Config
+from .vocal_detector import detect_vocal_activity
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +158,7 @@ class AudioGenerationResult:
     prompt: str
     generation_time_seconds: float
     size_bytes: int
+    retries: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +393,7 @@ class AudioBackend:
         cfg_scale: Optional[float] = None,
         seed: Optional[int] = None,
         lyrics: str = "",
+        is_instrumental: bool = False,
         unload_after_generate: bool = True,
         request_id: Optional[str] = None,
         cancellation_check: Optional[Callable[[], bool]] = None,
@@ -408,7 +412,13 @@ class AudioBackend:
             seed: Reproducibility seed.
             lyrics: Lyrics with optional [verse]/[chorus] structure
                 tags.  Empty string for instrumental.  Only used by
-                MiniMax-Music3.
+                MiniMax-Music3.  Ignored when is_instrumental is True.
+            is_instrumental: When True, force instrumental generation for
+                MiniMax-Music3: lyrics are replaced with the structural tag
+                scaffold and the caption is augmented with a no-vocals
+                directive.  Because the open-weight model lacks a dedicated
+                is_instrumental parameter, a post-generation vocal-activity
+                check with seed-retry is performed when configured.
             unload_after_generate: Drop the model after generation.
                 Default True so image generation resumes on the next
                 request without manual eviction.
@@ -478,34 +488,97 @@ class AudioBackend:
                     resolved_path = self._resolve_model_path(model_id)
                     model_location = str(resolved_path) if resolved_path is not None else metadata["repo"]
 
-                    if is_minimax:
-                        audio_path = await asyncio.to_thread(
-                            engine.generate,
-                            prompt=prompt,
-                            lyrics=lyrics or "",
-                            audio_duration=float(seconds),
-                            num_inference_steps=steps,
-                            seed=seed,
-                            model_repo_or_path=model_location,
-                        )
-                    else:
-                        audio_path = await asyncio.to_thread(
-                            engine.generate,
-                            prompt=prompt,
-                            seconds=seconds,
-                            steps=steps,
-                            cfg_scale=cfg_scale,
-                            seed=seed,
-                            model_repo=model_location,
-                        )
+                    # Resolve seed upfront so we can increment it for retries.
+                    # If the client didn't supply one, pick a random seed now
+                    # (the engine would otherwise pick one internally and we'd
+                    # never know what was used).
+                    current_seed = seed
+                    if current_seed is None:
+                        current_seed = random.randint(0, 2**32 - 1)
 
-                    if cancellation_check is not None and cancellation_check():
-                        # Best-effort cleanup if we were cancelled during gen.
-                        try:
-                            audio_path.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-                        raise RuntimeError("Audio generation cancelled mid-flight")
+                    # When is_instrumental is True for MiniMax-Music3, run a
+                    # post-generation vocal-activity check.  If vocals are
+                    # detected, discard the output and retry with a new seed.
+                    # The open-weight model lacks a dedicated is_instrumental
+                    # parameter, so this quality gate is the only way to get
+                    # guaranteed instrumental output.
+                    max_retries = 0
+                    if is_instrumental and is_minimax:
+                        max_retries = self.config.audio.instrumental_retry_attempts
+
+                    retries = 0
+                    audio_path: Optional[Path] = None
+
+                    for attempt in range(max_retries + 1):
+                        if is_minimax:
+                            audio_path = await asyncio.to_thread(
+                                engine.generate,
+                                prompt=prompt,
+                                lyrics=lyrics or "",
+                                audio_duration=float(seconds),
+                                num_inference_steps=steps,
+                                seed=current_seed,
+                                model_repo_or_path=model_location,
+                                is_instrumental=is_instrumental,
+                            )
+                        else:
+                            audio_path = await asyncio.to_thread(
+                                engine.generate,
+                                prompt=prompt,
+                                seconds=seconds,
+                                steps=steps,
+                                cfg_scale=cfg_scale,
+                                seed=current_seed,
+                                model_repo=model_location,
+                            )
+
+                        if cancellation_check is not None and cancellation_check():
+                            # Best-effort cleanup if we were cancelled during gen.
+                            try:
+                                audio_path.unlink(missing_ok=True)
+                                wav_for_cleanup = audio_path.with_suffix(".wav")
+                                wav_for_cleanup.unlink(missing_ok=True)
+                            except Exception:
+                                pass
+                            raise RuntimeError("Audio generation cancelled mid-flight")
+
+                        # Vocal-activity check for instrumental MiniMax generations.
+                        if is_instrumental and is_minimax and attempt < max_retries:
+                            # The WAV file always exists on disk (the engine
+                            # writes it first, then optionally converts to MP3).
+                            check_path = audio_path.with_suffix(".wav") if audio_path.suffix == ".mp3" else audio_path
+                            detected = detect_vocal_activity(
+                                check_path,
+                                threshold=self.config.audio.instrumental_vad_threshold,
+                            )
+                            if detected is True:
+                                logger.warning(
+                                    "[%s] Vocal activity detected in instrumental output "
+                                    "(attempt %d/%d), retrying with new seed",
+                                    request_id, attempt + 1, max_retries,
+                                )
+                                # Clean up both WAV and MP3 before retry.
+                                audio_path.unlink(missing_ok=True)
+                                check_path.unlink(missing_ok=True)
+                                current_seed = current_seed + 1000
+                                retries += 1
+                                continue
+                            elif detected is None:
+                                logger.warning(
+                                    "Vocal detection unavailable for %s; "
+                                    "returning best-effort result",
+                                    check_path.name,
+                                )
+                                # Can't verify — return this result.
+                                break
+                            else:
+                                logger.info(
+                                    "[%s] Instrumental verification passed (no vocals detected)",
+                                    request_id,
+                                )
+                                break
+                        else:
+                            break
 
                     # Resolve total generation time (includes model load + inference + decode)
                     elapsed = time.time() - gen_start
@@ -517,12 +590,13 @@ class AudioBackend:
                         duration_seconds=float(seconds),
                         sample_rate=int(metadata["sample_rate"]),
                         model=model_id,
-                        seed=int(seed) if seed is not None else 0,
+                        seed=int(current_seed),
                         steps=int(steps),
                         cfg_scale=float(cfg_scale),
                         prompt=prompt,
                         generation_time_seconds=round(elapsed, 3),
                         size_bytes=stat.st_size,
+                        retries=retries,
                     )
                 finally:
                     self._inflight = max(0, self._inflight - 1)

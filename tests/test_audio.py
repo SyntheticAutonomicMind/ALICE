@@ -792,6 +792,23 @@ def test_generated_audio_appears_in_gallery(alice_app_with_audio):
     assert body["data"][0]["prompt"] == "test prompt"
 
 
+def test_endpoint_accepts_is_instrumental(alice_app_with_audio):
+    """POST /v1/audio/generations accepts is_instrumental and forwards it."""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(alice_app_with_audio.app)
+    resp = client.post(
+        "/v1/audio/generations",
+        json={"prompt": "instrumental jazz", "model": "minimax-music-3",
+              "seconds": 10, "is_instrumental": True},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # The mock backend doesn't actually do VAD, but retries should be in the response
+    assert "retries" in body
+    assert body["retries"] == 0
+
+
 def test_endpoint_returns_503_when_disabled(tmp_path):
     """When config.audio.enabled is False, the endpoint returns 503."""
     from src.config import load_config
@@ -804,3 +821,323 @@ def test_endpoint_returns_503_when_disabled(tmp_path):
 
     resp = client.post("/v1/audio/generations", json={"prompt": "test"})
     assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# is_instrumental parameter plumbing
+# ---------------------------------------------------------------------------
+
+
+def test_audio_config_instrumental_defaults():
+    """AudioConfig has the instrumental retry + VAD threshold defaults."""
+    from src.config import AudioConfig, Config
+
+    cfg = Config()
+    assert cfg.audio.instrumental_retry_attempts == 3
+    assert cfg.audio.instrumental_vad_threshold == 0.55
+
+
+def test_audio_config_yaml_has_instrumental_defaults():
+    """config.yaml has the new instrumental settings."""
+    from src.config import load_config
+
+    cfg = load_config()
+    assert hasattr(cfg.audio, "instrumental_retry_attempts")
+    assert hasattr(cfg.audio, "instrumental_vad_threshold")
+    assert cfg.audio.instrumental_retry_attempts >= 0
+    assert 0.0 <= cfg.audio.instrumental_vad_threshold <= 1.0
+
+
+def test_engine_accepts_is_instrumental_param():
+    """MiniMaxMusic3Engine.generate() has an is_instrumental parameter."""
+    import inspect
+    from src.audio_engine import MiniMaxMusic3Engine
+
+    sig = inspect.signature(MiniMaxMusic3Engine.generate)
+    assert "is_instrumental" in sig.parameters
+    assert sig.parameters["is_instrumental"].default is False
+
+
+def test_engine_is_instrumental_clears_client_lyrics():
+    """When is_instrumental=True, client-provided lyrics are discarded and
+    replaced with the structural tag scaffold, and the prompt gets the
+    vocal-suppression cue."""
+    from src.audio_engine import MiniMaxMusic3Engine
+    import numpy as np
+
+    engine = MiniMaxMusic3Engine(output_dir=Path("/tmp/test_audio_minimax2"))
+    engine.load_model = MagicMock()
+
+    captured = {}
+
+    def fake_call(**kwargs):
+        captured.update(kwargs)
+        mock_result = MagicMock()
+        mock_result.audios = [np.zeros((2, 100))]
+        return mock_result
+
+    mock_pipeline = MagicMock()
+    mock_pipeline.sampling_rate = 44100
+    mock_pipeline.side_effect = fake_call
+    engine.pipeline = mock_pipeline
+
+    try:
+        engine.generate(
+            prompt="upbeat jazz fusion",
+            lyrics="[verse]\nSome actual lyrics here\n[chorus]\nMore lyrics",
+            audio_duration=10.0,
+            num_inference_steps=20,
+            is_instrumental=True,
+        )
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+    # Lyrics should have been cleared to the structural tag set (no actual words)
+    lyrics_val = captured.get("lyrics", "")
+    assert "[instrumental]" in lyrics_val.lower()
+    # The user's actual lyrics must NOT survive
+    assert "actual lyrics" not in lyrics_val.lower()
+    assert "more lyrics" not in lyrics_val.lower()
+    # Prompt should be augmented with the no-vocals directive
+    assert "Vocal Details: Purely instrumental track, no vocals." in captured.get("prompt", "")
+
+
+def test_backend_generate_accepts_is_instrumental():
+    """AudioBackend.generate() has an is_instrumental parameter."""
+    import inspect
+    from src.backends.audio_backend import AudioBackend
+
+    sig = inspect.signature(AudioBackend.generate)
+    assert "is_instrumental" in sig.parameters
+
+
+def test_audio_generation_result_has_retries():
+    """AudioGenerationResult includes a retries field."""
+    from src.backends.audio_backend import AudioGenerationResult
+
+    result = AudioGenerationResult(
+        audio_path=Path("/tmp/test.wav"),
+        url="/v1/audio/test.wav",
+        duration_seconds=10.0,
+        sample_rate=44100,
+        model="minimax-music-3",
+        seed=42,
+        steps=30,
+        cfg_scale=0.0,
+        prompt="test",
+        generation_time_seconds=1.0,
+        size_bytes=100,
+        retries=2,
+    )
+    assert result.retries == 2
+
+
+# ---------------------------------------------------------------------------
+# Vocal activity detector
+# ---------------------------------------------------------------------------
+
+
+def _make_test_wav(path: Path, duration: float = 1.0, sample_rate: int = 44100,
+                   freq: float = 440.0) -> Path:
+    """Write a simple sine-wave WAV file for testing."""
+    import numpy as np
+
+    n_samples = int(duration * sample_rate)
+    t = np.linspace(0, duration, n_samples, endpoint=False)
+    # Simple sine wave — no formant structure, no speech modulation
+    audio = np.sin(2 * np.pi * freq * t).astype(np.float32) * 0.5
+    audio_int16 = (audio * 32767).astype(np.int16)
+
+    import wave as _wave
+
+    with _wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio_int16.tobytes())
+
+    return path
+
+
+def test_vocal_detector_returns_none_for_missing_file():
+    """detect_vocal_activity returns None when the file doesn't exist."""
+    from src.backends.vocal_detector import detect_vocal_activity
+
+    result = detect_vocal_activity(Path("/nonexistent/file.wav"))
+    assert result is None
+
+
+def test_vocal_detector_instrumental_wav():
+    """A pure sine-wave (instrumental) WAV should not trigger vocal detection."""
+    from src.backends.vocal_detector import detect_vocal_activity
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        wav_path = Path(f.name)
+    try:
+        _make_test_wav(wav_path, duration=2.0, freq=440.0)
+        result = detect_vocal_activity(wav_path)
+        # Should be False or None (if detection deps missing), never True
+        assert result is not True, "Sine wave incorrectly flagged as vocal"
+    finally:
+        wav_path.unlink(missing_ok=True)
+
+
+def test_vocal_detector_result_is_bool_or_none():
+    """detect_vocal_activity returns only True, False, or None."""
+    from src.backends.vocal_detector import detect_vocal_activity
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        wav_path = Path(f.name)
+    try:
+        _make_test_wav(wav_path, duration=2.0)
+        result = detect_vocal_activity(wav_path)
+        assert result in (True, False, None)
+    finally:
+        wav_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Backend vocal-detection retry loop
+# ---------------------------------------------------------------------------
+
+
+def test_backend_instrumental_retries_on_vocals(tmp_path):
+    """When is_instrumental=True and VAD detects vocals, the backend retries
+    with an incremented seed up to config.audio.instrumental_retry_attempts."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from src.backends.audio_backend import AudioBackend
+    from src.config import Config
+
+    cfg = Config()
+    cfg.audio.instrumental_retry_attempts = 3
+    cfg.audio.instrumental_vad_threshold = 0.55
+    cfg.audio.default_model = "minimax-music-3"
+
+    backend = AudioBackend(config=cfg, output_dir=tmp_path, max_concurrent=1)
+
+    # Mock the engine
+    mock_engine = MagicMock()
+    mock_engine.is_loaded.return_value = True
+    call_count = [0]
+
+    def mock_generate(**kwargs):
+        call_count[0] += 1
+        is_inst = kwargs.get("is_instrumental", False)
+        seed = kwargs.get("seed", 0)
+        wav_path = tmp_path / f"test_{is_inst}_{seed}.wav"
+        _make_test_wav(wav_path, duration=1.0)
+        return wav_path
+
+    mock_engine.generate = mock_generate
+    mock_engine.model_repo = "MiniMaxAI/MiniMax-Music3"
+    mock_engine.unload_model = MagicMock()
+
+    # Patch _get_engine to return our mock
+    backend._get_engine = AsyncMock(return_value=mock_engine)
+    backend._resolve_model_path = MagicMock(return_value=None)
+
+    # Patch detect_vocal_activity: True on first attempt, False on second
+    vad_call_count = [0]
+    with patch("src.backends.audio_backend.detect_vocal_activity") as mock_vad:
+        def mock_detect(path, threshold):
+            vad_call_count[0] += 1
+            return True if vad_call_count[0] == 1 else False
+        mock_vad.side_effect = mock_detect
+
+        result = asyncio.run(
+            backend.generate(
+                prompt="instrumental jazz fusion",
+                model_id="minimax-music-3",
+                seconds=30,
+                steps=30,
+                seed=42,
+                is_instrumental=True,
+            )
+        )
+
+    # Should have been called twice (initial + 1 retry)
+    assert call_count[0] == 2
+    assert result.retries == 1
+    # The seed should have been incremented
+    assert result.seed == 42 + 1000
+
+
+def test_backend_instrumental_no_retry_when_no_vocals(tmp_path):
+    """When VAD returns False (no vocals), no retry happens."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from src.backends.audio_backend import AudioBackend
+    from src.config import Config
+
+    cfg = Config()
+    cfg.audio.instrumental_retry_attempts = 3
+    backend = AudioBackend(config=cfg, output_dir=tmp_path, max_concurrent=1)
+
+    mock_engine = MagicMock()
+    call_count = [0]
+
+    def mock_generate(**kwargs):
+        call_count[0] += 1
+        wav_path = tmp_path / f"test_{call_count[0]}.wav"
+        _make_test_wav(wav_path, duration=1.0)
+        return wav_path
+
+    mock_engine.generate = mock_generate
+    mock_engine.model_repo = "MiniMaxAI/MiniMax-Music3"
+    mock_engine.unload_model = MagicMock()
+
+    backend._get_engine = AsyncMock(return_value=mock_engine)
+    backend._resolve_model_path = MagicMock(return_value=None)
+
+    with patch("src.backends.audio_backend.detect_vocal_activity", return_value=False):
+        result = asyncio.run(
+            backend.generate(
+                prompt="instrumental jazz",
+                model_id="minimax-music-3",
+                seconds=30,
+                steps=30,
+                is_instrumental=True,
+            )
+        )
+
+    assert call_count[0] == 1
+    assert result.retries == 0
+
+
+def test_backend_no_vad_when_not_instrumental(tmp_path):
+    """When is_instrumental=False, VAD is never called."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from src.backends.audio_backend import AudioBackend
+    from src.config import Config
+
+    cfg = Config()
+    backend = AudioBackend(config=cfg, output_dir=tmp_path, max_concurrent=1)
+
+    mock_engine = MagicMock()
+
+    def mock_generate(**kwargs):
+        wav_path = tmp_path / "test.wav"
+        _make_test_wav(wav_path, duration=1.0)
+        return wav_path
+
+    mock_engine.generate = mock_generate
+    mock_engine.model_repo = "stabilityai/stable-audio-open-1.0"
+    mock_engine.unload_model = MagicMock()
+
+    backend._get_engine = AsyncMock(return_value=mock_engine)
+    backend._resolve_model_path = MagicMock(return_value=None)
+
+    with patch("src.backends.audio_backend.detect_vocal_activity") as mock_vad:
+        result = asyncio.run(
+            backend.generate(
+                prompt="a warm acoustic guitar loop",
+                model_id="stable-audio-open-1.0",
+                seconds=30,
+                is_instrumental=False,
+            )
+        )
+
+    assert mock_vad.call_count == 0
+    assert result.retries == 0
