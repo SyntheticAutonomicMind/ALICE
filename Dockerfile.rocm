@@ -92,8 +92,9 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTH
 # Create non-root user (with video/render group for GPU access)
 RUN groupadd -r alice && useradd -r -g alice -G video,render -d /app -s /sbin/nologin alice
 
-# Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python${PYTHON_VERSION}/dist-packages /usr/local/lib/python${PYTHON_VERSION}/dist-packages
+# Copy Python packages from builder.
+# Copy the entire python3.x lib directory to handle patch-versioned paths.
+COPY --from=builder /usr/local/lib/python${PYTHON_VERSION} /usr/local/lib/python${PYTHON_VERSION}
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 WORKDIR /app

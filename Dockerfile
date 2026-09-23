@@ -32,8 +32,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 
 # Install PyTorch based on GPU argument
-RUN pip install --no-cache-dir --upgrade pip && \
-    if [ "$GPU" = "cuda" ]; then \
+RUN pip install --no-cache-dir --upgrade pip
+
+# Install PyTorch
+RUN if [ "$GPU" = "cuda" ]; then \
         pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124; \
     else \
         pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu; \
@@ -43,9 +45,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # PIP_CONSTRAINT: pins setuptools<81 for build isolation environments
 # (setuptools 81+ removed pkg_resources, needed at build time by some packages).
 # stable-audio-tools is installed with --no-deps because its dynamic metadata
-# pulls in flash-attn>=2.5.0 (requires CUDA_HOME to build from source) and
-# pandas==2.0.2 (no Python 3.13 wheel). We install it separately, then install
-# the remaining requirements which override pandas with a newer version.
+# pulls in flash-attn>=2.5.0 (requires CUDA_HOME to build from source).
 COPY requirements.txt .
 RUN echo "setuptools<81" > /build/constraints.txt && \
     PIP_CONSTRAINT=/build/constraints.txt pip install --no-cache-dir --no-deps stable-audio-tools && \
@@ -57,6 +57,15 @@ RUN echo "setuptools<81" > /build/constraints.txt && \
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
 ARG GPU
+ARG PYTHON_VERSION
+
+# Copy Python packages from builder.
+# We copy the entire Python standard library + site-packages directory
+# because the python:3.x-slim image uses a patch-versioned directory
+# (e.g., python3.13/site-packages is a symlink to python3.13.15/).
+# Using --link=false and the python3 prefix handles this correctly.
+COPY --from=builder /usr/local/lib/python${PYTHON_VERSION} /usr/local/lib/python${PYTHON_VERSION}
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 LABEL org.opencontainers.image.title="ALICE"
 LABEL org.opencontainers.image.description="Artificial Latent Interpretive Creation Engine - Remote Stable Diffusion and Audio Generation Service"
@@ -71,10 +80,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Create non-root user
 RUN groupadd -r alice && useradd -r -g alice -d /app -s /sbin/nologin alice
-
-# Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python${PYTHON_VERSION}/site-packages /usr/local/lib/python${PYTHON_VERSION}/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Create application directory structure
 WORKDIR /app
