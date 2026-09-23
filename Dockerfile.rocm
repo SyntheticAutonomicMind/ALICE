@@ -24,7 +24,7 @@ ARG TORCHAUDIO_VERSION=2.11.0.2+rocm10.0.0
 # =============================================================================
 # Stage 1: Builder
 # =============================================================================
-FROM rocm/dev-ubuntu-24.04:10.0.0-complete AS builder
+FROM rocm/dev-ubuntu-24.04:10.0.0-full AS builder
 
 ARG PYTHON_VERSION
 ARG TORCH_VERSION
@@ -63,7 +63,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # =============================================================================
 # Stage 2: Runtime
 # =============================================================================
-FROM rocm/dev-ubuntu-24.04:10.0.0-complete AS runtime
+FROM rocm/dev-ubuntu-24.04:10.0.0-full AS runtime
 
 ARG PYTHON_VERSION
 
