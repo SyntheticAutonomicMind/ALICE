@@ -564,10 +564,9 @@ class AudioGenerationRequest(BaseModel):
     lyrics: Optional[str] = Field(default=None, max_length=8000, description="Lyrics to sing (MiniMax-Music3 only); empty for instrumental")
     # When True, forces instrumental generation: lyrics are set to empty
     # (which _preprocess_lyrics normalizes to the structural tag set
-    # [Intro]\n[Instrumental]\n[Solo]\n[Outro]) and the engine augments the
+    # [intro]\n[instrumental]\n[solo]\n[outro]) and the engine augments the
     # caption with "Vocal Details: Purely instrumental track, no vocals." per
-    # the prompting guide.  Both the structural tags in the lyrics field and
-    # the caption augmentation are needed - neither alone is sufficient.
+    # the prompting guide.  Both the structural tags in the lyrics field and the caption augmentation are needed - neither alone is sufficient.
     is_instrumental: Optional[bool] = Field(default=None, description="Force instrumental output (MiniMax-Music3); overrides lyrics field")
     # OpenAI compat fields that we accept but ignore for music generation
     voice: Optional[str] = Field(default=None, description="Ignored; accepted for OpenAI API shape compatibility")

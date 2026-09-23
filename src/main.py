@@ -3801,18 +3801,15 @@ async def create_audio_generation(
     if not prompt or not prompt.strip():
         raise HTTPException(status_code=400, detail="Field 'prompt' (or 'input') is required")
 
-    # When is_instrumental is True, force instrumental mode by clearing
-    # the lyrics field.  The engine's _preprocess_lyrics converts empty
-    # lyrics to the full structural tag set "[Intro]\n[Instrumental]\n[Solo]\n[Outro]",
-    # and the engine augments the caption with "Vocal Details: Purely
-    # instrumental track, no vocals." per the prompting guide - the structural
-    # tags alone are insufficient; the caption augmentation is the primary
-    # vocal-suppression signal.
+    # When is_instrumental is True, preserve any client-provided lyrics
+    # (which may contain user-written structural tags).  The engine's
+    # _preprocess_lyrics normalizes them to the structural tag set
+    # ([intro]\n[instrumental]\n[solo]\n[outro]) and augments the caption
+    # with "Vocal Details: Purely instrumental track, no vocals." per the
+    # prompting guide.  When lyrics are empty/None, the engine generates
+    # the structural tags internally.
     is_instrumental = request.is_instrumental or False
-    if is_instrumental:
-        lyrics = ""
-    else:
-        lyrics = request.lyrics or ""
+    lyrics = request.lyrics or ""
 
     model_id = request.model or config.audio.default_model
     metadata = AudioBackend.get_model_metadata(model_id)

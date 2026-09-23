@@ -425,10 +425,10 @@ def _preprocess_lyrics(lyrics: Optional[str]) -> str:
     body text on the next line.  After this transform the pipeline keeps both.
 
     Empty or whitespace-only lyrics (including ``None``) are replaced with
-    ``"[Intro]\n[Instrumental]\n[Solo]\n[Outro]"`` because the pipeline raises
+    ``"[intro]\\n[instrumental]\\n[solo]\\n[outro]"`` because the pipeline raises
     ``ValueError`` when ``lyrics.strip()`` is falsy, and the MiniMax-Music3
     prompting guide requires the lyrics field to contain structural tags
-    (e.g. ``[Intro]``, ``[Instrumental]``, ``[Solo]``, ``[Outro]``); a lone
+    (e.g. ``[intro]``, ``[instrumental]``, ``[solo]``, ``[outro]``); a lone
     ``[instrumental]`` tag is insufficient -- the full set of structural tags
     gives the model a clear section scaffold without any vocal content.
     The literal marker ``[instrumental]`` (case-insensitive, optionally
@@ -437,13 +437,13 @@ def _preprocess_lyrics(lyrics: Optional[str]) -> str:
     pipeline validation.
     """
     if not lyrics or not lyrics.strip():
-        return "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
+        return "[intro]\n[instrumental]\n[solo]\n[outro]"
 
     # Recognize explicit "instrumental" markers from the user and normalize
     # them to the full structural tag set so the pipeline treats them as vocal-free.
     stripped = lyrics.strip().lower()
     if stripped in ("[instrumental]", "instrumental", "[no vocals]", "[no vocal]"):
-        return "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
+        return "[intro]\n[instrumental]\n[solo]\n[outro]"
 
     lines = []
     for line in lyrics.split("\n"):
@@ -756,7 +756,7 @@ class MiniMaxMusic3Engine:
         # Pre-process lyrics: the pipeline's _normalize_lyrics silently
         # drops text on the same line as a [tag].  Splitting tag+text
         # lines preserves the user's lyric content.  Empty lyrics
-        # (instrumental) become "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
+        # (instrumental) become "[intro]\n[instrumental]\n[solo]\n[outro]"
         # because the pipeline raises ValueError on a blank string.
         # NOTE: _preprocess_lyrics must be called BEFORE the log statement
         # below, which references len(processed_lyrics).  Calling it after
@@ -766,17 +766,16 @@ class MiniMaxMusic3Engine:
             logger.debug("Lyrics preprocessed for MiniMax pipeline: %r -> %r", lyrics, processed_lyrics)
 
         # If the user explicitly requested instrumental (or left lyrics empty),
-        # augment the caption with the standard vocal-details phrase per the
-        # MiniMax-Music3 prompting guide: "Vocal Details: Purely instrumental
-        # track, no vocals."  The [Instrumental] structural tag is already in
-        # the lyrics field via _preprocess_lyrics, but the caption must also
-        # state it -- otherwise the Qwen3 AR model defaults to generating
-        # vocals based on genre defaults.
-        # Skip if the caller already included "Vocal Details:" in the prompt
-        # (e.g. the demo script structures it as a dedicated section) to avoid
-        # duplication.
+        # augment the caption with the vocal-suppression phrase per the
+        # MiniMax-Music3 prompting guide.  The [Instrumental] structural tag
+        # is already in the lyrics field via _preprocess_lyrics, but the
+        # caption must also state it -- otherwise the Qwen3 AR model defaults
+        # to generating vocals based on genre defaults.
+        # Format: "Vocal Details: Purely instrumental track, no vocals."
+        # We append this to the prompt so the model receives the explicit
+        # no-vocals instruction in the caption.
         is_instrumental = "[instrumental]" in processed_lyrics.lower()
-        if is_instrumental and "vocal details" not in prompt.lower():
+        if is_instrumental:
             prompt = f"{prompt.strip()}, Vocal Details: Purely instrumental track, no vocals."
 
         logger.info(

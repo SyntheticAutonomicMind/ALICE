@@ -418,24 +418,24 @@ def test_preprocess_lyrics_handles_multiple_consecutive_tags():
 
 
 def test_preprocess_lyrics_empty_returns_instrumental():
-    """Empty string becomes the structural tag set '[Intro]\n[Instrumental]\n[Solo]\n[Outro]' so the pipeline doesn't raise."""
+    """Empty string becomes the structural tag set '[intro]\n[instrumental]\n[solo]\n[outro]' so the pipeline doesn't raise."""
     from src.audio_engine import _preprocess_lyrics
 
-    assert _preprocess_lyrics("") == "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
+    assert _preprocess_lyrics("") == "[intro]\n[instrumental]\n[solo]\n[outro]"
 
 
 def test_preprocess_lyrics_whitespace_returns_instrumental():
     """Whitespace-only lyrics also become the full structural tag set."""
     from src.audio_engine import _preprocess_lyrics
 
-    assert _preprocess_lyrics("   \n  \t  ") == "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
+    assert _preprocess_lyrics("   \n  \t  ") == "[intro]\n[instrumental]\n[solo]\n[outro]"
 
 
 def test_preprocess_lyrics_none_returns_instrumental():
     """None is treated as empty and becomes the full structural tag set."""
     from src.audio_engine import _preprocess_lyrics
 
-    assert _preprocess_lyrics(None) == "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
+    assert _preprocess_lyrics(None) == "[intro]\n[instrumental]\n[solo]\n[outro]"
 
 
 def test_preprocess_lyrics_already_has_instrumental_preserved():
@@ -443,7 +443,7 @@ def test_preprocess_lyrics_already_has_instrumental_preserved():
     from src.audio_engine import _preprocess_lyrics
 
     result = _preprocess_lyrics("[instrumental]")
-    assert result == "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
+    assert result == "[intro]\n[instrumental]\n[solo]\n[outro]"
 
 
 def test_preprocess_lyrics_no_change_for_plain_text():
@@ -460,7 +460,7 @@ def test_instrumental_prompt_augmented():
     model doesn't generate vocals.
 
     Per the MiniMax-Music3 prompting guide: the lyrics/input field must
-    contain ONLY structural tags ([Intro], [Instrumental], [Solo], [Outro]),
+    contain ONLY structural tags ([intro], [instrumental], [solo], [outro]),
     and the caption must explicitly state "Vocal Details: Purely instrumental
     track, no vocals."  Both signals are needed — neither alone is sufficient.
     """
