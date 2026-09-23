@@ -33,7 +33,7 @@ WORKDIR /build
 
 # Install PyTorch based on GPU argument
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir setuptools wheel && \
+    pip install --no-cache-dir "setuptools<81" wheel && \
     if [ "$GPU" = "cuda" ]; then \
         pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124; \
     else \

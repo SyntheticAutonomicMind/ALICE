@@ -10,6 +10,10 @@
 # The ROCm 10.0.0 multi-arch packages are installed via the stable.repo.amd.com
 # index with device-* extras that cover gfx1103, gfx1151, and all other
 # supported AMD GPU architectures.
+#
+# setuptools<81 is pinned because setuptools 81+ removed pkg_resources, which
+# is still needed at build time by some packages (e.g., pandas via
+# stable-audio-tools) on Python slim images where it was never bundled.
 
 # FastAPI and server
 fastapi>=0.104.1
@@ -35,6 +39,11 @@ pillow>=12.0.0
 # Configuration
 pyyaml>=6.0.3
 ruamel.yaml>=0.18.0
+
+# setuptools: pin <81 because setuptools 81+ removed pkg_resources, which
+# is still needed at build time by some packages (e.g., pandas) on Python
+# slim Docker images.
+setuptools<81
 
 # Async file handling
 aiofiles>=23.2.1
