@@ -24,19 +24,25 @@ ARG TORCHAUDIO_VERSION=2.11.0.2+rocm10.0.0
 # =============================================================================
 # Stage 1: Builder
 # =============================================================================
-FROM rocm/dev-ubuntu-24.04:10.0.0-complete AS builder
+FROM rocm/dev-ubuntu-24.04:10.0.0-full AS builder
 
 ARG PYTHON_VERSION
 ARG TORCH_VERSION
 ARG TORCHVISION_VERSION
 ARG TORCHAUDIO_VERSION
 
+# Install Python 3.13 from deadsnakes PPA (Ubuntu 24.04 only ships 3.12).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/* && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
     python${PYTHON_VERSION} \
     python${PYTHON_VERSION}-venv \
     python${PYTHON_VERSION}-dev \
     python3-pip \
-    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Use the specified Python version
@@ -60,9 +66,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # PIP_CONSTRAINT: pins setuptools<81 for build isolation environments
 # (setuptools 81+ removed pkg_resources, needed at build time by some packages).
 # stable-audio-tools is installed with --no-deps because its dynamic metadata
-# pulls in flash-attn>=2.5.0 and pandas==2.0.2, both of which fail to build
-# on Python 3.13. We install it separately, then install the remaining
-# requirements which override pandas with a newer version.
+# pulls in flash-attn>=2.5.0 (requires CUDA_HOME to build) and pandas==2.0.2
+# (no Python 3.13 wheel). We install it separately, then install the
+# remaining requirements which override pandas with a newer version.
 COPY requirements.txt .
 RUN echo "setuptools<81" > /build/constraints.txt && \
     PIP_CONSTRAINT=/build/constraints.txt pip install --no-cache-dir --no-deps stable-audio-tools && \
@@ -71,7 +77,7 @@ RUN echo "setuptools<81" > /build/constraints.txt && \
 # =============================================================================
 # Stage 2: Runtime
 # =============================================================================
-FROM rocm/dev-ubuntu-24.04:10.0.0-complete AS runtime
+FROM rocm/dev-ubuntu-24.04:10.0.0-full AS runtime
 
 ARG PYTHON_VERSION
 
@@ -81,7 +87,13 @@ LABEL org.opencontainers.image.url="https://github.com/SyntheticAutonomicMind/AL
 LABEL org.opencontainers.image.source="https://github.com/SyntheticAutonomicMind/ALICE"
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"
 
+# Install Python 3.13 from deadsnakes PPA (Ubuntu 24.04 only ships 3.12).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/* && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
     python${PYTHON_VERSION} \
     python3-pip \
     curl \
