@@ -1,7 +1,7 @@
 # ALICE Makefile
 # Build, run, test, and deployment commands for ALICE service
 
-.PHONY: install run test clean lint dev setup-dirs update check-update docker docker-cuda docker-rocm release
+.PHONY: install run test clean lint dev setup-dirs update check-update docker docker-cuda docker-rocm release sdcpp
 
 VENV = venv
 PYTHON = $(VENV)/bin/python
@@ -24,6 +24,11 @@ install: $(VENV)/bin/activate
 # Create required directories
 setup-dirs:
 	mkdir -p models images logs data
+
+# Build stable-diffusion.cpp with Vulkan (optional backend for universal GPU support)
+sdcpp:
+	INSTALL_PREFIX=$(CURDIR) bash scripts/build_sdcpp.sh
+	ln -sf $(CURDIR)/bin/sd-cli /usr/local/bin/sd-cli
 
 # Run development server
 run: setup-dirs
@@ -215,6 +220,9 @@ help:
 	@echo "    make docker-up-rocm - Start with Docker Compose (ROCm)"
 	@echo "    make docker-down    - Stop Docker Compose"
 	@echo "    make docker-logs    - Show Docker logs"
+	@echo ""
+	@echo "  Backends:"
+	@echo "    make sdcpp          - Build stable-diffusion.cpp (Vulkan backend)"
 	@echo ""
 	@echo "  Distribution:"
 	@echo "    make dist           - Create distribution tarball"

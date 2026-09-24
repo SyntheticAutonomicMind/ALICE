@@ -280,6 +280,14 @@ build_sdcpp() {
             ln -sf "${INSTALL_DIR}/bin/sd-cli" /usr/local/bin/sd-cli
             print_status "sd-cli installed to /usr/local/bin/sd-cli"
         fi
+
+        # Update config.yaml to point at the sd-cli binary and enable the vulkan backend
+        if [[ -f "${CONFIG_DIR}/config.yaml" ]]; then
+            sed -i "s|^  sdcpp_binary:.*|  sdcpp_binary: /usr/local/bin/sd-cli|" "${CONFIG_DIR}/config.yaml"
+            # Enable the Vulkan backend by default – it works universally on AMD/NVIDIA/Intel
+            sed -i "s|^  backend:.*|  backend: sdcpp|" "${CONFIG_DIR}/config.yaml"
+            print_status "Config updated: backend=sdcpp, sdcpp_binary=/usr/local/bin/sd-cli"
+        fi
     else
         print_warning "build_sdcpp.sh not found, skipping Vulkan backend build"
     fi
