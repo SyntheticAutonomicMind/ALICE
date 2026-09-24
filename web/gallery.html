@@ -78,21 +78,45 @@
         }
 
         /* Audio gallery cards — square aspect ratio to match image cards.
-           The audio player fills the card like an image does, and the overlay
-           floats on top via position:absolute. */
+           The audio player is centered in the card, and badges/buttons float
+           on top via position:absolute. */
         .audio-card-inner {
             position: relative;
-            padding: 0;
             height: 100%;
             display: flex;
-            flex-direction: column;
+            align-items: center;
+            justify-content: center;
         }
 
         .audio-card-inner audio {
-            border-radius: 12px 12px 0 0;
-            width: 100%;
-            flex: 1;
+            border-radius: 8px;
+            width: 85%;
             height: auto;
+            min-height: 60px;
+            z-index: 1;
+        }
+
+        /* Audio card badges and action buttons — always visible */
+        .audio-card .audio-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .audio-card .audio-overlay .overlay-top,
+        .audio-card .audio-overlay .overlay-actions,
+        .audio-card .audio-overlay .privacy-badge,
+        .audio-card .audio-overlay .model-badge,
+        .audio-card .audio-overlay .overlay-btn {
+            pointer-events: auto;
         }
 
         .audio-duration-info {
@@ -134,22 +158,6 @@
         
         .gallery-item:hover .gallery-overlay {
             opacity: 1;
-        }
-        
-        /* For audio cards, the overlay must not block the audio controls. */
-        .audio-card .gallery-overlay {
-            /* Gradient transparent in the center so player is visible */
-            background: linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.1) 8%, rgba(0,0,0,0) 25%, rgba(0,0,0,0) 75%, rgba(0,0,0,0.1) 92%, rgba(0,0,0,0.45) 100%);
-            /* Let pointer events pass through to the audio controls */
-            pointer-events: none;
-        }
-        
-        /* But make the action buttons and badges clickable */
-        .audio-card .gallery-overlay .overlay-top,
-        .audio-card .gallery-overlay .overlay-actions,
-        .audio-card .gallery-overlay .privacy-badge,
-        .audio-card .gallery-overlay .model-badge {
-            pointer-events: auto;
         }
         
         /* Top badges */
@@ -1186,12 +1194,12 @@
             var size = aud.sizeBytes ? formatBytes(aud.sizeBytes) : '';
             var durInfo = (dur || '') + (dur && size ? ' * ' : '') + size;
             return '<div class="audio-card-inner">' +
-                '<audio controls preload="none" style="width:100%;">' +
+                '<audio controls preload="none" style="width:100%;" onclick="event.stopPropagation()">' +
                 '<source src="' + aud.url + '" type="audio/wav">' +
                 'Your browser does not support the audio element.' +
                 '</audio>' +
-                '<div class="audio-duration-info" style="padding:8px 15px 0;font-size:0.75rem;color:var(--text-secondary);">' + durInfo + '</div>' +
-                '<div class="gallery-overlay">' +
+                (durInfo ? '<div class="audio-duration-info" style="padding:8px 15px 0;font-size:0.75rem;color:var(--text-secondary);">' + durInfo + '</div>' : '') +
+                '<div class="audio-overlay">' +
                 '<div class="overlay-top">' +
                 '<span class="privacy-badge ' + (aud.isPublic ? 'public' : 'private') + '">' + (aud.isPublic ? 'Public' : 'Private') + '</span>' +
                 '<span class="model-badge" title="' + escapeHtml(aud.model) + '">' + escapeHtml(modelName) + '</span>' +
@@ -1386,6 +1394,9 @@
 
             // Show the right media element
             if (item._mediaType === 'audio') {
+                // Pause any playing audio in the gallery cards
+                var galleryAudios = document.querySelectorAll('.audio-card-inner audio');
+                galleryAudios.forEach(function(a) { a.pause(); });
                 viewer.classList.add('audio-view');
                 viewerImage.style.display = 'none';
                 viewerImage.src = '';
@@ -1515,6 +1526,8 @@
             viewer.classList.remove('active', 'fullscreen', 'sidebar-visible', 'audio-view');
             var audio = document.getElementById('viewer-audio');
             if (audio) { audio.pause(); audio.style.display = 'none'; }
+            var galleryAudios = document.querySelectorAll('.audio-card-inner audio');
+            galleryAudios.forEach(function(a) { a.pause(); });
             document.body.style.overflow = '';
             currentViewerIndex = -1;
         }
