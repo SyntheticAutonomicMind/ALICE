@@ -125,7 +125,25 @@ install_alice() {
         huggingface-hub>=1.0.0 \
         einops \
         stable-audio-tools
-    
+
+    # Build stable-diffusion.cpp (Vulkan backend) — provides universal GPU
+    # support via Vulkan, working alongside ROCm as a fallback.
+    log_info "Building stable-diffusion.cpp (Vulkan backend)..."
+    if [[ -f "${SCRIPT_DIR}/build_sdcpp.sh" ]]; then
+        INSTALL_PREFIX="${ALICE_DIR}" bash "${SCRIPT_DIR}/build_sdcpp.sh" || {
+            log_warn "sd.cpp build failed — Vulkan backend will be unavailable."
+            log_warn "ALICE will fall back to ROCm/PyTorch for image generation."
+        }
+        # Make sd-cli available system-wide if it was built
+        if [[ -f "${ALICE_DIR}/sd.cpp/build/bin/sd-cli" ]]; then
+            ln -sf "${ALICE_DIR}/sd.cpp/build/bin/sd-cli" "${HOME}/.local/bin/sd-cli"
+            mkdir -p "${HOME}/.local/bin"
+            log_info "sd-cli symlinked to ~/.local/bin/sd-cli"
+        fi
+    else
+        log_warn "build_sdcpp.sh not found at ${SCRIPT_DIR}/build_sdcpp.sh — skipping Vulkan backend"
+    fi
+
     # Create config file if it doesn't exist
     if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
         log_info "Creating configuration file..."
@@ -191,6 +209,13 @@ generation:
   # Disabled on SteamOS to avoid stability issues with ROCm + systemd
   enable_torch_compile: false
   torch_compile_mode: "reduce-overhead"
+  
+  # stable-diffusion.cpp (Vulkan) backend configuration
+  # sd-cli provides universal GPU support via Vulkan, working alongside ROCm.
+  # Set backend to "auto" so ALICE picks Vulkan when ROCm isn't available.
+  backend: "auto"
+  sdcpp_binary: null
+  sdcpp_threads: 4
 
 logging:
   level: "INFO"
