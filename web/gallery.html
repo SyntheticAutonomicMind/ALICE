@@ -21,43 +21,45 @@
             transition: box-shadow 0.2s ease;
             cursor: pointer;
             width: 312px;
-            /* Ensure audio cards (which have small audio players) are as
-               tall as image cards. */
-            min-height: 312px;
         }
 
+        /* Audio cards need a minimum height so short audio players don't
+           collapse the card.  Image cards size to their natural image
+           dimensions. */
         .gallery-item.audio-card {
             width: 312px;
             aspect-ratio: 1 / 1;
+            min-height: 312px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
         }
         
         @media (max-width: 1400px) {
             .gallery-item {
                 width: 275px;
-                min-height: 275px;
             }
             .gallery-item.audio-card {
                 width: 275px;
+                min-height: 275px;
             }
         }
         
         @media (max-width: 1024px) {
             .gallery-item {
                 width: 250px;
-                min-height: 250px;
             }
             .gallery-item.audio-card {
                 width: 250px;
+                min-height: 250px;
             }
         }
         
         @media (max-width: 640px) {
             .gallery-item {
                 width: 100%;
-                min-height: 250px;
             }
             .gallery-item.audio-card {
                 width: 100%;
+                min-height: 250px;
             }
         }
         
@@ -84,19 +86,34 @@
             position: relative;
             height: 100%;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
         }
 
         .audio-card-inner audio {
             border-radius: 8px;
             width: 85%;
             height: auto;
-            min-height: 60px;
+            min-height: 44px;
             z-index: 1;
         }
 
-        /* Audio card badges and action buttons — always visible */
+        /* Duration info below the player */
+        .audio-duration-info {
+            padding-top: 8px;
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-align: center;
+            z-index: 1;
+        }
+
+        /* Audio card badges and action buttons — always visible, floating
+           on top of the card.  pointer-events:none on the overlay itself so
+           clicks on empty area open the viewer; children get auto so
+           badges/buttons are clickable. */
         .audio-card .audio-overlay {
             position: absolute;
             top: 0;
@@ -117,12 +134,6 @@
         .audio-card .audio-overlay .model-badge,
         .audio-card .audio-overlay .overlay-btn {
             pointer-events: auto;
-        }
-
-        .audio-duration-info {
-            padding-top: 5px;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
         }
 
         /* Audio player in the viewer — make it prominent */
@@ -1198,7 +1209,7 @@
                 '<source src="' + aud.url + '" type="audio/wav">' +
                 'Your browser does not support the audio element.' +
                 '</audio>' +
-                (durInfo ? '<div class="audio-duration-info" style="padding:8px 15px 0;font-size:0.75rem;color:var(--text-secondary);">' + durInfo + '</div>' : '') +
+                (durInfo ? '<div class="audio-duration-info" style="font-size:0.7rem;color:var(--text-secondary);text-align:center;">' + durInfo + '</div>' : '') +
                 '<div class="audio-overlay">' +
                 '<div class="overlay-top">' +
                 '<span class="privacy-badge ' + (aud.isPublic ? 'public' : 'private') + '">' + (aud.isPublic ? 'Public' : 'Private') + '</span>' +
