@@ -1212,7 +1212,7 @@
             var durInfo = (dur || '') + (dur && size ? ' * ' : '') + size;
             return '<div class="audio-card-inner">' +
                 '<audio controls preload="none" style="width:100%;" onclick="event.stopPropagation()">' +
-                '<source src="' + aud.url + '" type="audio/wav">' +
+                '<source src="' + aud.url + '" type="' + (aud.url.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav') + '">' +
                 'Your browser does not support the audio element.' +
                 '</audio>' +
                 (durInfo ? '<div class="audio-duration-info" style="font-size:0.7rem;color:var(--text-secondary);text-align:center;">' + durInfo + '</div>' : '') +
