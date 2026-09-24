@@ -312,11 +312,18 @@ class ModelRegistry:
                 if is_component:
                     continue
                 
+                # Skip safetensors files inside a directory that also contains a .gguf
+                # file — those are auxiliary components (VAE, LLM encoder) of the GGUF
+                # diffusion model, not standalone image checkpoints.
+                if safetensors_file.parent != self.models_dir:
+                    if list(safetensors_file.parent.glob("*.gguf")):
+                        logger.debug("Skipping auxiliary safetensors in GGUF model dir: %s", safetensors_file.name)
+                        continue
+                
                 # Skip known auxiliary files (VAE, text encoders, etc.)
                 # These are used by multi-component models but shouldn't be listed separately
                 stem_lower = safetensors_file.stem.lower()
                 if any(aux in stem_lower for aux in ['_vae', 'text_encoder', 'clip_vision', 'mmproj']):
-                    # Check if a corresponding model config references this file
                     logger.debug("Skipping auxiliary safetensors file: %s", safetensors_file.name)
                     continue
                 
