@@ -110,10 +110,10 @@
             z-index: 1;
         }
 
-        /* Audio card badges and action buttons — always visible, floating
-           on top of the card.  pointer-events:none on the overlay itself so
-           clicks on empty area open the viewer; children get auto so
-           badges/buttons are clickable. */
+        /* Audio card badges and action buttons — hidden until hover,
+           matching image card behavior.  pointer-events:none on the
+           overlay itself so clicks on empty area open the viewer;
+           children get auto so badges/buttons are clickable. */
         .audio-card .audio-overlay {
             position: absolute;
             top: 0;
@@ -126,6 +126,12 @@
             justify-content: space-between;
             pointer-events: none;
             z-index: 2;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .gallery-item:hover .audio-overlay {
+            opacity: 1;
         }
 
         .audio-card .audio-overlay .overlay-top,
