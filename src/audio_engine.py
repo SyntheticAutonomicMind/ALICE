@@ -247,7 +247,7 @@ class ALICEAudioEngine:
         cfg_scale: float = DEFAULT_CFG_SCALE,
         seed: Optional[int] = None,
         model_repo: str = DEFAULT_REPO,
-    ) -> Path:
+    ) -> Tuple[Path, float]:
         """
         Generate a stereo WAV from a text prompt.
 
@@ -260,7 +260,9 @@ class ALICEAudioEngine:
             model_repo: HuggingFace repo id of the model to load.
 
         Returns:
-            Path to the generated audio file (MP3 if ffmpeg conversion succeeded, otherwise WAV).
+            Tuple of (Path, float).  Path points to the generated audio
+            file (MP3 if ffmpeg conversion succeeded, otherwise WAV).
+            The float is the actual audio duration in seconds.
         """
         if not prompt or not prompt.strip():
             raise ValueError("prompt must be a non-empty string")
@@ -354,10 +356,16 @@ class ALICEAudioEngine:
 
         torchaudio.save(str(output_path), audio, sample_rate)
 
+        # Compute actual duration from the audio array.  Stable Audio
+        # generates approximately the requested length, but rounding to
+        # the latent grid can cause small differences.
+        actual_duration = float(audio.shape[-1] / sample_rate)
+
         elapsed = time.time() - start
         logger.info(
-            "Audio generation complete: %s (%.2fs, %.2f MB)",
-            output_path.name, elapsed, output_path.stat().st_size / (1024 * 1024),
+            "Audio generation complete: %s (%.2fs, %.2f MB, audio=%.1fs)",
+            output_path.name, elapsed,
+            output_path.stat().st_size / (1024 * 1024), actual_duration,
         )
 
         # Free unused intermediates.  The model itself stays loaded
@@ -366,7 +374,7 @@ class ALICEAudioEngine:
         # method handles cleanup after generation.
         del latents, audio
 
-        return output_path
+        return output_path, actual_duration
 
     # -- introspection -------------------------------------------------------
 
@@ -727,7 +735,7 @@ class MiniMaxMusic3Engine:
         seed: Optional[int] = None,
         model_repo_or_path: str = MINIMAX_MUSIC3_DEFAULT_REPO,
         is_instrumental: bool = False,
-    ) -> Path:
+    ) -> Tuple[Path, float]:
         """
         Generate a stereo WAV from a music description + lyrics.
 
@@ -753,8 +761,12 @@ class MiniMaxMusic3Engine:
                 seed when reliable instrumental output is required.
 
         Returns:
-            Path to the generated audio file (MP3 if ffmpeg conversion
-            succeeded, otherwise WAV).
+            Tuple of (Path, float).  The Path points to the generated audio
+            file (MP3 if ffmpeg conversion succeeded, otherwise WAV).  The
+            float is the actual audio duration in seconds.  The actual
+            duration may be shorter than ``audio_duration`` when the model
+            emits the end-of-audio token early (this is by design —
+            ``audio_duration`` is an upper-bound cap, not a guarantee).
         """
         if not prompt or not prompt.strip():
             raise ValueError("prompt must be a non-empty string")
@@ -849,6 +861,19 @@ class MiniMaxMusic3Engine:
         audio = result.audios[0] if hasattr(result, "audios") else result[0]
         sample_rate = int(self.pipeline.sampling_rate)
 
+        # Compute actual duration from the generated audio array.  The AR
+        # model may emit the end-of-audio token early, producing shorter
+        # audio than the requested audio_duration (which is only an
+        # upper-bound cap).  Returning the real duration lets the backend
+        # report accurate metadata to clients.
+        actual_duration = float(audio.shape[-1] / sample_rate)
+        if actual_duration < audio_duration * 0.8:
+            logger.warning(
+                "MiniMax generation produced %.1fs audio (requested %.1fs); "
+                "model emitted end-of-audio token early",
+                actual_duration, audio_duration,
+            )
+
         # When vae_decode_cpu is set, move the audio array to CPU early to
         # release GPU memory before any subsequent requests.  The pipeline
         # already returns numpy (CPU) when output_type="np", but the vocoder
@@ -872,9 +897,9 @@ class MiniMaxMusic3Engine:
 
         elapsed = time.time() - start
         logger.info(
-            "Music generation complete: %s (%.2fs, %.2f MB, %dHz)",
+            "Music generation complete: %s (%.2fs, %.2f MB, %dHz, audio=%.1fs)",
             output_path.name, elapsed,
-            output_path.stat().st_size / (1024 * 1024), sample_rate,
+            output_path.stat().st_size / (1024 * 1024), sample_rate, actual_duration,
         )
 
         # Attempt MP3 conversion using ffmpeg subprocess (pydub not installed).
@@ -883,7 +908,7 @@ class MiniMaxMusic3Engine:
         # Backend cleanup handles gc.collect()/empty_cache() after
         # the AudioBackend.unload() call, so we don't duplicate it here.
 
-        return mp3_path if mp3_path else output_path
+        return (mp3_path if mp3_path else output_path), actual_duration
 
     def _try_convert_to_mp3(self, wav_path: Path) -> Optional[Path]:
         """Convert WAV to MP3 using ffmpeg subprocess.

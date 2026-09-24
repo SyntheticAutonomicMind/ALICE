@@ -964,7 +964,7 @@ def test_backend_instrumental_flag_passed_to_engine(tmp_path):
         seed = kwargs.get("seed", 0)
         wav_path = tmp_path / f"test_{is_inst}_{seed}.wav"
         _make_test_wav(wav_path, duration=1.0)
-        return wav_path
+        return wav_path, 30.0
 
     mock_engine = MagicMock()
     mock_engine.generate = mock_generate
@@ -1006,7 +1006,7 @@ def test_backend_instrumental_false_passed_to_engine(tmp_path):
         call_count[0] += 1
         wav_path = tmp_path / f"test_{call_count[0]}.wav"
         _make_test_wav(wav_path, duration=1.0)
-        return wav_path
+        return wav_path, 30.0
 
     mock_engine = MagicMock()
     mock_engine.generate = mock_generate

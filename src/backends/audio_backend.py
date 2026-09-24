@@ -37,7 +37,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import torch
 
@@ -497,7 +497,7 @@ class AudioBackend:
                     # augmentation).  No post-generation vocal detection or
                     # seed retry is performed.
                     if is_minimax:
-                        audio_path = await asyncio.to_thread(
+                        audio_path, actual_duration = await asyncio.to_thread(
                             engine.generate,
                             prompt=prompt,
                             lyrics=lyrics or "",
@@ -508,7 +508,7 @@ class AudioBackend:
                             is_instrumental=is_instrumental,
                         )
                     else:
-                        audio_path = await asyncio.to_thread(
+                        audio_path, actual_duration = await asyncio.to_thread(
                             engine.generate,
                             prompt=prompt,
                             seconds=seconds,
@@ -530,10 +530,18 @@ class AudioBackend:
                     elapsed = time.time() - gen_start
                     stat = audio_path.stat()
                     rel = audio_path.name
+
+                    if actual_duration < seconds * 0.8:
+                        logger.warning(
+                            "[%s] Audio produced %.1fs but %ds requested; "
+                            "model emitted end-of-audio token early",
+                            request_id, actual_duration, seconds,
+                        )
+
                     return AudioGenerationResult(
                         audio_path=audio_path,
                         url=f"/v1/audio/{rel}",
-                        duration_seconds=float(seconds),
+                        duration_seconds=round(actual_duration, 1),
                         sample_rate=int(metadata["sample_rate"]),
                         model=model_id,
                         seed=int(current_seed),
