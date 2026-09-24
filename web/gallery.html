@@ -77,22 +77,22 @@
             border-radius: 12px 12px 0 0;
         }
 
-        /* Audio gallery cards — square aspect ratio to match image cards */
+        /* Audio gallery cards — square aspect ratio to match image cards.
+           The audio player fills the card like an image does, and the overlay
+           floats on top via position:absolute. */
         .audio-card-inner {
             position: relative;
-            padding: 15px;
+            padding: 0;
             height: 100%;
             display: flex;
             flex-direction: column;
         }
 
         .audio-card-inner audio {
-            border-radius: 8px;
+            border-radius: 12px 12px 0 0;
             width: 100%;
             flex: 1;
             height: auto;
-            min-height: 120px;
-            margin-bottom: 8px;
         }
 
         .audio-duration-info {
@@ -1190,6 +1190,7 @@
                 '<source src="' + aud.url + '" type="audio/wav">' +
                 'Your browser does not support the audio element.' +
                 '</audio>' +
+                '<div class="audio-duration-info" style="padding:8px 15px 0;font-size:0.75rem;color:var(--text-secondary);">' + durInfo + '</div>' +
                 '<div class="gallery-overlay">' +
                 '<div class="overlay-top">' +
                 '<span class="privacy-badge ' + (aud.isPublic ? 'public' : 'private') + '">' + (aud.isPublic ? 'Public' : 'Private') + '</span>' +
@@ -1206,7 +1207,6 @@
                 '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">' +
                 '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>' : '') +
                 '</div>' +
-                (durInfo ? '<div style="font-size:0.7rem; color:rgba(255,255,255,0.9); margin-top:4px;">' + durInfo + '</div>' : '') +
                 '</div></div>';
         }
 
