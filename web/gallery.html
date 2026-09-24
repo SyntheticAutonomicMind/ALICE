@@ -21,15 +21,20 @@
             transition: box-shadow 0.2s ease;
             cursor: pointer;
             width: 312px;
+            /* Ensure audio cards (which have small audio players) are as
+               tall as image cards. */
+            min-height: 312px;
         }
 
         .gallery-item.audio-card {
             width: 312px;
+            aspect-ratio: 1 / 1;
         }
         
         @media (max-width: 1400px) {
             .gallery-item {
                 width: 275px;
+                min-height: 275px;
             }
             .gallery-item.audio-card {
                 width: 275px;
@@ -39,6 +44,7 @@
         @media (max-width: 1024px) {
             .gallery-item {
                 width: 250px;
+                min-height: 250px;
             }
             .gallery-item.audio-card {
                 width: 250px;
@@ -48,6 +54,7 @@
         @media (max-width: 640px) {
             .gallery-item {
                 width: 100%;
+                min-height: 250px;
             }
             .gallery-item.audio-card {
                 width: 100%;
@@ -70,15 +77,21 @@
             border-radius: 12px 12px 0 0;
         }
 
-        /* Audio gallery cards */
+        /* Audio gallery cards — square aspect ratio to match image cards */
         .audio-card-inner {
             position: relative;
             padding: 15px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
 
         .audio-card-inner audio {
             border-radius: 8px;
             width: 100%;
+            flex: 1;
+            height: auto;
+            min-height: 120px;
             margin-bottom: 8px;
         }
 
