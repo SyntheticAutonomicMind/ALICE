@@ -24,7 +24,7 @@
         }
 
         .gallery-item.audio-card {
-            width: 500px;
+            width: 312px;
         }
         
         @media (max-width: 1400px) {
@@ -32,7 +32,7 @@
                 width: 275px;
             }
             .gallery-item.audio-card {
-                width: 460px;
+                width: 275px;
             }
         }
         
@@ -41,7 +41,7 @@
                 width: 250px;
             }
             .gallery-item.audio-card {
-                width: 425px;
+                width: 250px;
             }
         }
         
@@ -90,14 +90,16 @@
 
         /* Audio player in the viewer — make it prominent */
         #viewer-audio {
-            max-width: 600px;
+            max-width: 700px;
             width: 100%;
+            display: block;
         }
 
         .viewer-container.audio-view .viewer-image-area {
             display: flex;
             align-items: center;
             justify-content: center;
+            min-height: 120px;
         }
         
         /* Hover Overlay */
@@ -797,7 +799,7 @@
             
             <img id="viewer-image" class="viewer-image" src="" alt="">
             
-            <audio id="viewer-audio" style="display:none;" width="100%">
+            <audio id="viewer-audio" controls style="display:none;" width="100%">
                 <source src="" type="audio/wav">
             </audio>
             
