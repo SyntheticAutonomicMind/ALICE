@@ -837,8 +837,8 @@
             
             <img id="viewer-image" class="viewer-image" src="" alt="">
             
-            <audio id="viewer-audio" controls style="display:none;" width="100%">
-                <source src="" type="audio/wav">
+            <audio id="viewer-audio" controls style="display:none;" width="100%" preload="auto">
+                <source src="" type="audio/mpeg">
             </audio>
             
             <button class="viewer-nav next" onclick="navigateImage(1)">
@@ -1420,7 +1420,22 @@
                 viewerAudio.style.display = 'block';
                 var source = viewerAudio.querySelector('source');
                 source.src = item.url;
+                // Set the correct MIME type based on file extension.
+                // The server may serve either WAV (from Stable Audio) or
+                // MP3 (from MiniMax-Music3 with ffmpeg conversion).
+                // A wrong type causes the browser to stall loading, which
+                // also blocks the close button.
+                if (item.url.toLowerCase().endsWith('.mp3')) {
+                    source.type = 'audio/mpeg';
+                } else {
+                    source.type = 'audio/wav';
+                }
                 viewerAudio.load();
+                // Play immediately so the viewer player matches the
+                // playback state the user expects after clicking a card.
+                viewerAudio.play().catch(function(e) {
+                    console.debug('Auto-play blocked:', e);
+                });
             } else {
                 viewer.classList.remove('audio-view');
                 viewerAudio.style.display = 'none';
