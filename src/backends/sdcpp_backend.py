@@ -160,6 +160,8 @@ class SDCppBackend(BaseBackend):
             Path("/usr/bin/sd-cli"),
             Path.home() / "sd.cpp" / "build" / "bin" / "sd-cli",
             Path("/home/deck/sd.cpp/build/bin/sd-cli"),
+            Path.home() / ".local" / "bin" / "sd-cli",
+            Path("/opt/stable-diffusion.cpp/build/bin/sd-cli"),
         ]
         
         for path in search_paths:
