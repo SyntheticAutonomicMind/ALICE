@@ -174,8 +174,6 @@ def get_default_config() -> Dict[str, Any]:
             "request_timeout_seconds": 1800,
             "force_fp32": False,
             "vae_decode_cpu": False,
-            "instrumental_retry_attempts": 3,
-            "instrumental_vad_threshold": 0.55,
         },
     }
 

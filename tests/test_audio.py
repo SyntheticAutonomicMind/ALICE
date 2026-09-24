@@ -828,26 +828,6 @@ def test_endpoint_returns_503_when_disabled(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_audio_config_instrumental_defaults():
-    """AudioConfig has the instrumental retry + VAD threshold defaults."""
-    from src.config import AudioConfig, Config
-
-    cfg = Config()
-    assert cfg.audio.instrumental_retry_attempts == 3
-    assert cfg.audio.instrumental_vad_threshold == 0.55
-
-
-def test_audio_config_yaml_has_instrumental_defaults():
-    """config.yaml has the new instrumental settings."""
-    from src.config import load_config
-
-    cfg = load_config()
-    assert hasattr(cfg.audio, "instrumental_retry_attempts")
-    assert hasattr(cfg.audio, "instrumental_vad_threshold")
-    assert cfg.audio.instrumental_retry_attempts >= 0
-    assert 0.0 <= cfg.audio.instrumental_vad_threshold <= 1.0
-
-
 def test_engine_accepts_is_instrumental_param():
     """MiniMaxMusic3Engine.generate() has an is_instrumental parameter."""
     import inspect
@@ -959,66 +939,23 @@ def _make_test_wav(path: Path, duration: float = 1.0, sample_rate: int = 44100,
     return path
 
 
-def test_vocal_detector_returns_none_for_missing_file():
-    """detect_vocal_activity returns None when the file doesn't exist."""
-    from src.backends.vocal_detector import detect_vocal_activity
-
-    result = detect_vocal_activity(Path("/nonexistent/file.wav"))
-    assert result is None
-
-
-def test_vocal_detector_instrumental_wav():
-    """A pure sine-wave (instrumental) WAV should not trigger vocal detection."""
-    from src.backends.vocal_detector import detect_vocal_activity
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        wav_path = Path(f.name)
-    try:
-        _make_test_wav(wav_path, duration=2.0, freq=440.0)
-        result = detect_vocal_activity(wav_path)
-        # Should be False or None (if detection deps missing), never True
-        assert result is not True, "Sine wave incorrectly flagged as vocal"
-    finally:
-        wav_path.unlink(missing_ok=True)
-
-
-def test_vocal_detector_result_is_bool_or_none():
-    """detect_vocal_activity returns only True, False, or None."""
-    from src.backends.vocal_detector import detect_vocal_activity
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        wav_path = Path(f.name)
-    try:
-        _make_test_wav(wav_path, duration=2.0)
-        result = detect_vocal_activity(wav_path)
-        assert result in (True, False, None)
-    finally:
-        wav_path.unlink(missing_ok=True)
-
-
 # ---------------------------------------------------------------------------
-# Backend vocal-detection retry loop
+# Instrumental flag pass-through
 # ---------------------------------------------------------------------------
 
 
-def test_backend_instrumental_retries_on_vocals(tmp_path):
-    """When is_instrumental=True and VAD detects vocals, the backend retries
-    with an incremented seed up to config.audio.instrumental_retry_attempts."""
+def test_backend_instrumental_flag_passed_to_engine(tmp_path):
+    """When is_instrumental=True, the flag is passed to the engine and
+    generation is called exactly once (no retry loop)."""
     import asyncio
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import AsyncMock, MagicMock
     from src.backends.audio_backend import AudioBackend
     from src.config import Config
 
     cfg = Config()
-    cfg.audio.instrumental_retry_attempts = 3
-    cfg.audio.instrumental_vad_threshold = 0.55
     cfg.audio.default_model = "minimax-music-3"
-
     backend = AudioBackend(config=cfg, output_dir=tmp_path, max_concurrent=1)
 
-    # Mock the engine
-    mock_engine = MagicMock()
-    mock_engine.is_loaded.return_value = True
     call_count = [0]
 
     def mock_generate(**kwargs):
@@ -1029,52 +966,40 @@ def test_backend_instrumental_retries_on_vocals(tmp_path):
         _make_test_wav(wav_path, duration=1.0)
         return wav_path
 
+    mock_engine = MagicMock()
     mock_engine.generate = mock_generate
     mock_engine.model_repo = "MiniMaxAI/MiniMax-Music3"
     mock_engine.unload_model = MagicMock()
 
-    # Patch _get_engine to return our mock
     backend._get_engine = AsyncMock(return_value=mock_engine)
     backend._resolve_model_path = MagicMock(return_value=None)
 
-    # Patch detect_vocal_activity: True on first attempt, False on second
-    vad_call_count = [0]
-    with patch("src.backends.audio_backend.detect_vocal_activity") as mock_vad:
-        def mock_detect(path, threshold):
-            vad_call_count[0] += 1
-            return True if vad_call_count[0] == 1 else False
-        mock_vad.side_effect = mock_detect
-
-        result = asyncio.run(
-            backend.generate(
-                prompt="instrumental jazz fusion",
-                model_id="minimax-music-3",
-                seconds=30,
-                steps=30,
-                seed=42,
-                is_instrumental=True,
-            )
+    result = asyncio.run(
+        backend.generate(
+            prompt="instrumental jazz fusion",
+            model_id="minimax-music-3",
+            seconds=30,
+            steps=30,
+            seed=42,
+            is_instrumental=True,
         )
+    )
 
-    # Should have been called twice (initial + 1 retry)
-    assert call_count[0] == 2
-    assert result.retries == 1
-    # The seed should have been incremented
-    assert result.seed == 42 + 1000
+    # Should have been called exactly once
+    assert call_count[0] == 1
+    assert result.retries == 0
 
 
-def test_backend_instrumental_no_retry_when_no_vocals(tmp_path):
-    """When VAD returns False (no vocals), no retry happens."""
+def test_backend_instrumental_false_passed_to_engine(tmp_path):
+    """When is_instrumental=False, the flag is still passed through."""
     import asyncio
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import AsyncMock, MagicMock
     from src.backends.audio_backend import AudioBackend
     from src.config import Config
 
     cfg = Config()
-    cfg.audio.instrumental_retry_attempts = 3
     backend = AudioBackend(config=cfg, output_dir=tmp_path, max_concurrent=1)
 
-    mock_engine = MagicMock()
     call_count = [0]
 
     def mock_generate(**kwargs):
@@ -1083,45 +1008,7 @@ def test_backend_instrumental_no_retry_when_no_vocals(tmp_path):
         _make_test_wav(wav_path, duration=1.0)
         return wav_path
 
-    mock_engine.generate = mock_generate
-    mock_engine.model_repo = "MiniMaxAI/MiniMax-Music3"
-    mock_engine.unload_model = MagicMock()
-
-    backend._get_engine = AsyncMock(return_value=mock_engine)
-    backend._resolve_model_path = MagicMock(return_value=None)
-
-    with patch("src.backends.audio_backend.detect_vocal_activity", return_value=False):
-        result = asyncio.run(
-            backend.generate(
-                prompt="instrumental jazz",
-                model_id="minimax-music-3",
-                seconds=30,
-                steps=30,
-                is_instrumental=True,
-            )
-        )
-
-    assert call_count[0] == 1
-    assert result.retries == 0
-
-
-def test_backend_no_vad_when_not_instrumental(tmp_path):
-    """When is_instrumental=False, VAD is never called."""
-    import asyncio
-    from unittest.mock import AsyncMock, MagicMock, patch
-    from src.backends.audio_backend import AudioBackend
-    from src.config import Config
-
-    cfg = Config()
-    backend = AudioBackend(config=cfg, output_dir=tmp_path, max_concurrent=1)
-
     mock_engine = MagicMock()
-
-    def mock_generate(**kwargs):
-        wav_path = tmp_path / "test.wav"
-        _make_test_wav(wav_path, duration=1.0)
-        return wav_path
-
     mock_engine.generate = mock_generate
     mock_engine.model_repo = "stabilityai/stable-audio-open-1.0"
     mock_engine.unload_model = MagicMock()
@@ -1129,15 +1016,14 @@ def test_backend_no_vad_when_not_instrumental(tmp_path):
     backend._get_engine = AsyncMock(return_value=mock_engine)
     backend._resolve_model_path = MagicMock(return_value=None)
 
-    with patch("src.backends.audio_backend.detect_vocal_activity") as mock_vad:
-        result = asyncio.run(
-            backend.generate(
-                prompt="a warm acoustic guitar loop",
-                model_id="stable-audio-open-1.0",
-                seconds=30,
-                is_instrumental=False,
-            )
+    result = asyncio.run(
+        backend.generate(
+            prompt="a warm acoustic guitar loop",
+            model_id="stable-audio-open-1.0",
+            seconds=30,
+            is_instrumental=False,
         )
+    )
 
-    assert mock_vad.call_count == 0
+    assert call_count[0] == 1
     assert result.retries == 0

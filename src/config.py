@@ -136,18 +136,6 @@ class AudioConfig(BaseModel):
     # surprise users on the same hardware).
     force_fp32: bool = Field(default=False, description="Force float32 (rare; required for some AMD APUs)")
     vae_decode_cpu: bool = Field(default=False, description="Decode VAE on CPU (AMD gfx1103 workaround)")
-    # Instrumental vocal-leak prevention (MiniMax-Music3 only).
-    # The open-weight model lacks a dedicated is_instrumental parameter,
-    # so we run a post-generation vocal-activity check and retry with a
-    # new seed when vocals are detected.
-    instrumental_retry_attempts: int = Field(
-        default=3, ge=0, le=10,
-        description="Max vocal-detection retries for instrumental MiniMax-Music3 generations (0 disables retry)",
-    )
-    instrumental_vad_threshold: float = Field(
-        default=0.55, ge=0.0, le=1.0,
-        description="Vocal-activity detection confidence threshold (0.0–1.0) above which a retry is triggered",
-    )
 
 
 class Config(BaseModel):

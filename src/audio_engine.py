@@ -441,9 +441,6 @@ def _preprocess_lyrics(lyrics: Optional[str]) -> str:
     MiniMax-Music3 checkpoint (HF Diffusers) does not expose a dedicated
     ``is_instrumental`` parameter like the hosted API does; the Qwen3 AR
     model may still generate wordless vocalizations despite the scaffolding.
-    Callers that need guaranteed instrumental output should run a
-    post-generation vocal-activity check and retry with a new seed
-    (see ``AudioBackend.generate`` retry logic).
     """
     if not lyrics or not lyrics.strip():
         return "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
