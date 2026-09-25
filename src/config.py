@@ -54,7 +54,7 @@ class GenerationConfig(BaseModel):
     sdcpp_threads: int = Field(default=8, ge=1, le=64, description="CPU threads for Vulkan backend")
     # PyTorch device settings
     force_cpu: bool = Field(default=False, description="Force CPU mode even if GPU is available")
-    device_map: Optional[str] = Field(default=None, description="Device map for model loading (e.g., 'balanced' for AMD APUs)")
+    device_map: Optional[str] = Field(default=None, description="Device map for model loading. Use 'None' (default) for AMD Phoenix APU (gfx1103) to avoid hipErrorInvalidKernelFile. Use 'sequential' only for limited VRAM.")
     force_float32: bool = Field(default=False, description="Force float32 (required for some AMD GPUs)")
     force_bfloat16: bool = Field(default=False, description="Force bfloat16 (better for AMD Phoenix APU)")
     # Memory optimization settings (shared by PyTorch and Vulkan where applicable)

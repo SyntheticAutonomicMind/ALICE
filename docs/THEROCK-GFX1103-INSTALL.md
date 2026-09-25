@@ -66,14 +66,13 @@ if torch.cuda.is_available():
 The following environment variables are recommended for gfx1103:
 
 ```bash
-# Set correct architecture
+# Set correct architecture for kernel compilation
 export PYTORCH_ROCM_ARCH=gfx1103
 
-# Version override for compatibility
-export HSA_OVERRIDE_GFX_VERSION=11.0.0
-
-# Enable experimental features
-export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
+# Do NOT set HSA_OVERRIDE_GFX_VERSION for gfx1103 (Phoenix APU)!
+# Setting HSA_OVERRIDE_GFX_VERSION=11.0.0 causes hipErrorInvalidImage because
+# it reports the GPU as gfx1100 to the HSA runtime, but the precompiled kernels
+# target gfx1103.  ROCm 10.0+ / TheRock nightly includes native gfx1103 support.
 ```
 
 For systemd services, add these to the service file:
@@ -81,8 +80,8 @@ For systemd services, add these to the service file:
 ```ini
 [Service]
 Environment="PYTORCH_ROCM_ARCH=gfx1103"
-Environment="HSA_OVERRIDE_GFX_VERSION=11.0.0"
-Environment="TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1"
+Environment="MIOPEN_DEBUG_FIND_ALL=0"
+# Do NOT set HSA_OVERRIDE_GFX_VERSION — see note above.
 ```
 
 ## Alternative: Install ROCm Packages Only
