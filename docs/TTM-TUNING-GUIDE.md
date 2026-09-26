@@ -786,7 +786,8 @@ python3 test_ttm_allocation.py
    
    # Should include:
    # Environment="PYTORCH_ROCM_ARCH=gfx1103"
-   # Environment="HSA_OVERRIDE_GFX_VERSION=11.0.0"
+   # Environment="MIOPEN_DEBUG_FIND_ALL=0"
+   # Do NOT set HSA_OVERRIDE_GFX_VERSION for gfx1103 — it causes hipErrorInvalidImage
    ```
 
 4. **Test GPU directly:**

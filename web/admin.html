@@ -652,11 +652,10 @@
                             <div class="form-group">
                                 <label for="setting-gen-device-map">Device Map</label>
                                 <select id="setting-gen-device-map" data-key="generation.device_map">
-                                    <option value="">Auto</option>
-                                    <option value="balanced">Balanced</option>
+                                    <option value="">None (load all on GPU)</option>
                                     <option value="sequential">Sequential</option>
                                 </select>
-                                <small style="color: var(--text-muted); font-size: 0.75rem;">For AMD APUs use 'balanced'</small>
+                                <small style="color: var(--text-muted); font-size: 0.75rem;">Use 'None' for AMD Phoenix APU (gfx1103) to avoid hipErrorInvalidKernelFile in CLIP text encoder. 'Sequential' is for systems with limited VRAM.</small>
                             </div>
                         </div>
                         

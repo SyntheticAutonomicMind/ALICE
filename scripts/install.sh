@@ -330,16 +330,24 @@ install_systemd_service() {
     # Set AMD GPU environment variables based on detected architecture
     # PYTORCH_ROCM_ARCH and HSA_OVERRIDE_GFX_VERSION must be set before
     # the Python process starts (they affect HSA runtime initialization)
+    # NOTE: HSA_OVERRIDE_GFX_VERSION is NOT set for gfx1103 (Phoenix APU) on
+    # ROCm 10.0+ because it causes hipErrorInvalidImage. Native gfx1103
+    # kernel support makes the override unnecessary and harmful.
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     source "${SCRIPT_DIR}/detect_amd_gpu.sh"
     local gpu_env=$(detect_amd_gpu 2>/dev/null)
     local rocm_arch=$(echo "$gpu_env" | grep PYTORCH_ROCM_ARCH | sed 's/export PYTORCH_ROCM_ARCH=//' | tr -d '"')
     local hsa_ver=$(echo "$gpu_env" | grep HSA_OVERRIDE_GFX_VERSION | sed 's/export HSA_OVERRIDE_GFX_VERSION=//' | tr -d '"')
     
-    if [[ -n "$rocm_arch" && -n "$hsa_ver" ]]; then
-        # Insert GPU environment variables after the MIOPEN_DEBUG_FIND_ALL line
-        sed -i "/Environment=\"MIOPEN_DEBUG_FIND_ALL=0\"/a Environment=\"PYTORCH_ROCM_ARCH=${rocm_arch}\"\nEnvironment=\"HSA_OVERRIDE_GFX_VERSION=${hsa_ver}\"" "/etc/systemd/system/${APP_NAME}.service"
-        print_status "Set ROCm GPU environment: PYTORCH_ROCM_ARCH=${rocm_arch}, HSA_OVERRIDE_GFX_VERSION=${hsa_ver}"
+    if [[ -n "$rocm_arch" ]]; then
+        # Insert PYTORCH_ROCM_ARCH after the MIOPEN_DEBUG_FIND_ALL line
+        sed -i "/Environment=\"MIOPEN_DEBUG_FIND_ALL=0\"/a Environment=\"PYTORCH_ROCM_ARCH=${rocm_arch}\"" "/etc/systemd/system/${APP_NAME}.service"
+        if [[ -n "$hsa_ver" ]]; then
+            sed -i "/Environment=\"PYTORCH_ROCM_ARCH=${rocm_arch}\"/a Environment=\"HSA_OVERRIDE_GFX_VERSION=${hsa_ver}\"" "/etc/systemd/system/${APP_NAME}.service"
+            print_status "Set ROCm GPU environment: PYTORCH_ROCM_ARCH=${rocm_arch}, HSA_OVERRIDE_GFX_VERSION=${hsa_ver}"
+        else
+            print_status "Set ROCm GPU environment: PYTORCH_ROCM_ARCH=${rocm_arch} (HSA_OVERRIDE not set - native gfx1103 support)"
+        fi
     fi
     
     systemctl daemon-reload

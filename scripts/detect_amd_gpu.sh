@@ -16,11 +16,14 @@ AMD_VENDOR="1002"
 # Format: "PCI_ID:gfx_arch:hsa_override"
 declare -A AMD_GPU_MAP=(
     # RDNA3 - Phoenix (Ryzen 7000/8000 series APUs)
-    # Note: Phoenix is gfx1103 but works with gfx1100 kernels (11.0.0)
-    # The 11.0.0 override provides better kernel compatibility than 11.0.2
-    ["15bf"]="gfx1103:11.0.0"    # Phoenix1 (Ryzen 7 8840U, Ryzen 9 8945HS, etc.) - tested working
-    ["15c8"]="gfx1103:11.0.0"    # Phoenix2 - use same override as Phoenix1
-    ["1900"]="gfx1103:11.0.0"    # Phoenix (variant)
+    # NOTE: HSA_OVERRIDE_GFX_VERSION is NOT set for Phoenix (gfx1103) on
+    # ROCm 10.0+ / TheRock nightly, because it causes hipErrorInvalidImage:
+    # the override tells the HSA runtime the GPU is gfx1100, but precompiled
+    # kernels target gfx1103, resulting in an invalid kernel image.
+    # Native gfx1103 support in the ROCm stack makes the override unnecessary.
+    ["15bf"]="gfx1103:"    # Phoenix1 (Ryzen 7 8840U, Ryzen 9 8945HS, etc.)
+    ["15c8"]="gfx1103:"    # Phoenix2
+    ["1900"]="gfx1103:"    # Phoenix (variant)
 
     # RDNA3 - Navi 31/32/33 (RX 7000 series)
     ["744c"]="gfx1100:11.0.0"    # Navi 31 (RX 7900 XTX/XT)
@@ -29,8 +32,8 @@ declare -A AMD_GPU_MAP=(
     ["7470"]="gfx1102:11.0.0"    # Navi 33 (RX 7600) - use 11.0.0 for compatibility
 
     # RDNA3 - Strix Point / Strix Halo (Ryzen AI 300 series)
-    ["150e"]="gfx1103:11.0.0"    # Strix Point (Ryzen AI 9 HX 370, etc.)
-    ["1502"]="gfx1103:11.0.0"    # Strix (variant)
+    ["150e"]="gfx1103:"    # Strix Point (Ryzen AI 9 HX 370, etc.)
+    ["1502"]="gfx1103:"    # Strix (variant)
 
     # RDNA3.5 - Strix Halo (Ryzen AI Max 300 series, e.g. Ryzen AI Max+ 395)
     # Strix Halo uses gfx1151 kernels and lives behind a wheel index separate
@@ -110,11 +113,17 @@ detect_amd_gpu() {
         [[ -n "$gpu_name" ]] && echo "# GPU Name: $gpu_name"
         echo "# GFX Architecture: $gfx_arch"
         echo "export PYTORCH_ROCM_ARCH=\"$gfx_arch\""
-        echo "export HSA_OVERRIDE_GFX_VERSION=\"$hsa_version\""
+        # Only set HSA_OVERRIDE_GFX_VERSION if a non-empty version is mapped.
+        # Phoenix APUs (gfx1103) with ROCm 10.0+ have native kernel support,
+        # so the override must NOT be set — it causes hipErrorInvalidImage by
+        # reporting gfx1100 to the HSA runtime while kernels target gfx1103.
+        if [[ -n "$hsa_version" ]]; then
+            echo "export HSA_OVERRIDE_GFX_VERSION=\"$hsa_version\""
+        fi
         
         # Enable experimental features for newer GPUs
         case "$gfx_arch" in
-            gfx110*|gfx103*)
+            gfx1151)
                 echo "export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1"
                 ;;
         esac
@@ -168,8 +177,10 @@ check_rocm_setup() {
     
     if [[ -n "$HSA_OVERRIDE_GFX_VERSION" ]]; then
         echo "[OK] HSA_OVERRIDE_GFX_VERSION=$HSA_OVERRIDE_GFX_VERSION"
+    elif echo "$PYTORCH_ROCM_ARCH" | grep -q "gfx1103\|gfx1151"; then
+        echo "[OK] HSA_OVERRIDE_GFX_VERSION not set (native $(echo $PYTORCH_ROCM_ARCH) kernel support)"
     else
-        echo "[MISSING] HSA_OVERRIDE_GFX_VERSION not set"
+        echo "[WARN] HSA_OVERRIDE_GFX_VERSION not set (may be needed for older GPUs)"
     fi
     
     # Check for ROCm libraries

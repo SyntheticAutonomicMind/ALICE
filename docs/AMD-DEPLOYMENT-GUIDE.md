@@ -312,8 +312,11 @@ ls -la /dev/kfd /dev/dri/renderD128
 # Check groups
 id | grep -E "video|render"
 
-# Try environment variable
-export HSA_OVERRIDE_GFX_VERSION=11.0.0
+# Try environment variable (NOT for gfx1103 — native kernels are available)
+# For older GPUs only:
+# export HSA_OVERRIDE_GFX_VERSION=11.0.0
+echo "PYTORCH_ROCM_ARCH=$PYTORCH_ROCM_ARCH (should be gfx1103 for Phoenix)"
+echo "HSA_OVERRIDE_GFX_VERSION=$HSA_OVERRIDE_GFX_VERSION (should NOT be set for gfx1103)"
 ```
 
 ### Out of Memory
