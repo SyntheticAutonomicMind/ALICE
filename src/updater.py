@@ -393,10 +393,16 @@ class UpdateManager:
                     from .config_migration import migrate_config
                     migration = migrate_config()
                     if migration["migrated"]:
-                        logger.info(
-                            "Config migrated: added %s",
-                            ", ".join(migration["added"]),
-                        )
+                        if migration["added"]:
+                            logger.info(
+                                "Config migrated: added %s",
+                                ", ".join(migration["added"]),
+                            )
+                        if migration.get("removed"):
+                            logger.info(
+                                "Config cleaned up: removed %s",
+                                ", ".join(migration["removed"]),
+                            )
                 except Exception as e:
                     logger.debug("Config migration after update skipped: %s", e)
 

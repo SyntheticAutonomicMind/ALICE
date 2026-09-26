@@ -213,22 +213,43 @@ def test_config_cancel_on_disconnect_yaml(monkeypatch, tmp_path):
     assert config.generation.cancel_on_disconnect is True
 
 
-def test_config_migration_sync():
-    """Test that get_default_config in config_migration stays in sync with GenerationConfig."""
-    from src.config import GenerationConfig, AudioConfig, ServerConfig, ModelsConfig, StorageConfig, LoggingConfig, ModelCacheConfig
+@pytest.mark.parametrize("model_cls,section", [
+    (ServerConfig, "server"),
+    (ModelsConfig, "models"),
+    (GenerationConfig, "generation"),
+    (StorageConfig, "storage"),
+    (LoggingConfig, "logging"),
+    (ModelCacheConfig, "model_cache"),
+    (AudioConfig, "audio"),
+])
+def test_config_migration_sync(model_cls, section):
+    """Test that every non-default_factory Pydantic field exists in get_default_config().
+
+    Fields with ``default_factory`` (which read env vars at runtime) are
+    intentionally excluded from ``get_default_config()`` because writing them
+    into the YAML config would override the factory on subsequent restarts.
+    """
     from src.config_migration import get_default_config
+    from src.config import ServerConfig, ModelsConfig, GenerationConfig, StorageConfig, LoggingConfig, ModelCacheConfig, AudioConfig
 
     defaults = get_default_config()
-    gen_defaults = defaults.get("generation", {})
+    section_defaults = defaults.get(section, {})
+    fields = getattr(model_cls, "model_fields", None) or getattr(model_cls, "__fields__", {})
 
-    # Verify cancel_on_disconnect specifically
-    assert "cancel_on_disconnect" in gen_defaults
-    assert gen_defaults["cancel_on_disconnect"] is False
-
-    # Invariant: every field in GenerationConfig must exist in migration defaults
-    model_fields = getattr(GenerationConfig, "model_fields", None) or getattr(GenerationConfig, "__fields__", {})
-    missing_fields = set(model_fields.keys()) - set(gen_defaults.keys())
-    assert not missing_fields, f"Missing fields in config_migration.py get_default_config(): {missing_fields}"
+    for fname, field_info in fields.items():
+        # Skip fields with default_factory — these should NOT be in get_default_config
+        if field_info.default_factory is not None:
+            assert fname not in section_defaults, (
+                f"Field {section}.{fname} has a default_factory and should NOT "
+                f"be in get_default_config() — the migration would bake in the "
+                f"env-var value, preventing the factory from being used at runtime."
+            )
+            continue
+        # Every non-factory field must be present in get_default_config
+        assert fname in section_defaults, (
+            f"Field {section}.{fname} is in the Pydantic model but missing from "
+            f"get_default_config() — the migration won't add it to new configs."
+        )
 
 
 @pytest.mark.parametrize("model_cls,section", [
@@ -312,5 +333,102 @@ def test_config_migration_preserves_comments(tmp_path):
     # Verify user values are preserved
     assert "port: 8090" in content
     assert "force_float32: true" in content
+
+
+def test_config_migration_removes_auto_added_cancel_on_disconnect(tmp_path, monkeypatch):
+    """Test that migrate_config removes cancel_on_disconnect when it matches the env-var default.
+
+    When the env var is not set, the default is False.  If a previous migration
+    wrote 'cancel_on_disconnect: false' into the config, the current migration
+    should remove it so the default_factory (env-var reader) takes effect.
+    """
+    from src.config_migration import migrate_config
+    monkeypatch.delenv("ALICE_CANCEL_ON_DISCONNECT", raising=False)
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        "server:\n  port: 8080\n"
+        "generation:\n  cancel_on_disconnect: false\n"
+        "  max_cached_models: 3\n",
+        encoding="utf-8",
+    )
+
+    result = migrate_config(config_path=str(config_file), backup=True)
+    # migration runs because cancel_on_disconnect needs cleanup
+    assert result["migrated"]
+    assert "generation.cancel_on_disconnect" in result.get("removed", [])
+
+    content = config_file.read_text(encoding="utf-8")
+    assert "cancel_on_disconnect" not in content, "cancel_on_disconnect should have been removed"
+    assert "max_cached_models: 3" in content, "User values must be preserved"
+
+
+def test_config_migration_preserves_user_set_cancel_on_disconnect(tmp_path, monkeypatch):
+    """Test that migrate_config preserves cancel_on_disconnect when the user changed it."""
+    from src.config_migration import migrate_config
+    monkeypatch.delenv("ALICE_CANCEL_ON_DISCONNECT", raising=False)
+
+    config_file = tmp_path / "config.yaml"
+    # User set cancel_on_disconnect to True (different from env-var default of False)
+    config_file.write_text(
+        "server:\n  port: 8080\n"
+        "generation:\n  cancel_on_disconnect: true\n"
+        "  max_cached_models: 3\n",
+        encoding="utf-8",
+    )
+
+    result = migrate_config(config_path=str(config_file), backup=True)
+    # migration runs because there are missing keys (auto_unload_timeout was
+    # added to defaults)
+    assert result["migrated"]
+    assert "generation.cancel_on_disconnect" not in result.get("removed", []), \
+        "User-set cancel_on_disconnect should be preserved"
+
+    content = config_file.read_text(encoding="utf-8")
+    assert "cancel_on_disconnect: true" in content, "User value should be preserved"
+
+
+def test_config_migration_cancel_on_disconnect_with_env_var(tmp_path, monkeypatch):
+    """Test that cancel_on_disconnect is only removed when it matches the env-var default."""
+    from src.config_migration import migrate_config
+    from src.config import load_config
+    monkeypatch.setenv("ALICE_CANCEL_ON_DISCONNECT", "true")
+
+    config_file = tmp_path / "config.yaml"
+    # Env var default is True, but config has False — should be preserved
+    config_file.write_text(
+        "server:\n  port: 8080\n"
+        "generation:\n  cancel_on_disconnect: false\n"
+        "  max_cached_models: 3\n",
+        encoding="utf-8",
+    )
+
+    result = migrate_config(config_path=str(config_file), backup=True)
+    assert result["migrated"]
+    assert "generation.cancel_on_disconnect" not in result.get("removed", []), \
+        "cancel_on_disconnect=False differs from env-var default True — should be preserved"
+
+    content = config_file.read_text(encoding="utf-8")
+    assert "cancel_on_disconnect: false" in content, "User override should be preserved"
+
+    # Now test: config has True (matches env var default of True) — should be removed
+    config_file.write_text(
+        "server:\n  port: 8080\n"
+        "generation:\n  cancel_on_disconnect: true\n"
+        "  max_cached_models: 3\n",
+        encoding="utf-8",
+    )
+    result = migrate_config(config_path=str(config_file), backup=True)
+    assert result["migrated"]
+    assert "generation.cancel_on_disconnect" in result.get("removed", []), \
+        "cancel_on_disconnect=True matches env-var default True — should be removed"
+
+    content = config_file.read_text(encoding="utf-8")
+    assert "cancel_on_disconnect" not in content, "Should have been removed"
+
+    # Verify load_config now uses the env var default
+    cfg = load_config(config_file)
+    assert cfg.generation.cancel_on_disconnect is True, \
+        "After removal, default_factory should read env var = true"
 
 

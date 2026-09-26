@@ -81,12 +81,30 @@ def write_config_file(path: Path, config: Any) -> None:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 
+def _cancel_on_disconnect_default() -> bool:
+    """Compute the runtime default for cancel_on_disconnect from the env var.
+
+    This mirrors the Pydantic ``default_factory`` so that the migration
+    can decide whether an existing ``cancel_on_disconnect`` value in a
+    user's config was auto-added by a previous migration (and can safely
+    be removed) or was explicitly set by the user (and must be kept).
+    """
+    return os.environ.get("ALICE_CANCEL_ON_DISCONNECT", "false").lower() in ("true", "1", "yes")
+
+
 def get_default_config() -> Dict[str, Any]:
     """Generate the full default configuration as a dictionary.
 
     This mirrors the Pydantic model defaults in config.py but as raw
     dictionaries suitable for YAML serialization. Using the Pydantic models
     directly would lose comments and formatting.
+
+    Fields that use ``default_factory`` in the Pydantic model (which read
+    environment variables at runtime) are intentionally excluded here.
+    The migration should NOT write these into the YAML config file, because
+    doing so "bakes in" the value and prevents the ``default_factory`` from
+    being consulted on subsequent restarts.  The Pydantic model handles
+    these defaults at load time.
     """
     return {
         "server": {
@@ -100,6 +118,7 @@ def get_default_config() -> Dict[str, Any]:
         },
         "models": {
             "directory": "./models",
+            "auto_unload_timeout": 0,
             "default_model": None,
             "civitai_api_key": None,
             "huggingface_token": None,
@@ -133,8 +152,6 @@ def get_default_config() -> Dict[str, Any]:
             "vae_conv_direct": True,
             "circular": False,
             "enable_flash_attention": True,
-            "cancel_on_disconnect": os.environ.get("ALICE_CANCEL_ON_DISCONNECT", "false").lower()
-        in ("true", "1", "yes"),
             "max_cached_models": 2,
             "vram_evict_threshold_gb": 2.0,
             "max_cpu_cached_models": 8,
@@ -230,12 +247,14 @@ def migrate_config(
         Dictionary with migration results:
         - "migrated": bool - Whether any changes were made
         - "added": list - Keys that were added
+        - "removed": list - Keys that were removed (obsolete auto-added settings)
         - "config_path": str - Path to the config file
         - "backup_path": str or None - Path to backup if created
     """
     result = {
         "migrated": False,
         "added": [],
+        "removed": [],
         "config_path": None,
         "backup_path": None,
         "version": __version__,
@@ -280,7 +299,28 @@ def migrate_config(
     defaults = get_default_config()
     missing = find_missing_keys(user_config, defaults)
 
-    if not missing:
+    # Clean up settings that were auto-added by previous migrations of fields
+    # that now use default_factory (env-var-based) defaults.  We only remove
+    # a key if its current value matches the runtime default — that means it
+    # was almost certainly written by the migration, not explicitly set by the
+    # user via the admin panel.  User-set overrides (different from the default)
+    # are always preserved.
+    removed = []
+    gen_section = user_config.get("generation", {}) if isinstance(user_config, dict) else {}
+    if isinstance(gen_section, dict) and "cancel_on_disconnect" in gen_section:
+        current_val = gen_section["cancel_on_disconnect"]
+        default_val = _cancel_on_disconnect_default()
+        if current_val == default_val:
+            # Value matches the env-var default — safe to remove so the
+            # default_factory takes effect on subsequent restarts.
+            removed.append(("generation", "cancel_on_disconnect"))
+            logger.info(
+                "Config cleanup: removing generation.cancel_on_disconnect=%s "
+                "(matches env-var default, was auto-added by previous migration)",
+                repr(current_val),
+            )
+
+    if not missing and not removed:
         logger.debug("Config is up to date, no migration needed")
         return result
 
@@ -288,6 +328,10 @@ def migrate_config(
     for section, key, value in missing:
         result["added"].append(f"{section}.{key}")
         logger.info("Config migration: adding %s.%s = %s", section, key, repr(value))
+
+    # Report what will be removed
+    for section, key in removed:
+        result["removed"].append(f"{section}.{key}")
 
     if dry_run:
         result["migrated"] = True
@@ -304,9 +348,9 @@ def migrate_config(
         except Exception as e:
             logger.warning("Failed to create config backup: %s", e)
 
-    # Apply missing keys directly to the loaded config object.
+    # Apply missing keys and cleanups to the loaded config object.
     # With ruamel's CommentedMap this preserves existing comments;
-    # with a plain dict (pyyaml fallback) it just adds the keys.
+    # with a plain dict (pyyaml fallback) it just adds/removes keys.
     for section, key, value in missing:
         if section == "root":
             user_config[key] = value
@@ -320,6 +364,22 @@ def migrate_config(
                 target = target[part]
             target[key] = value
 
+    # Remove obsolete auto-added keys (cancel_on_disconnect with matching default)
+    for section, key in removed:
+        if section == "root":
+            user_config.pop(key, None)
+        else:
+            parts = section.split(".")
+            target = user_config
+            for part in parts:
+                if isinstance(target, dict) and part in target:
+                    target = target[part]
+                else:
+                    target = None
+                    break
+            if target is not None and isinstance(target, dict) and key in target:
+                del target[key]
+
     # Write updated config — preserving comments when ruamel is available
     try:
         if yaml_rt is not None:
@@ -331,6 +391,7 @@ def migrate_config(
                 f.write(
                     f"# Configuration migrated to version {__version__}\n"
                     f"# Added {len(missing)} new setting(s) with defaults\n"
+                    f"# Removed {len(removed)} obsolete setting(s)\n"
                     f"# Original backed up to: {result.get('backup_path', 'N/A')}\n"
                     f"#\n"
                 )
@@ -340,6 +401,7 @@ def migrate_config(
             with open(path, "w") as f:
                 f.write(f"# Configuration migrated to version {__version__}\n")
                 f.write(f"# Added {len(missing)} new setting(s) with defaults\n")
+                f.write(f"# Removed {len(removed)} obsolete setting(s)\n")
                 f.write(f"# Original backed up to: {result.get('backup_path', 'N/A')}\n")
                 f.write("#\n")
                 yaml.dump(
@@ -351,11 +413,18 @@ def migrate_config(
                 )
 
         result["migrated"] = True
-        logger.info(
-            "Config migrated: added %d new key(s) to %s",
-            len(missing),
-            path,
-        )
+        if missing:
+            logger.info(
+                "Config migrated: added %d new key(s) to %s",
+                len(missing),
+                path,
+            )
+        if removed:
+            logger.info(
+                "Config cleaned up: removed %d obsolete key(s) from %s",
+                len(removed),
+                path,
+            )
     except Exception as e:
         logger.error("Failed to write migrated config: %s", e)
         # Try to restore backup
@@ -369,4 +438,4 @@ def migrate_config(
     return result
 
 
-__all__ = ["get_default_config", "find_missing_keys", "migrate_config"]
+__all__ = ["get_default_config", "find_missing_keys", "migrate_config", "_cancel_on_disconnect_default"]
