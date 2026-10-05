@@ -257,9 +257,6 @@ class ModelCacheService:
                         # CivitAI uses query parameter for authentication, not header
                         if self.civitai_api_key:
                             params["token"] = self.civitai_api_key
-                        # CivitAI uses query parameter for authentication, not header
-                        if self.civitai_api_key:
-                            params["token"] = self.civitai_api_key
                         else:
                             logger.warning("No CivitAI API key configured - may be rate limited")
                         
@@ -290,11 +287,6 @@ class ModelCacheService:
                         metadata = data.get("metadata", {})
                         next_cursor = metadata.get("nextCursor")
                         self._total_pages = metadata.get("totalPages")  # May not be accurate with cursors
-                        
-                        if self._total_pages:
-                            logger.info("Progress: page %d of %d", page_count, self._total_pages)
-                        else:
-                            logger.info("Progress: page %d (total unknown)", page_count)
                         
                         if self._total_pages:
                             logger.info("Progress: page %d of %d", page_count, self._total_pages)
@@ -334,8 +326,6 @@ class ModelCacheService:
                             logger.info("No more pages (nextCursor is null), stopping at page %d", page_count)
                             break
                         
-                        # Use the next cursor for the next iteration
-                        cursor = next_cursor
                         # Use the next cursor for the next iteration
                         cursor = next_cursor
                         

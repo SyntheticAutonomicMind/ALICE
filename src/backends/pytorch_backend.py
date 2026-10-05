@@ -667,6 +667,10 @@ class PyTorchBackend(BaseBackend):
         self._generation_semaphore: asyncio.Semaphore = asyncio.Semaphore(max_concurrent_generations)
         self._max_concurrent = max_concurrent_generations
         
+        # Strong references to background cleanup tasks so the GC can't
+        # destroy them before they complete (torch.cuda.empty_cache etc.).
+        self._bg_cleanup_tasks: set[asyncio.Task] = set()
+        
         # Request queue tracking
         self._pending_requests: int = 0  # Track number of queued requests
         self._queue_lock: asyncio.Lock = asyncio.Lock()  # Protects _pending_requests counter
@@ -1722,19 +1726,29 @@ class PyTorchBackend(BaseBackend):
         self._unet_compiled = False
         self._original_unet = None
 
-        # Clear GPU cache — run in thread to avoid blocking event loop
+        # Clear GPU cache — run in thread to avoid blocking event loop.
+        # Hold a strong reference so the GC can't destroy the task before
+        # it runs (previously the task was fire-and-forget and could be
+        # GC'd before empty_cache() executed).
         if self._device == "cuda":
-            def _unload_cleanup():
+            async def _unload_cleanup_task():
+                def _unload_cleanup():
+                    try:
+                        torch.cuda.synchronize()
+                    except Exception:
+                        pass
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception as e:
+                        logger.warning("torch.cuda.empty_cache() failed during unload: %s", e)
                 try:
-                    torch.cuda.synchronize()
-                except Exception:
-                    pass
-                try:
-                    torch.cuda.empty_cache()
+                    await asyncio.to_thread(_unload_cleanup)
                 except Exception as e:
-                    logger.warning("torch.cuda.empty_cache() failed during unload: %s", e)
+                    logger.warning("unload cleanup task failed: %s", e)
             try:
-                asyncio.create_task(asyncio.to_thread(_unload_cleanup))
+                task = asyncio.create_task(_unload_cleanup_task())
+                self._bg_cleanup_tasks.add(task)
+                task.add_done_callback(self._bg_cleanup_tasks.discard)
             except RuntimeError:
                 pass
         if self._device != "cuda":
@@ -1782,17 +1796,24 @@ class PyTorchBackend(BaseBackend):
             self._pending_cleanup = True
 
             if self._device == "cuda":
-                def _per_model_cleanup():
+                async def _per_model_cleanup_task():
+                    def _per_model_cleanup():
+                        try:
+                            torch.cuda.synchronize()
+                        except Exception:
+                            pass
+                        try:
+                            torch.cuda.empty_cache()
+                        except Exception as e:
+                            logger.warning("torch.cuda.empty_cache() failed: %s", e)
                     try:
-                        torch.cuda.synchronize()
-                    except Exception:
-                        pass
-                    try:
-                        torch.cuda.empty_cache()
+                        await asyncio.to_thread(_per_model_cleanup)
                     except Exception as e:
-                        logger.warning("torch.cuda.empty_cache() failed: %s", e)
+                        logger.warning("per-model cleanup task failed: %s", e)
                 try:
-                    asyncio.create_task(asyncio.to_thread(_per_model_cleanup))
+                    task = asyncio.create_task(_per_model_cleanup_task())
+                    self._bg_cleanup_tasks.add(task)
+                    task.add_done_callback(self._bg_cleanup_tasks.discard)
                 except RuntimeError:
                     pass
 
@@ -2287,6 +2308,16 @@ class PyTorchBackend(BaseBackend):
         
         # Unload model
         await self.unload_model()
+
+        # Await any outstanding background cleanup tasks
+        if self._bg_cleanup_tasks:
+            pending = list(self._bg_cleanup_tasks)
+            self._bg_cleanup_tasks.clear()
+            for task in pending:
+                try:
+                    await task
+                except Exception as e:
+                    logger.warning("Background cleanup task failed during shutdown: %s", e)
         
         logger.info("Generator service shutdown complete")
     

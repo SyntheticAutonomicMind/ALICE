@@ -780,10 +780,14 @@ class TestNonBlockingCleanup:
         )
 
     def test_evict_cleanup_non_blocking(self):
-        """_evict_lru should run empty_cache in a thread, not synchronously."""
+        """_unload_model_internal should run empty_cache in a background task,
+        not synchronously, and should hold a strong reference to prevent GC."""
         pb_path = Path(pytorch_backend.__file__)
         source = pb_path.read_text()
-        # Should use asyncio.create_task with asyncio.to_thread for cleanup
-        assert "asyncio.create_task(asyncio.to_thread" in source, (
-            "_evict_lru does not use asyncio.to_thread for non-blocking cleanup"
+        # Should use asyncio.to_thread for non-blocking cleanup
+        assert "_unload_cleanup_task" in source, (
+            "_unload_model_internal does not use a background task for cleanup"
+        )
+        assert "_bg_cleanup_tasks" in source, (
+            "Cleanup tasks are not tracked in _bg_cleanup_tasks (risk of GC)"
         )

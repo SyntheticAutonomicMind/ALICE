@@ -224,8 +224,7 @@ class GalleryManager:
         limit: int = 100,
         offset: int = 0,
     ) -> List[AudioRecord]:
-        """
-        List audio records accessible to the given user.
+        """List audio records accessible to the given user.
 
         Args:
             api_key_id: API key ID of the requester (None for anonymous)
@@ -239,22 +238,57 @@ class GalleryManager:
             List of accessible audio records, sorted by created_at (newest first)
         """
         with self._lock:
-            accessible = []
-            for audio in self._audio.values():
-                if audio.is_public and audio.is_expired():
-                    continue
-                if not audio.is_accessible_by(api_key_id, is_admin):
-                    continue
-                is_own = api_key_id and audio.owner_api_key_id == api_key_id
-                if audio.is_public and not include_public and not is_own:
-                    continue
-                if not audio.is_public and not include_private:
-                    continue
-                accessible.append(audio)
-            accessible.sort(key=lambda x: x.created_at, reverse=True)
+            accessible = self._filter_accessible_audio(
+                api_key_id=api_key_id,
+                is_admin=is_admin,
+                include_public=include_public,
+                include_private=include_private,
+            )
             if limit > 0:
                 return accessible[offset:offset + limit]
             return accessible[offset:]
+
+    def count_audio(
+        self,
+        api_key_id: Optional[str] = None,
+        is_admin: bool = False,
+        include_public: bool = True,
+        include_private: bool = True,
+    ) -> int:
+        """Return total count of accessible audio records matching filters."""
+        with self._lock:
+            return len(self._filter_accessible_audio(
+                api_key_id=api_key_id,
+                is_admin=is_admin,
+                include_public=include_public,
+                include_private=include_private,
+            ))
+
+    def _filter_accessible_audio(
+        self,
+        api_key_id: Optional[str] = None,
+        is_admin: bool = False,
+        include_public: bool = True,
+        include_private: bool = False,
+    ) -> List[AudioRecord]:
+        """Return all accessible audio matching filters, sorted newest first.
+
+        Must be called while holding self._lock.
+        """
+        accessible = []
+        for audio in self._audio.values():
+            if audio.is_public and audio.is_expired():
+                continue
+            if not audio.is_accessible_by(api_key_id, is_admin):
+                continue
+            is_own = api_key_id and audio.owner_api_key_id == api_key_id
+            if audio.is_public and not include_public and not is_own:
+                continue
+            if not audio.is_public and not include_private:
+                continue
+            accessible.append(audio)
+        accessible.sort(key=lambda x: x.created_at, reverse=True)
+        return accessible
 
     def delete_audio(self, audio_id: str) -> bool:
         """

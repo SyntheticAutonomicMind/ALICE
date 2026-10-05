@@ -732,16 +732,6 @@ async def get_access_level(
     return AccessLevel.ANONYMOUS
 
 
-async def verify_api_key(authorization: Optional[str] = Header(None)) -> bool:
-    """
-    Legacy API key verification for backwards compatibility.
-    Always returns True - use get_access_level for proper auth.
-    """
-    # For backwards compatibility, always return True
-    # Individual endpoints should use require_access_level instead
-    return True
-
-
 def require_access_level(minimum_level: AccessLevel):
     """
     Dependency that requires a minimum access level.
@@ -837,6 +827,11 @@ async def get_current_user(
     if not config.server.require_auth:
         return AnonymousUser()
 
+    raise HTTPException(
+        status_code=401,
+        detail="Authentication required. Use 'Authorization: Bearer <key>' header or session cookie."
+    )
+
 
 def check_nsfw_content(text: str) -> bool:
     """
@@ -915,13 +910,8 @@ def check_nsfw_content(text: str) -> bool:
         if re.search(pattern, text_normalized):
             logger.warning("NSFW content blocked: context pattern detected in prompt")
             return True
-    
+
     return False
-    
-    raise HTTPException(
-        status_code=401,
-        detail="Authentication required. Use 'Authorization: Bearer <key>' header or session cookie."
-    )
 
 
 async def get_current_user_optional(
@@ -2112,19 +2102,12 @@ async def gallery_list_audio(
             size_bytes=aud.size_bytes,
         ))
 
-    total_count = 0
-    with gallery_manager._lock:
-        for aud in gallery_manager._audio.values():
-            if aud.is_public and aud.is_expired():
-                continue
-            if not aud.is_accessible_by(api_key_id, is_admin):
-                continue
-            is_own = api_key_id and aud.owner_api_key_id == api_key_id
-            if aud.is_public and not include_public and not is_own:
-                continue
-            if not aud.is_public and not include_private:
-                continue
-            total_count += 1
+    total_count = gallery_manager.count_audio(
+        api_key_id=api_key_id,
+        is_admin=is_admin,
+        include_public=include_public,
+        include_private=include_private,
+    )
 
     logger.debug("Gallery audio returning %d records (total=%d)", len(data), total_count)
     return GalleryAudioListResponse(data=data, total=total_count, limit=limit, offset=offset)
@@ -2220,7 +2203,8 @@ async def gallery_update_audio_privacy(
 async def update_image_privacy(
     image_id: str,
     request: UpdateImagePrivacyRequest,
-    current_user: Any = Depends(get_current_user)
+    current_user: Any = Depends(get_current_user),
+    access: AccessLevel = Depends(require_access_level(AccessLevel.USER)),
 ):
     """
     Update image privacy settings.
@@ -2270,7 +2254,8 @@ async def update_image_privacy(
 async def update_image_tags(
     image_id: str,
     request: UpdateImageTagsRequest,
-    current_user: Any = Depends(get_current_user)
+    current_user: Any = Depends(get_current_user),
+    access: AccessLevel = Depends(require_access_level(AccessLevel.USER)),
 ):
     """
     Update image tags.
@@ -2313,7 +2298,8 @@ async def update_image_tags(
 
 @app.get("/v1/gallery/tags")
 async def list_gallery_tags(
-    current_user: Any = Depends(get_current_user)
+    current_user: Any = Depends(get_current_user),
+    access: AccessLevel = Depends(require_access_level(AccessLevel.USER)),
 ):
     """
     List all unique tags used by the current user.
@@ -2343,7 +2329,8 @@ async def list_gallery_tags(
 @app.delete("/v1/gallery/{image_id}")
 async def delete_gallery_image(
     image_id: str,
-    current_user: Any = Depends(get_current_user)
+    current_user: Any = Depends(get_current_user),
+    access: AccessLevel = Depends(require_access_level(AccessLevel.USER)),
 ):
     """
     Delete an image from the gallery.
