@@ -1887,62 +1887,49 @@ async def get_metrics():
 @app.get("/images/{filename}")
 async def serve_image(
     filename: str,
-    alice_session: Optional[str] = Cookie(default=None),
-    authorization: Optional[str] = Header(default=None)
+    current_user: Any = Depends(get_current_user_optional),
 ):
     """
     Serve an image file with access control.
-    
+
     Only the owner, admins, or anyone (for public non-expired images) can access.
+    Path-traversal protected: only files inside the configured images directory.
     """
     if gallery_manager is None:
         raise HTTPException(status_code=503, detail="Service not ready")
-    
+
+    # Path-traversal guard FIRST, before any database lookup
+    safe_name = Path(filename).name
+    if not safe_name or safe_name != filename or ".." in filename:
+        raise HTTPException(status_code=403, detail="Invalid filename")
+
     # Extract image ID from filename
-    image_id = Path(filename).stem
-    
+    image_id = Path(safe_name).stem
+
     # Get image record
     image_record = gallery_manager.get_image(image_id)
     if not image_record:
         raise HTTPException(status_code=404, detail="Image not found")
-    
-    # Get current user from session or API key
-    current_user = None
-    is_admin = False
-    
-    if alice_session and auth_manager:
-        # The alice_session cookie contains the raw API key
-        api_key = auth_manager.verify_api_key(alice_session)
-        if api_key:
-            current_user = api_key
-            is_admin = api_key.get_access_level() == AccessLevel.ADMIN
-    
-    if not current_user and authorization and auth_manager:
-        # Try API key from header
-        token = authorization.replace("Bearer ", "")
-        api_key = auth_manager.verify_api_key(token)
-        if api_key:
-            current_user = api_key
-            is_admin = api_key.get_access_level() == AccessLevel.ADMIN
-    
+
     # Check access
     api_key_id = current_user.id if current_user else None
+    is_admin = current_user.get_access_level() == AccessLevel.ADMIN if current_user else False
     if not image_record.is_accessible_by(api_key_id, is_admin):
         raise HTTPException(
             status_code=403,
             detail="You don't have permission to access this image"
         )
-    
+
     # Serve the file
-    if ".." in filename:
-        raise HTTPException(status_code=403, detail="Invalid filename")
-    image_path = (config.storage.images_directory / filename).resolve()
+    image_path = (config.storage.images_directory / safe_name).resolve()
     images_root = config.storage.images_directory.resolve()
-    if not str(image_path).startswith(str(images_root) + os.sep) and image_path != images_root:
+    try:
+        image_path.relative_to(images_root)
+    except ValueError:
         raise HTTPException(status_code=403, detail="Access denied")
     if not image_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found")
-    
+
     return FileResponse(image_path, media_type="image/png")
 
 
@@ -4071,8 +4058,7 @@ async def get_audio_stats(
 @app.get("/v1/audio/{filename}")
 async def get_audio_file(
     filename: str,
-    alice_session: Optional[str] = Cookie(default=None),
-    authorization: Optional[str] = Header(default=None),
+    current_user: Any = Depends(get_current_user_optional),
 ):
     """
     Serve a generated audio file with access control.
@@ -4107,24 +4093,9 @@ async def get_audio_file(
         media_type = "audio/wav" if safe_name.lower().endswith(".wav") else "audio/mpeg"
         return FileResponse(audio_path, media_type=media_type, filename=safe_name)
 
-    # Resolve the current user from session cookie or API key header
-    current_user = None
-    is_admin = False
-
-    if alice_session and auth_manager:
-        api_key = auth_manager.verify_api_key(alice_session)
-        if api_key:
-            current_user = api_key
-            is_admin = api_key.get_access_level() == AccessLevel.ADMIN
-
-    if not current_user and authorization and auth_manager:
-        token = authorization.replace("Bearer ", "")
-        api_key = auth_manager.verify_api_key(token)
-        if api_key:
-            current_user = api_key
-            is_admin = api_key.get_access_level() == AccessLevel.ADMIN
-
+    # Resolve current user via the shared dependency.
     api_key_id = current_user.id if current_user else None
+    is_admin = current_user.get_access_level() == AccessLevel.ADMIN if current_user else False
     if not audio_record.is_accessible_by(api_key_id, is_admin):
         raise HTTPException(
             status_code=403,

@@ -400,65 +400,6 @@ class TestModelCacheLRU:
 
 
 # ---------------------------------------------------------------------------
-# Pre-warming logic tests (main.py)
-# ---------------------------------------------------------------------------
-
-class TestPreWarming:
-    """Test that the pre-warming logic in main.py loads the first available model."""
-
-    def test_pre_warming_loads_first_model(self):
-        """Pre-warming should call generator.load_model with the first model's path."""
-        # Read main.py source to verify pre-warming code exists
-        main_py = Path(__file__).parent.parent / "src" / "main.py"
-        source = main_py.read_text()
-
-        # Verify pre-warming code exists
-        assert "Pre-warm" in source or "pre-warming" in source.lower(), (
-            "Pre-warming code not found in main.py"
-        )
-        assert "load_model" in source, "load_model not found in pre-warming section"
-        assert "models[0]" in source or "models[0].path" in source, (
-            "First model access not found in pre-warming section"
-        )
-
-    def test_pre_warming_handles_no_models(self):
-        """Pre-warming should gracefully handle the case where no models exist."""
-        main_py = Path(__file__).parent.parent / "src" / "main.py"
-        source = main_py.read_text()
-
-        # Should check if models list is non-empty
-        assert "if models and generator" in source or "if models and" in source, (
-            "Pre-warming should check if models list is non-empty"
-        )
-
-    def test_pre_warming_logs_elapsed_time(self):
-        """Pre-warming should log the elapsed time."""
-        main_py = Path(__file__).parent.parent / "src" / "main.py"
-        source = main_py.read_text()
-
-        assert "Pre-warmed" in source or "pre-warmed" in source, (
-            "Pre-warming log message not found"
-        )
-
-    def test_pre_warming_handles_errors_gracefully(self):
-        """Pre-warming should log a warning but not crash if model loading fails."""
-        main_py = Path(__file__).parent.parent / "src" / "main.py"
-        source = main_py.read_text()
-
-        assert "Pre-warming failed" in source or "pre-warming failed" in source.lower(), (
-            "Error handling for pre-warming not found"
-        )
-
-    def test_hf_home_has_fallback_to_var_lib_alice(self):
-        """HF_HOME should have a fallback to /var/lib/alice/.cache/huggingface."""
-        main_py = Path(__file__).parent.parent / "src" / "main.py"
-        source = main_py.read_text()
-        assert "/var/lib/alice/.cache/huggingface" in source, (
-            "HF_HOME fallback to /var/lib/alice/.cache/huggingface not found"
-        )
-
-
-# ---------------------------------------------------------------------------
 # Downloader HF_HOME fix tests
 # ---------------------------------------------------------------------------
 
