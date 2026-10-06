@@ -170,7 +170,7 @@ logging:
 
 ```ini
 [Unit]
-Description=ALICE - Remote Stable Diffusion Service
+Description=ALICE - Local Image and Audio Generation Service
 After=network.target
 
 [Service]

@@ -10,7 +10,7 @@
 
 ## Overview
 
-This guide walks through implementing ALICE from scratch. Follow the phases in order for a working remote Stable Diffusion service.
+This guide walks through implementing ALICE from scratch. Follow the phases in order for a working local image and audio generation service.
 
 **Total Estimated Time:** 12-16 hours  
 **Skill Requirements:** Python, FastAPI, Linux, systemd, basic Docker knowledge

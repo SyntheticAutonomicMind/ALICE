@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 Andrew Wyatt (Fewtarius)
 
 """
-ALICE - Artificial Latent Interpretive Creation Engine
+ALICE - Local Image and Audio Generation Service
 
 A standalone Python service that provides OpenAI-compatible REST API
 endpoints for Stable Diffusion image generation and audio synthesis.

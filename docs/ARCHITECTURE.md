@@ -4,22 +4,23 @@
 # ALICE Architecture
 
 **Version:** 1.1  
-**Purpose:** Remote Stable Diffusion and audio generation service for SAM integration
+**Purpose:** Local image and audio generation service (Stable Diffusion, FLUX, Stable Audio, MiniMax Music)
 
 ---
 
 ## Overview
 
-ALICE is a standalone Python service that provides OpenAI-compatible API endpoints for Stable Diffusion image generation and Stable Audio / MiniMax Music synthesis. It enables SAM clients to offload media generation to remote GPU servers.
+ALICE is a standalone Python service that provides OpenAI-compatible API endpoints for Stable Diffusion image generation and Stable Audio / MiniMax Music synthesis. It runs on your hardware — NVIDIA (CUDA), AMD (ROCm or Vulkan via stable-diffusion.cpp), Apple Silicon (MPS), or CPU. Use the web interface standalone, connect it to SAM for image generation, or integrate it with any client that supports the OpenAI image or audio API.
 
 **Key Features:**
-- OpenAI-compatible REST API (`POST /v1/chat/completions`)
+- OpenAI-compatible REST API (`POST /v1/chat/completions` for images, `POST /v1/audio/generations` for audio)
 - Web-based management interface
 - Model download manager (CivitAI & HuggingFace)
-- Linux daemon deployment
+- Linux systemd service, macOS launchd, and Docker deployment
 - Multi-user queue management
 - Model hot-swapping
-- Image generation via `diffusers` library
+- Image generation via `diffusers` library (dual backend: PyTorch + stable-diffusion.cpp)
+- Audio synthesis (Stable Audio Open 1.0 + MiniMax Music 3)
 - Session-based authentication
 
 ---
@@ -127,9 +128,9 @@ ALICE is a standalone Python service that provides OpenAI-compatible API endpoin
 - Hot-swapping without server restart
 - Model registry file for metadata
 
-**Supported Features:**
+### Supported Features:
 - Text-to-image
-- Image-to-image (future)
+- Image-to-image
 - Multiple schedulers (DPM++, Euler, DDIM, etc.)
 - Seed control for reproducibility
 - Dynamic resolution (model-dependent)

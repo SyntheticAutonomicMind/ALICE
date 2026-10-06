@@ -1,5 +1,5 @@
 [Unit]
-Description=ALICE - Remote Stable Diffusion Service
+Description=ALICE - Local Image and Audio Generation Service
 Documentation=https://github.com/fewtarius/alice
 After=network.target
 Wants=network-online.target

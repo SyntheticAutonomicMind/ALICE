@@ -8,7 +8,7 @@
 
 ## Project Overview
 
-**ALICE** (Artificial Latent Interpretive Creation Engine) is a remote Stable Diffusion and audio generation service built for privacy, performance, and simplicity.
+**ALICE** is a standalone local image and audio generation service built for privacy, performance, and simplicity. It provides Stable Diffusion image generation (including image-to-image), Stable Audio and MiniMax Music synthesis, a web management interface, and an OpenAI-compatible API. It runs on your hardware — NVIDIA (CUDA), AMD (ROCm or Vulkan via stable-diffusion.cpp), Apple Silicon (MPS), or CPU.
 
 - **Language:** Python 3.10+
 - **Architecture:** FastAPI web service with PyTorch/Diffusers backend

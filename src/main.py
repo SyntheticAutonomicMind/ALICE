@@ -454,7 +454,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ALICE",
-    description="Remote Stable Diffusion and audio generation service with OpenAI-compatible API",
+    description="Local image and audio generation service with OpenAI-compatible API",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",

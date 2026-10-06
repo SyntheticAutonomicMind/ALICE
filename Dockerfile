@@ -68,7 +68,7 @@ COPY --from=builder /usr/local/lib/python${PYTHON_VERSION} /usr/local/lib/python
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 LABEL org.opencontainers.image.title="ALICE"
-LABEL org.opencontainers.image.description="Artificial Latent Interpretive Creation Engine - Remote Stable Diffusion and Audio Generation Service"
+LABEL org.opencontainers.image.description="Local image and audio generation service - Stable Diffusion, audio synthesis, web UI, OpenAI-compatible API"
 LABEL org.opencontainers.image.url="https://github.com/SyntheticAutonomicMind/ALICE"
 LABEL org.opencontainers.image.source="https://github.com/SyntheticAutonomicMind/ALICE"
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"
