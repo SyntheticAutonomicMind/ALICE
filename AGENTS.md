@@ -573,6 +573,8 @@ async def load_model(self, model_path: Path) -> None:
 | `docs/AMD-DEPLOYMENT-GUIDE.md` | AMD GPU setup | Users/Admins |
 | `docs/AMD-PHOENIX-ENVIRONMENT.md` | AMD Phoenix APU | Users/Admins |
 | `docs/TTM-TUNING-GUIDE.md` | Performance tuning | Admins |
+| `docs/AUDIO-GENERATION.md` | Audio backend, API, configuration | Users/Developers |
+| `docs/MUSIC-CLIENT-SCRIPTS.md` | Standalone music generation client scripts | Users/Developers |
 | `.clio/instructions.md` | Project methodology | AI agents |
 | `AGENTS.md` | Technical reference | AI agents |
 

@@ -330,7 +330,10 @@ class AudioBackend:
                 self._engine_model_id = None
                 gc.collect()
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    # On AMD ROCm, empty_cache() after MiniMax-Music3
+                    # generation can trigger GPU memory faults. Skip on ROCm.
+                    if not (os.environ.get("ROCM_DEVICE") or torch.version.hip):
+                        torch.cuda.empty_cache()
             if self._engine is None:
                 engine_cls = _resolve_engine_class(model_id)
                 # Different audio engines accept different constructor
@@ -371,10 +374,17 @@ class AudioBackend:
                     torch.cuda.synchronize()
                 except Exception:
                     pass
-                try:
-                    torch.cuda.empty_cache()
-                except Exception as e:
-                    logger.warning("empty_cache failed during audio unload: %s", e)
+                # On AMD ROCm (gfx1151/Strix Halo and Phoenix Point), calling
+                # empty_cache() after MiniMax-Music3 generation can trigger a
+                # GPU memory fault / segfault that kills the entire server
+                # process — preventing the gallery recording from completing.
+                # Skip empty_cache on ROCm; the memory will be reclaimed when
+                # the model is evicted or the process exits.
+                if not (os.environ.get("ROCM_DEVICE") or torch.version.hip):
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception as e:
+                        logger.warning("empty_cache failed during audio unload: %s", e)
 
         try:
             await asyncio.wait_for(asyncio.to_thread(_cleanup_sync), timeout=30.0)

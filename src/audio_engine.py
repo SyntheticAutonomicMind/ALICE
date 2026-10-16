@@ -235,7 +235,11 @@ class ALICEAudioEngine:
         self.model_repo = None
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            if not (os.environ.get("ROCM_DEVICE") or torch.version.hip):
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
 
     # -- generation ----------------------------------------------------------
 
@@ -722,7 +726,13 @@ class MiniMaxMusic3Engine:
         self.model_repo = None
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            # On AMD ROCm, empty_cache() after MiniMax generation can
+            # trigger GPU memory faults. Skip on ROCm.
+            if not (os.environ.get("ROCM_DEVICE") or torch.version.hip):
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
 
     # -- generation ----------------------------------------------------------
 
@@ -793,13 +803,17 @@ class MiniMaxMusic3Engine:
         # below, which references len(processed_lyrics).  Calling it after
         # was a NameError that broke all MiniMax-Music3 generations.
         #
-        # When is_instrumental is True, discard any client-provided lyrics
-        # and replace them with the structural tag scaffold.  The open-weight
-        # model does not honor a dedicated is_instrumental parameter (unlike
-        # the hosted API), so the only available controls are the structural
-        # tags in the lyrics field plus the caption-level "no vocals"
-        # directive below — both are best-effort and may not fully suppress
-        # vocal generation.
+        # When is_instrumental is True, discard any client-provided lyric TEXT
+        # (actual words/syllables) and replace with the structural tag scaffold.
+        # The open-weight model does not honor a dedicated is_instrumental
+        # parameter, so the only available controls are the structural tags
+        # in the lyrics field plus the caption-level "no vocals" directive.
+        #
+        # We use a simple 4-tag scaffold ([Intro], [Instrumental], [Solo],
+        # [Outro]) rather than the client's full tag timeline.  Testing showed
+        # that complex multi-tag timelines cause the AR model to stop early
+        # (interpreting each tag as a song section boundary), while the simple
+        # scaffold lets the model generate longer audio.
         if is_instrumental:
             lyrics = ""
         processed_lyrics = _preprocess_lyrics(lyrics)
@@ -843,17 +857,15 @@ class MiniMaxMusic3Engine:
         )
 
         # Free GPU memory used by the AR language model and intermediate
-        # latents.  On AMD ROCm, empty_cache() can hang if called without
-        # prior synchronization — sync first, then release.
+        # latents.  On AMD ROCm, empty_cache() can cause memory faults when
+        # called while the pipeline's submodules are still on the device.
+        # We skip it here — the backend's unload() method handles memory
+        # cleanup more safely by evicting models one at a time.
         if torch.cuda.is_available():
             try:
                 torch.cuda.synchronize()
             except Exception:
                 pass
-            try:
-                torch.cuda.empty_cache()
-            except Exception as e:
-                logger.warning("empty_cache failed after MiniMax generation: %s", e)
 
         # The pipeline returns a numpy ndarray: shape (channels, samples) float32.
         # Sample rate is exposed on the pipeline; upstream card says 32kHz but
