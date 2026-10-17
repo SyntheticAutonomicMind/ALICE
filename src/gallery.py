@@ -360,6 +360,12 @@ class GalleryManager:
                         logger.error("Failed to delete expired audio file %s: %s",
                                    audio.filename, e)
                         continue
+                # Also remove any orphaned WAV counterpart
+                wav_path = audio_path.with_suffix(".wav")
+                try:
+                    wav_path.unlink()
+                except Exception:
+                    pass
                 del self._audio[aud_id]
                 cleaned += 1
             if cleaned > 0:

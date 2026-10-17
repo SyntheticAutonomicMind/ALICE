@@ -2124,10 +2124,17 @@ async def gallery_delete_audio(
 
     success = gallery_manager.delete_audio(audio_id)
     if success:
-        # Also delete the audio file
-        audio_path = config.storage.audio_directory / audio.filename
+        # Also delete the audio file and any orphaned WAV counterpart
+        audio_dir = config.storage.audio_directory
+        audio_path = audio_dir / audio.filename
         try:
             audio_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        # Remove orphaned WAV (from pre-MP3-cleanup generations)
+        wav_path = audio_path.with_suffix(".wav")
+        try:
+            wav_path.unlink(missing_ok=True)
         except Exception:
             pass
         logger.info("Deleted audio from gallery: %s", audio_id)
@@ -3924,43 +3931,102 @@ async def create_audio_generation(
     cancellation_check = lambda: cancellation_token.is_cancelled()
 
     try:
-        start = time.time()
-
         # Build the generation coroutine and wrap it in a task so we can
-        # apply asyncio.shield when cancel_on_disconnect is False — this
-        # lets audio finish (and save to the gallery) even if the client
-        # disconnects, matching the behaviour of the image generation endpoint.
-        async def _do_audio_generation():
-            return await asyncio.wait_for(
-                audio_backend.generate(
-                    prompt=prompt,
-                    model_id=model_id,
-                    seconds=seconds,
-                    steps=steps,
-                    cfg_scale=cfg_scale,
-                    seed=request.seed,
-                    lyrics=lyrics,
-                    is_instrumental=is_instrumental,
-                    unload_after_generate=config.audio.unload_after_generate,
-                    request_id=request_id,
-                    cancellation_check=cancellation_check,
-                ),
-                timeout=config.audio.request_timeout_seconds,
+        # apply asyncio.shield when cancel_on_disconnect is False.  Gallery
+        # recording is inside the task so it completes even when the
+        # client disconnects or the client-facing timeout fires while
+        # generation is still running.
+        async def _do_audio_generation_and_record():
+            task_start = time.time()
+            result = await audio_backend.generate(
+                prompt=prompt,
+                model_id=model_id,
+                seconds=seconds,
+                steps=steps,
+                cfg_scale=cfg_scale,
+                seed=request.seed,
+                lyrics=lyrics,
+                is_instrumental=is_instrumental,
+                unload_after_generate=config.audio.unload_after_generate,
+                request_id=request_id,
+                cancellation_check=cancellation_check,
             )
+
+            # Record audio in the gallery.  This runs inside the task so
+            # it completes even when the client disconnects or the
+            # client-facing timeout fires while generation is still running.
+            elapsed = time.time() - task_start
+            audio_is_public = not config.server.require_auth or current_user is None
+
+            # When the user is anonymous, current_user is None (or an
+            # AnonymousUser with id="anonymous").  In either case we need
+            # to ensure the audio record is visible so anonymous users
+            # can see their generated audio in the gallery.
+            api_key_id = getattr(current_user, "id", None) if current_user else None
+            if api_key_id is None:
+                # No authenticated owner -- mark as public so it's visible
+                audio_is_public = True
+                api_key_id = None
+
+            if gallery_manager is not None:
+                audio_id = Path(result.url).stem
+                audio_record = AudioRecord(
+                    id=audio_id,
+                    filename=Path(result.audio_path).name,
+                    owner_api_key_id=api_key_id,
+                    is_public=audio_is_public,
+                    prompt=prompt,
+                    lyrics=request.lyrics or "",
+                    model=model_id,
+                    seed=result.seed,
+                    steps=result.steps,
+                    cfg_scale=result.cfg_scale,
+                    duration_seconds=result.duration_seconds,
+                    sample_rate=result.sample_rate,
+                    size_bytes=result.size_bytes,
+                )
+                gallery_manager.add_audio(audio_record)
+                logger.info("Successfully recorded audio in gallery: %s (public=%s)",
+                            audio_id, audio_is_public)
+
+            return result, elapsed
 
         # Check the shared cancel_on_disconnect setting so audio behaves
         # consistently with image generation.
         cancel_on_disconnect = config.generation.cancel_on_disconnect
-        generation_task = asyncio.create_task(_do_audio_generation())
+        generation_task = asyncio.create_task(_do_audio_generation_and_record())
         if not cancel_on_disconnect:
             _background_tasks.add(generation_task)
             generation_task.add_done_callback(_background_tasks.discard)
 
+        client_timeout = config.audio.request_timeout_seconds
         try:
             if cancel_on_disconnect:
-                result = await generation_task
+                result, elapsed = await asyncio.wait_for(generation_task, timeout=client_timeout)
             else:
-                result = await asyncio.shield(generation_task)
+                # Shield so client disconnect doesn't cancel the task.
+                # wait_for around shield raises TimeoutError on timeout
+                # without cancelling the inner task.
+                result, elapsed = await asyncio.wait_for(
+                    asyncio.shield(generation_task), timeout=client_timeout
+                )
+        except asyncio.TimeoutError:
+            if not cancel_on_disconnect:
+                logger.info(
+                    "Client-facing timeout (%ds) reached for request %s. "
+                    "Shielded audio task continues in background; gallery "
+                    "save will run when generation completes.",
+                    client_timeout, request_id,
+                )
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"Audio generation in progress (timed out after {client_timeout}s; "
+                           f"the server will save it to the gallery when complete)",
+                )
+            raise HTTPException(
+                status_code=504,
+                detail=f"Audio generation timed out after {client_timeout}s",
+            )
         except asyncio.CancelledError:
             if not cancel_on_disconnect:
                 logger.info(
@@ -3970,41 +4036,6 @@ async def create_audio_generation(
                 )
                 raise
             raise
-
-        elapsed = time.time() - start
-        audio_is_public = not config.server.require_auth or current_user is None
-
-        # When the user is anonymous, current_user is None (or an
-        # AnonymousUser with id="anonymous").  In either case we need to
-        # ensure the audio record is visible — otherwise anonymous users
-        # can generate audio that no one can ever see in the gallery.
-        api_key_id = getattr(current_user, "id", None) if current_user else None
-        if api_key_id is None:
-            # No authenticated owner — mark as public so it's visible
-            audio_is_public = True
-            api_key_id = None
-
-        # Record audio in gallery
-        if gallery_manager is not None:
-            audio_id = Path(result.url).stem
-            audio_record = AudioRecord(
-                id=audio_id,
-                filename=Path(result.audio_path).name,
-                owner_api_key_id=api_key_id,
-                is_public=audio_is_public,
-                prompt=prompt,
-                lyrics=request.lyrics or "",
-                model=model_id,
-                seed=result.seed,
-                steps=result.steps,
-                cfg_scale=result.cfg_scale,
-                duration_seconds=result.duration_seconds,
-                sample_rate=result.sample_rate,
-                size_bytes=result.size_bytes,
-            )
-            gallery_manager.add_audio(audio_record)
-            logger.info("Successfully recorded audio in gallery: %s (public=%s)",
-                        audio_id, audio_is_public)
 
         return AudioGenerationResponse(
             url=result.url,

@@ -926,8 +926,9 @@ class MiniMaxMusic3Engine:
         """Convert WAV to MP3 using ffmpeg subprocess.
 
         Returns the MP3 path on success, or None if ffmpeg is unavailable
-        or conversion fails.  The original WAV is preserved so it can be
-        served as a fallback.
+        or conversion fails.  On success the original WAV is deleted to
+        avoid orphaned intermediate files; on failure the WAV is preserved
+        so it can still be served.
         """
         ffmpeg_bin = shutil.which("ffmpeg")
         if ffmpeg_bin is None:
@@ -947,7 +948,13 @@ class MiniMaxMusic3Engine:
                 timeout=30,
             )
             if result.returncode == 0 and mp3_path.exists():
-                logger.info("Converted %s to MP3: %s", wav_path.name, mp3_path.name)
+                # Success: remove the intermediate WAV to keep only the MP3.
+                try:
+                    wav_path.unlink()
+                except FileNotFoundError:
+                    pass
+                logger.info("Converted %s to MP3: %s (WAV removed)",
+                            wav_path.name, mp3_path.name)
                 return mp3_path
             else:
                 logger.warning("ffmpeg conversion failed for %s: %s",
