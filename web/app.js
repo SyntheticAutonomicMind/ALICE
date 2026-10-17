@@ -307,6 +307,9 @@ const API = {
         if (formData.lyrics !== undefined && formData.lyrics !== '') {
             request.lyrics = formData.lyrics;
         }
+        if (formData.is_instrumental !== undefined && formData.is_instrumental) {
+            request.is_instrumental = formData.is_instrumental;
+        }
 
         const response = await this.fetch('/v1/audio/generations', {
             method: 'POST',
@@ -495,7 +498,7 @@ class ModelSelector {
         this.models.forEach(model => {
             const option = document.createElement('option');
             option.value = model.id;
-            option.textContent = model.id;
+            option.textContent = model.name || model.id;
             this.select.appendChild(option);
         });
     }

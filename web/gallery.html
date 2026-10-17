@@ -1610,6 +1610,11 @@
                 seed: img.seed,
                 loras: img.loras || [],
                 loraScales: img.loraScales || [],
+                isPublic: img.isPublic,
+                expiresAt: img.expiresAt,
+                createdAt: img.createdAt,
+                numImages: img.numImages,
+                strength: img.strength,
             }));
 
             window.location.href = '/web/images.html';
@@ -1639,7 +1644,15 @@
         // Download item (image or audio)
         // ------------------------------------------------------------------
         function downloadItem(url, itemId, mediaType) {
-            var ext = mediaType === 'audio' ? '.wav' : '.png';
+            var ext;
+            if (mediaType === 'audio') {
+                // Extract actual file extension from URL (.mp3 or .wav)
+                var lastDot = url.lastIndexOf('.');
+                var urlExt = lastDot > -1 ? url.substring(lastDot).toLowerCase() : '';
+                ext = (urlExt === '.mp3' || urlExt === '.wav') ? urlExt : '.wav';
+            } else {
+                ext = '.png';
+            }
             var a = document.createElement('a');
             a.href = url;
             a.download = 'alice_' + itemId + ext;

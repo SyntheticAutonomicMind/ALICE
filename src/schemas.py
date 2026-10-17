@@ -248,6 +248,8 @@ class MetricsResponse(BaseModel):
     avg_generation_time: float = Field(default=0.0, alias="avgGenerationTime")
     # Audio generation metrics
     audio_inflight: int = Field(default=0, alias="audioInflight")
+    audio_total_generations: int = Field(default=0, alias="audioTotalGenerations")
+    audio_avg_generation_time: float = Field(default=0.0, alias="audioAvgGenerationTime")
     audio_backend_available: Optional[bool] = Field(default=None, alias="audioBackendAvailable")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -456,6 +458,8 @@ class GalleryImageInfo(BaseModel):
     generation_time: Optional[float] = Field(default=None, alias="generationTime")
     loras: Optional[List[str]] = Field(default=None)
     lora_scales: Optional[List[float]] = Field(default=None, alias="loraScales")
+    num_images: Optional[int] = Field(default=None, alias="numImages")
+    strength: Optional[float] = Field(default=None)
     tags: Optional[List[str]] = Field(default=None, description="User-defined tags")
 
     model_config = ConfigDict(populate_by_name=True)

@@ -427,7 +427,8 @@
                 document.getElementById('gpu-status').textContent = 
                     health.gpuAvailable ? 'Active' : 'CPU';
                 document.getElementById('models-count').textContent = health.modelsLoaded || 0;
-                document.getElementById('total-generations').textContent = metrics.totalGenerations || 0;
+                var totalGens = (metrics.totalGenerations || 0) + (metrics.audioTotalGenerations || 0);
+                document.getElementById('total-generations').textContent = totalGens;
                 document.getElementById('avg-time').textContent = 
                     UI.formatDuration(metrics.avgGenerationTime || 0);
                 
@@ -540,7 +541,9 @@
                             </div>
                         </div>
                     `;
-                } else if (health.modelsLoaded > 0) {
+                } else if (health.modelsLoaded > 0 || (health.audioEnabled && health.audioModelLoaded)) {
+                    var totalGens = (metrics.totalGenerations || 0) + (metrics.audioTotalGenerations || 0);
+                    var avgTime = metrics.avgGenerationTime || 0;
                     feed.innerHTML = `
                         <div class="activity-item">
                             <div class="activity-icon complete">
@@ -550,7 +553,7 @@
                             </div>
                             <div class="activity-info">
                                 <div class="activity-title">Ready</div>
-                                <div class="activity-meta">${metrics.totalGenerations || 0} images generated • Avg ${UI.formatDuration(metrics.avgGenerationTime || 0)}</div>
+                                <div class="activity-meta">${totalGens} items generated • Avg ${UI.formatDuration(avgTime)}</div>
                             </div>
                         </div>
                     `;
@@ -564,7 +567,7 @@
                             </div>
                             <div class="activity-info">
                                 <div class="activity-title">Idle</div>
-                                <div class="activity-meta">No model loaded - generate an image to start</div>
+                                <div class="activity-meta">No models loaded - generate an image or music to start</div>
                             </div>
                         </div>
                     `;
@@ -573,7 +576,7 @@
             
             // Start status polling with faster updates (3 seconds)
             StatusPoller.onUpdate(updateStatus);
-            StatusPoller.start(10000);
+            StatusPoller.start(3000);
 
             // Check for updates (admin-only, non-blocking)
             try {

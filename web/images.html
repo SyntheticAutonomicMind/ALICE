@@ -1043,7 +1043,15 @@
                 const guidanceScale = settings.guidanceScale !== undefined ? settings.guidanceScale : settings.guidance_scale;
                 if (guidanceScale !== undefined) document.getElementById('guidance').value = guidanceScale;
                 
-                if (settings.seed) document.getElementById('seed').value = settings.seed;
+                if (settings.seed !== undefined && settings.seed !== null) document.getElementById('seed').value = settings.seed;
+
+                if (settings.numImages !== undefined && settings.numImages !== null) {
+                    document.getElementById('num-images').value = settings.numImages;
+                }
+
+                if (settings.strength !== undefined && settings.strength !== null) {
+                    document.getElementById('img2img-strength').value = settings.strength;
+                }
                 if (settings.scheduler) {
                     document.getElementById('scheduler').value = settings.scheduler;
                     document.querySelectorAll('.scheduler-option').forEach(btn => {
@@ -1053,6 +1061,52 @@
                             btn.classList.remove('selected');
                         }
                     });
+                }
+
+                // Restore LoRA selections and slider values
+                if (settings.loras && settings.loras.length > 0) {
+                    // Wait for LoRA checkboxes to be loaded, then restore
+                    function restoreLoras() {
+                        var checkboxes = document.querySelectorAll('.lora-checkbox');
+                        if (checkboxes.length === 0) {
+                            setTimeout(restoreLoras, 100);
+                            return;
+                        }
+                        settings.loras.forEach(function(loraName, i) {
+                            var cb = Array.from(checkboxes).find(function(c) {
+                                return c.dataset.name === loraName;
+                            });
+                            if (cb) {
+                                cb.checked = true;
+                                var item = cb.closest('.lora-item');
+                                var slider = item.querySelector('.lora-weight');
+                                var label = item.querySelector('.lora-weight-value');
+                                slider.disabled = false;
+                                var scale = settings.loraScales && settings.loraScales[i] !== undefined
+                                    ? settings.loraScales[i] : 1.0;
+                                slider.value = scale;
+                                label.textContent = scale.toFixed(1);
+                            }
+                        });
+                    }
+                    restoreLoras();
+                }
+
+                // Restore privacy settings
+                if (settings.isPublic !== undefined) {
+                    document.getElementById('make-public').checked = settings.isPublic;
+                    document.getElementById('privacy-label').textContent = settings.isPublic
+                        ? 'Public (anyone can see)'
+                        : 'Private (only you can see)';
+                    document.getElementById('expiration-options').style.display = settings.isPublic ? 'block' : 'none';
+                    if (settings.isPublic && settings.expiresAt && settings.createdAt) {
+                        var hours = Math.round((settings.expiresAt - settings.createdAt) / 3600);
+                        var expSelect = document.getElementById('expiration');
+                        var closest = Array.from(expSelect.options).reduce(function(best, opt) {
+                            return Math.abs(parseInt(opt.value) - hours) < Math.abs(parseInt(best.value) - hours) ? opt : best;
+                        });
+                        expSelect.value = closest.value;
+                    }
                 }
             }
         });

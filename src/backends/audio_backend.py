@@ -217,6 +217,8 @@ class AudioBackend:
         self._engine_model_id: Optional[str] = None
         self._engine_lock = asyncio.Lock()
         self._inflight: int = 0
+        self.total_generations: int = 0
+        self.total_generation_time: float = 0.0
 
         logger.info(
             "AudioBackend ready: output=%s max_concurrent=%d",
@@ -548,6 +550,8 @@ class AudioBackend:
                             request_id, actual_duration, seconds,
                         )
 
+                    self.total_generations += 1
+                    self.total_generation_time += elapsed
                     return AudioGenerationResult(
                         audio_path=audio_path,
                         url=f"/v1/audio/{rel}",
@@ -578,11 +582,19 @@ class AudioBackend:
             "output_dir": str(self.output_dir),
             "max_concurrent": self._semaphore._value,  # type: ignore[attr-defined]
             "inflight": self._inflight,
+            "total_generations": self.total_generations,
+            "total_generation_time": self.total_generation_time,
             "model_loaded": engine.is_loaded() if engine else False,
             "model_id": self._engine_model_id,
             "model_repo": engine.model_repo if engine else None,
             "n_models_supported": len(self.list_supported_models()),
         }
+
+    def get_average_generation_time(self) -> float:
+        """Get average generation time in seconds."""
+        if self.total_generations == 0:
+            return 0.0
+        return self.total_generation_time / self.total_generations
 
 
 __all__ = [

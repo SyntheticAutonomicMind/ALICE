@@ -1746,6 +1746,8 @@ async def chat_completions(
                     generation_time=metadata.get("generation_time"),
                     loras=metadata.get("loras"),
                     lora_scales=metadata.get("lora_scales"),
+                    num_images=gen_num_images,
+                    strength=gen_strength,
                 )
                 gallery_manager.add_image(image_record)
                 logger.info("Successfully recorded image in gallery: %s (public=%s)", image_id, image_is_public)
@@ -1874,6 +1876,8 @@ async def get_metrics():
         total_generations=generator.total_generations,
         avg_generation_time=generator.get_average_generation_time(),
         audio_inflight=audio_backend._inflight if audio_backend is not None else 0,
+        audio_total_generations=audio_backend.total_generations if audio_backend is not None else 0,
+        audio_avg_generation_time=audio_backend.get_average_generation_time() if audio_backend is not None else 0.0,
         audio_backend_available=(config.audio.enabled and AudioBackend.is_available())
         if audio_backend is not None
         else False,

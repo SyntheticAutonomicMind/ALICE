@@ -43,6 +43,8 @@ class ImageRecord:
     loras: Optional[List[str]] = None
     lora_scales: Optional[List[float]] = None
     tags: Optional[List[str]] = None  # User-defined tags for organization
+    num_images: Optional[int] = None  # Number of images generated in this request
+    strength: Optional[float] = None  # Denoising strength (img2img only, None for txt2img)
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON storage."""
