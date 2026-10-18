@@ -3901,8 +3901,7 @@ async def create_audio_generation(
 
     # When is_instrumental is True, the backend discards client-provided
     # lyrics (replaces them with the structural tag scaffold
-    # [Intro]\n[Instrumental]\n[Solo]\n[Outro]), augments the caption with
-    # "Vocal Details: Purely instrumental track, no vocals.", and runs a
+    # [Intro]\n[Instrumental]\n[Solo]\n[Outro]) and runs a
     # post-generation vocal-activity check with seed-retry if the open-weight
     # model leaks vocals.
     is_instrumental = request.is_instrumental or False

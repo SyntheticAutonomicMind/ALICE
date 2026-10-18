@@ -426,8 +426,7 @@ class AudioBackend:
                 MiniMax-Music3.  Ignored when is_instrumental is True.
             is_instrumental: When True, force instrumental generation for
                 MiniMax-Music3: lyrics are replaced with the structural tag
-                scaffold and the caption is augmented with a no-vocals
-                directive.  The generated output is returned as-is.
+                scaffold.  The generated output is returned as-is.
             unload_after_generate: Drop the model after generation.
                 Default True so image generation resumes on the next
                 request without manual eviction.

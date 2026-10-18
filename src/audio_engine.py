@@ -448,11 +448,9 @@ def _preprocess_lyrics(lyrics: Optional[str]) -> str:
     can explicitly request instrumental output without worrying about
     pipeline validation.
 
-    These structural tags and the caption-level "no vocals" directive are
-    best-effort guidance for the open-weight model.  The open-weight
-    MiniMax-Music3 checkpoint (HF Diffusers) does not expose a dedicated
-    ``is_instrumental`` parameter like the hosted API does; the Qwen3 AR
-    model may still generate wordless vocalizations despite the scaffolding.
+    These structural tags are best-effort guidance for the open-weight model.
+    The open-weight MiniMax-Music3 checkpoint (HF Diffusers) may still
+    generate wordless vocalizations despite the structural scaffolding.
     """
     if not lyrics or not lyrics.strip():
         return "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
@@ -462,7 +460,7 @@ def _preprocess_lyrics(lyrics: Optional[str]) -> str:
     # lyrics, and an empty/whitespace string raises ValueError.  This is
     # best-effort scaffolding, not a guarantee that vocals won't be generated.
     stripped = lyrics.strip().lower()
-    if stripped in ("[instrumental]", "instrumental", "[no vocals]", "[no vocal]"):
+    if stripped in ("[instrumental]", "instrumental"):
         return "[Intro]\n[Instrumental]\n[Solo]\n[Outro]"
 
     lines = []
@@ -763,8 +761,7 @@ class MiniMaxMusic3Engine:
             model_repo_or_path: HF repo id or local model directory.
             is_instrumental: When True, discard any client-provided lyrics
                 and replace them with the structural tag scaffold
-                (``[Intro]\\n[Instrumental]\\n[Solo]\\n[Outro]``), and append
-                the caption-level "no vocals" directive to the prompt.
+                (``[Intro]\\n[Instrumental]\\n[Solo]\\n[Outro]``).
                 This is best-effort — the open-weight model may still
                 generate wordless vocalizations.  Callers should run a
                 post-generation vocal-activity check and retry with a new
@@ -806,8 +803,8 @@ class MiniMaxMusic3Engine:
         # When is_instrumental is True, discard any client-provided lyric TEXT
         # (actual words/syllables) and replace with the structural tag scaffold.
         # The open-weight model does not honor a dedicated is_instrumental
-        # parameter, so the only available controls are the structural tags
-        # in the lyrics field plus the caption-level "no vocals" directive.
+        # parameter, so the only available control is the structural tags
+        # in the lyrics field.
         #
         # We use a simple 4-tag scaffold ([Intro], [Instrumental], [Solo],
         # [Outro]) rather than the client's full tag timeline.  Testing showed
@@ -820,19 +817,6 @@ class MiniMaxMusic3Engine:
         if processed_lyrics != lyrics:
             logger.debug("Lyrics preprocessed for MiniMax pipeline: %r -> %r", lyrics, processed_lyrics)
 
-        # If the user explicitly requested instrumental (or left lyrics
-        # empty / used the [Instrumental] tag), augment the caption with the
-        # vocal-suppression phrase per the MiniMax-Music3 prompting guide.
-        # The [Instrumental] structural tag is already in the lyrics field
-        # via _preprocess_lyrics, but the caption must also state it —
-        # otherwise the Qwen3 AR model defaults to generating vocals based
-        # on genre conventions.
-        # This is best-effort: the open-weight model may still produce
-        # wordless vocalizations despite this and the structural tags.
-        is_instrumental_inferred = is_instrumental or "[instrumental]" in processed_lyrics.lower()
-        if is_instrumental_inferred:
-            prompt = f"{prompt.strip()}, Vocal Details: Purely instrumental track, no vocals."
-
         logger.info(
             "Generating music: prompt_len=%d lyrics_len=%d duration=%.1fs steps=%d seed=%d",
             len(prompt), len(processed_lyrics), audio_duration, num_inference_steps, seed,
@@ -840,7 +824,7 @@ class MiniMaxMusic3Engine:
         logger.debug("Full prompt: %r", prompt)
 
         # Pipeline inputs (per MiniMaxMusic3Blocks docs):
-        #   prompt: music description (genre/mood/vocals/...)
+        #   prompt: music description (genre/mood/...)
         #   lyrics: lyrics with [verse]/[chorus] structure tags
         #   audio_duration: upper bound in seconds, capped at 9000 frames (~6min)
         #   generator: torch generator

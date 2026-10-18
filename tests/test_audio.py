@@ -454,24 +454,24 @@ def test_preprocess_lyrics_no_change_for_plain_text():
     assert _preprocess_lyrics(raw) == raw
 
 
-def test_instrumental_prompt_augmented():
-    """When [Instrumental] lyrics are passed, the prompt gets the standard
-    "Vocal Details: Purely instrumental track, no vocals." cue so the MiniMax
-    model doesn't generate vocals.
+def test_instrumental_prompt_uses_lyrics_scaffold():
+    """When [Instrumental] lyrics are passed, the prompt is NOT augmented
+    with vocal directives and the lyrics field gets the structural tag
+    scaffold.
 
     Per the MiniMax-Music3 prompting guide: the lyrics/input field must
-    contain ONLY structural tags ([Intro], [Instrumental], [Solo], [Outro]),
-    and the caption must explicitly state "Vocal Details: Purely instrumental
-    track, no vocals."  Both signals are needed — neither alone is sufficient.
+    contain ONLY structural tags ([Intro], [Instrumental], [Solo], [Outro]).
+    The caption carries no vocal language — structural tags alone signal
+    instrumental mode.
     """
     from src.audio_engine import MiniMaxMusic3Engine
 
     # We test the logic by inspecting the processed prompt before the
     # pipeline call.  Since the engine's generate() calls load_model()
-    # before we can check, we verify the augmentation via a mock.
+    # before we can check, we verify via a mock.
     engine = MiniMaxMusic3Engine(output_dir=Path("/tmp/test_audio_minimax"))
     # Bypass model loading and pipeline import — we only want to test
-    # the prompt augmentation logic.
+    # the prompt handling logic.
     engine.load_model = MagicMock()
     engine._initialized = True
 
@@ -502,8 +502,9 @@ def test_instrumental_prompt_augmented():
         # prompt that was passed to the pipeline.
         pass
 
-    assert "Vocal Details: Purely instrumental track, no vocals." in captured.get("prompt", ""), (
-        f"Prompt was not augmented with standard vocal-details phrase: {captured.get('prompt', '')}"
+    # The prompt should NOT be augmented with vocal directives
+    assert "Vocal Details" not in captured.get("prompt", ""), (
+        f"Prompt should not be augmented with vocal details: {captured.get('prompt', '')}"
     )
     assert "[instrumental]" in captured.get("lyrics", "").lower(), (
         f"Lyrics should contain [Instrumental] structural tag: {captured.get('lyrics', '')}"
@@ -840,8 +841,8 @@ def test_engine_accepts_is_instrumental_param():
 
 def test_engine_is_instrumental_clears_client_lyrics():
     """When is_instrumental=True, client-provided lyrics are discarded and
-    replaced with the structural tag scaffold, and the prompt gets the
-    vocal-suppression cue."""
+    replaced with the structural tag scaffold.  The prompt is NOT augmented
+    with vocal directives."""
     from src.audio_engine import MiniMaxMusic3Engine
     import numpy as np
 
@@ -878,8 +879,8 @@ def test_engine_is_instrumental_clears_client_lyrics():
     # The user's actual lyrics must NOT survive
     assert "actual lyrics" not in lyrics_val.lower()
     assert "more lyrics" not in lyrics_val.lower()
-    # Prompt should be augmented with the no-vocals directive
-    assert "Vocal Details: Purely instrumental track, no vocals." in captured.get("prompt", "")
+    # Prompt should NOT be augmented with vocal directives
+    assert "Vocal Details" not in captured.get("prompt", "")
 
 
 def test_backend_generate_accepts_is_instrumental():
