@@ -3899,11 +3899,12 @@ async def create_audio_generation(
     if not prompt or not prompt.strip():
         raise HTTPException(status_code=400, detail="Field 'prompt' (or 'input') is required")
 
-    # When is_instrumental is True, the backend discards client-provided
-    # lyrics (replaces them with the structural tag scaffold
-    # [Intro]\n[Instrumental]\n[Solo]\n[Outro]) and runs a
-    # post-generation vocal-activity check with seed-retry if the open-weight
-    # model leaks vocals.
+    # The backend is a dumb pass-through: it sends the caption and lyrics
+    # verbatim to the model. Vocal suppression is handled by the client
+    # via structural [instrumental] tags in the lyrics field and an explicit
+    # NEGATIVE PROMPT section in the caption (the model weights the end of
+    # the caption most heavily). The is_instrumental flag only controls
+    # blank-lyrics fallback scaffolding in the audio engine.
     is_instrumental = request.is_instrumental or False
     lyrics = request.lyrics or ""
 
