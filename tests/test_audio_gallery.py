@@ -301,8 +301,9 @@ class TestGalleryAudioEndpoint:
             "/v1/gallery/audio",
             headers={"X-Api-Key": "testkey"},
         )
-        # Should return 200 (or 503 if gallery not init)
-        assert response.status_code in (200, 403, 503)
+        # 200 (ok), 401/403 (auth blocked by an earlier module's lifespan),
+        # or 503 (gallery not initialized)
+        assert response.status_code in (200, 401, 403, 503)
         if response.status_code == 200:
             data = response.json()
             assert "data" in data
@@ -318,8 +319,8 @@ class TestGalleryAudioEndpoint:
             "/v1/gallery/stats",
             headers={"X-Api-Key": "testkey"},
         )
-        # 403 means auth blocked (expected in test env); 200/503 means working
-        assert response.status_code in (200, 403, 503)
+        # 401/403 mean auth blocked (expected in test env); 200/503 means working
+        assert response.status_code in (200, 401, 403, 503)
         if response.status_code == 200:
             data = response.json()
             assert "totalAudio" in data

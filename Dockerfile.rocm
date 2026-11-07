@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (c) 2026 Andrew Wyatt (Fewtarius)
 #
-# ALICE Dockerfile - AMD ROCm variant (ROCm 10.0.0)
+# ALICE Dockerfile - AMD ROCm variant (ROCm 10.1.0)
 #
-# Uses the official AMD ROCm 10.0.0 base image, which includes
-# PyTorch 2.13.0+rocm10.0.0 with multi-arch device support for all
+# Uses the official AMD ROCm 10.1.0 base image, which includes
+# PyTorch 2.14.0+rocm10.1.0 with multi-arch device support for all
 # supported AMD GPUs (including gfx1103 Phoenix and gfx1151 Strix Halo).
 #
 # Build:
@@ -17,14 +17,14 @@
 #     alice:rocm
 
 ARG PYTHON_VERSION=3.13
-ARG TORCH_VERSION=2.13.0+rocm10.0.0
-ARG TORCHVISION_VERSION=0.28.0+rocm10.0.0
-ARG TORCHAUDIO_VERSION=2.11.0.2+rocm10.0.0
+ARG TORCH_VERSION=2.14.0+rocm10.1.0
+ARG TORCHVISION_VERSION=0.28.0+rocm10.1.0
+ARG TORCHAUDIO_VERSION=2.11.0.3+rocm10.1.0
 
 # =============================================================================
 # Stage 1: Builder
 # =============================================================================
-FROM rocm/dev-ubuntu-24.04:10.0.0-full AS builder
+FROM rocm/dev-ubuntu-24.04:10.1.0-full AS builder
 
 ARG PYTHON_VERSION
 ARG TORCH_VERSION
@@ -50,7 +50,7 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTH
 
 WORKDIR /build
 
-# Install PyTorch with ROCm 10.0.0 support (multi-arch, device-all).
+# Install PyTorch with ROCm 10.1.0 support (multi-arch, device-all).
 # The ROCm pip packages include GPU-specific device code and runtime
 # libraries automatically — no separate ROCm install is needed.
 # device-all covers gfx1103 (Phoenix), gfx1151 (Strix Halo),
@@ -78,12 +78,12 @@ RUN echo "setuptools<81" > /build/constraints.txt && \
 # =============================================================================
 # Stage 2: Runtime
 # =============================================================================
-FROM rocm/dev-ubuntu-24.04:10.0.0-full AS runtime
+FROM rocm/dev-ubuntu-24.04:10.1.0-full AS runtime
 
 ARG PYTHON_VERSION
 
-LABEL org.opencontainers.image.title="ALICE (ROCm 10.0.0)"
-LABEL org.opencontainers.image.description="ALICE - Local image and audio generation service with AMD ROCm 10.0.0 GPU support"
+LABEL org.opencontainers.image.title="ALICE (ROCm 10.1.0)"
+LABEL org.opencontainers.image.description="ALICE - Local image and audio generation service with AMD ROCm 10.1.0 GPU support"
 LABEL org.opencontainers.image.url="https://github.com/SyntheticAutonomicMind/ALICE"
 LABEL org.opencontainers.image.source="https://github.com/SyntheticAutonomicMind/ALICE"
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"

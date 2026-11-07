@@ -31,6 +31,7 @@ import pytest
 
 def _install_mocks():
     """Install mock modules for torch and PIL so pytorch_backend can be imported."""
+    saved = dict(sys.modules)
     # Mock torch
     torch_mock = MagicMock()
     torch_mock.cuda.is_available.return_value = False
@@ -68,9 +69,10 @@ def _install_mocks():
     # Mock compel (TYPE_CHECKING only, but mock for safety)
     compel_mock = MagicMock()
     sys.modules['compel'] = compel_mock
+    return saved
 
 
-_install_mocks()
+_saved_modules = _install_mocks()
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +80,25 @@ _install_mocks()
 # ---------------------------------------------------------------------------
 
 from src.backends import pytorch_backend  # noqa: E402
+
+
+def _restore_modules():
+    """Restore the pre-mock module state so mocks do not leak into other
+    test modules (this file may be collected before modules that need the
+    real torch/diffusers)."""
+    for name, module in _saved_modules.items():
+        if module is not None:
+            sys.modules[name] = module
+        else:
+            sys.modules.pop(name, None)
+
+
+_restore_modules()
+# Drop any mocked modules that were not imported before the mocks were
+# installed (they have no snapshot entry to restore from).
+for _name in ('torch', 'PIL', 'PIL.Image', 'diffusers', 'compel'):
+    if _name not in _saved_modules:
+        sys.modules.pop(_name, None)
 
 
 # ---------------------------------------------------------------------------

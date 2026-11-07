@@ -1,13 +1,13 @@
 # ALICE Dependencies
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Updated for ROCm 10.0.0 + PyTorch 2.13.0
+# Updated for ROCm 10.1.0 + PyTorch 2.14.0
 # Uses >= constraints to install the latest compatible versions.
 #
 # IMPORTANT: torch, torchvision, and torchaudio are NOT listed here because they
 # require platform-specific installation (ROCm on AMD, CUDA on NVIDIA,
 # CPU-only, etc.).  Install scripts handle PyTorch installation separately.
-# The ROCm 10.0.0 multi-arch packages are installed via the stable.repo.amd.com
+# The ROCm 10.1.0 multi-arch packages are installed via the stable.repo.amd.com
 # index with device-* extras that cover gfx1103, gfx1151, and all other
 # supported AMD GPU architectures.
 # Note: setuptools<81 is set via PIP_CONSTRAINT in Dockerfiles (see
@@ -28,6 +28,9 @@ transformers>=5.0
 accelerate>=1.12.0
 safetensors>=0.7.0
 huggingface-hub>=1.0.0
+
+# GGUF model loading via diffusers (Qwen Image / FLUX GGUF quantized models)
+gguf>=0.13.0
 
 # Prompt weighting and long prompts
 compel>=2.3.1

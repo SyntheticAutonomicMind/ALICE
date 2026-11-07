@@ -70,31 +70,31 @@ install_alice() {
         
         if [[ "$gfx_arch" == "gfx1103" || "$gfx_arch" == "gfx1151" ]]; then
             # Phoenix (gfx1103) and Strix Halo (gfx1151) are supported by
-            # the ROCm 10.0.0 multi-arch stable index via device extras.
+            # the ROCm 10.1.0 multi-arch stable index via device extras.
             # This replaces the legacy TheRock nightly indices and all
             # their workarounds (--pre, --no-deps, manual rocm-sdk-libraries,
             # and the torchvision::nms _meta_registrations patch).
-            log_info "Detected AMD GPU ($gfx_arch) - using ROCm 10.0.0 multi-arch packages"
+            log_info "Detected AMD GPU ($gfx_arch) - using ROCm 10.1.0 multi-arch packages"
             "${ALICE_DIR}/venv/bin/pip" install \
                 --index-url https://stable.repo.amd.com/rocm/whl-next/ \
-                "torch[device-${gfx_arch}]==2.13.0+rocm10.0.0" \
-                "torchvision[device-${gfx_arch}]==0.28.0+rocm10.0.0" \
-                "torchaudio==2.11.0.2+rocm10.0.0"
+                "torch[device-${gfx_arch}]==2.14.0+rocm10.1.0" \
+                "torchvision[device-${gfx_arch}]==0.28.0+rocm10.1.0" \
+                "torchaudio==2.11.0.3+rocm10.1.0"
         elif [[ "$gfx_arch" == "gfx90c" ]]; then
             # Cezanne/Renoir APUs (Ryzen 5000/4000 series) are not
-            # supported by ROCm 10.0.0.  Fall back to CPU-only.
-            log_warn "Detected AMD APU ($gfx_arch) - not supported by ROCm 10.0.0, using CPU-only PyTorch"
+            # supported by ROCm 10.1.0.  Fall back to CPU-only.
+            log_warn "Detected AMD APU ($gfx_arch) - not supported by ROCm 10.1.0, using CPU-only PyTorch"
             "${ALICE_DIR}/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
             USE_GPU=false
         else
-            # Other AMD GPUs (RDNA2/RDNA3/CDNA) - use ROCm 10.0.0 multi-arch
+            # Other AMD GPUs (RDNA2/RDNA3/CDNA) - use ROCm 10.1.0 multi-arch
             # with device-all for broad architecture coverage.
-            log_info "Detected AMD GPU ($gfx_arch) - using ROCm 10.0.0 multi-arch packages"
+            log_info "Detected AMD GPU ($gfx_arch) - using ROCm 10.1.0 multi-arch packages"
             "${ALICE_DIR}/venv/bin/pip" install \
                 --index-url https://stable.repo.amd.com/rocm/whl-next/ \
-                "torch[device-all]==2.13.0+rocm10.0.0" \
-                "torchvision[device-all]==0.28.0+rocm10.0.0" \
-                "torchaudio==2.11.0.2+rocm10.0.0"
+                "torch[device-all]==2.14.0+rocm10.1.0" \
+                "torchvision[device-all]==0.28.0+rocm10.1.0" \
+                "torchaudio==2.11.0.3+rocm10.1.0"
         fi
     else
         # Install CPU-only PyTorch
