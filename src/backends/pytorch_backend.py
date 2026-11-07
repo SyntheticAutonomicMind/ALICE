@@ -369,6 +369,78 @@ def _detect_pipeline_class(model_path: Path) -> Tuple[str, str]:
         return default_pipeline, default_type
 
 
+# Local cache for one-time snapshots of GGUF base repos (tokenizer, scheduler,
+# VAE and configs).  Once populated, GGUF loads never touch the network.
+BASE_REPO_CACHE_DIR = Path(
+    os.environ.get("ALICE_BASE_REPO_CACHE", "/var/lib/alice/base-repos")
+)
+
+
+def _slug_repo(repo_id: str) -> str:
+    """Convert a HuggingFace repo id to a filesystem-safe directory name."""
+    return repo_id.replace("/", "__")
+
+
+def _ensure_base_repo_snapshot(repo_id: str) -> Optional[Path]:
+    """
+    Return a local snapshot directory for a GGUF base repo, downloading it
+    on first use only.
+
+    Downloads config/tokenizer/scheduler/vae files (not transformer weights -
+    those live in the GGUF file) into BASE_REPO_CACHE_DIR.  Subsequent calls
+    return the cached directory without any network access.
+
+    Returns None when the snapshot cannot be obtained (offline, first-run
+    without network) so callers can fall back to normal hub resolution.
+    """
+    target = BASE_REPO_CACHE_DIR / _slug_repo(repo_id)
+    marker = target / ".snapshot_complete"
+    if marker.is_file():
+        return target
+
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        logger.warning(
+            "huggingface_hub unavailable; cannot cache base repo %s locally",
+            repo_id,
+        )
+        return None
+
+    logger.info(
+        "Downloading base repo %s for offline GGUF loading (one time only)",
+        repo_id,
+    )
+    try:
+        BASE_REPO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id=repo_id,
+            local_dir=target,
+            allow_patterns=[
+                "*.json",
+                "*.txt",
+                "tokenizer/**",
+                "processor/**",
+                "scheduler/**",
+                "text_encoder/**/*.json",
+                "vae/**",
+            ],
+        )
+        marker.write_text(repo_id)
+        logger.info("Base repo %s cached at %s", repo_id, target)
+        return target
+    except Exception as e:
+        logger.warning(
+            "Failed to cache base repo %s locally (%s); "
+            "falling back to hub resolution", repo_id, e,
+        )
+        # Remove partial download so a later attempt can retry cleanly.
+        if target.exists():
+            import shutil
+            shutil.rmtree(target, ignore_errors=True)
+        return None
+
+
 def _gguf_model_spec(model_path: Path) -> Optional[Dict[str, Any]]:
     """
     Identify a GGUF model file and map it to diffusers components.
@@ -1820,10 +1892,16 @@ class PyTorchBackend(BaseBackend):
             "Loading GGUF transformer %s (family=%s, compute_dtype=%s)",
             model_path.name, spec["family"], compute_dtype,
         )
+        base_local = _ensure_base_repo_snapshot(spec["base_repo"])
+        base_source = str(base_local) if base_local else spec["base_repo"]
+        local_only = base_local is not None
         transformer = spec["transformer_class"].from_single_file(
             str(model_path),
             quantization_config=quantization_config,
             torch_dtype=compute_dtype,
+            config=base_source,
+            subfolder="transformer",
+            local_files_only=local_only,
         )
 
         load_kwargs = {"torch_dtype": dtype}
@@ -1837,8 +1915,9 @@ class PyTorchBackend(BaseBackend):
             logger.info("Using device_map: %s (GGUF pipeline)", self.device_map)
 
         pipeline = spec["pipeline_class"].from_pretrained(
-            spec["base_repo"],
+            base_source,
             transformer=transformer,
+            local_files_only=local_only,
             **load_kwargs,
         )
 
@@ -1916,8 +1995,11 @@ class PyTorchBackend(BaseBackend):
         if vae_file is not None and vae_class is not None:
             try:
                 logger.info("Loading VAE from %s", vae_file)
+                vae_base = _ensure_base_repo_snapshot(spec["base_repo"])
                 components["vae"] = vae_class.from_single_file(
                     str(vae_file), torch_dtype=dtype,
+                    config=str(vae_base) if vae_base else spec["base_repo"],
+                    local_files_only=vae_base is not None,
                 )
             except (ValueError, OSError, RuntimeError) as e:
                 # Local VAE files are often raw exports with non-diffusers
@@ -1934,6 +2016,7 @@ class PyTorchBackend(BaseBackend):
             from safetensors.torch import load_file
             te_config = AutoConfig.from_pretrained(
                 spec["base_repo"], subfolder="text_encoder",
+                local_files_only=_ensure_base_repo_snapshot(spec["base_repo"]) is not None,
             )
             text_encoder = Qwen3VLForConditionalGeneration(te_config)
             state = load_file(str(llm_file))
