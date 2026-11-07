@@ -153,6 +153,7 @@ async def lifespan(app: FastAPI):
     generator = GeneratorService(
         images_dir=config.storage.images_directory,
         backend_name=config.generation.backend,
+        gguf_backend=config.generation.gguf_backend,
         sdcpp_binary=config.generation.sdcpp_binary,
         sdcpp_threads=config.generation.sdcpp_threads,
         default_steps=config.generation.default_steps,

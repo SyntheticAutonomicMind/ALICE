@@ -35,6 +35,7 @@ class GeneratorService:
         self,
         images_dir: str | Path = "./images",
         backend_name: str = "auto",
+        gguf_backend: str = "auto",
         sdcpp_binary: Optional[Path] = None,
         sdcpp_threads: int = 8,
         default_steps: int = 25,
@@ -71,6 +72,7 @@ class GeneratorService:
         Args:
             images_dir: Directory to save generated images
             backend_name: Backend to use ("auto", "pytorch", "vulkan")
+            gguf_backend: Backend for GGUF models ("auto", "pytorch", "sdcpp")
             sdcpp_binary: Path to sd-cli binary (for Vulkan backend)
             sdcpp_threads: CPU threads for Vulkan backend
             default_steps: Default inference steps
@@ -83,6 +85,7 @@ class GeneratorService:
         """
         self.images_dir = Path(images_dir)
         self.images_dir.mkdir(parents=True, exist_ok=True)
+        self._gguf_backend = (gguf_backend or "auto").lower()
         
         # Track statistics
         self.total_generations = 0
@@ -195,21 +198,41 @@ class GeneratorService:
     
     def _select_backend_for_model(self, model_path: Path) -> BaseBackend:
         """Select the backend that can load the given model.
-        
-        GGUF models require the sd.cpp (Vulkan) backend; everything else
-        goes to the primary backend. If the primary is already sd.cpp,
-        all models route there.
-        
+
+        GGUF models route to diffusers (PyTorch) when diffusers supports the
+        model family - generally much faster than sd.cpp on ROCm/CUDA - and
+        fall back to sd.cpp otherwise. The generation.gguf_backend config
+        can force a specific backend ('auto', 'pytorch', 'sdcpp').
+
         Args:
             model_path: Path to the model file or directory
-        
+
         Returns:
             Backend instance for this model
-        
+
         Raises:
             RuntimeError: If a GGUF model is requested but sd.cpp is unavailable
         """
-        if model_path.suffix.lower() == ".gguf" and self._backend_key != "sdcpp":
+        if model_path.suffix.lower() == ".gguf":
+            gguf_pref = (self._gguf_backend or "auto").lower()
+
+            if gguf_pref in ("pytorch", "diffusers", "auto"):
+                try:
+                    from .backends.pytorch_backend import pytorch_backend_can_load_gguf
+                    if pytorch_backend_can_load_gguf(model_path):
+                        return self._get_routing_backend("pytorch") if self._backend_key != "pytorch" else self._backend
+                except Exception as e:
+                    logger.debug("GGUF diffusers routing check failed: %s", e)
+                if gguf_pref in ("pytorch", "diffusers"):
+                    raise RuntimeError(
+                        f"Model '{model_path.name}' is a GGUF file but diffusers cannot load "
+                        f"its model family. Install the latest diffusers or set "
+                        f"generation.gguf_backend to 'sdcpp'."
+                    )
+
+            if self._backend_key == "sdcpp":
+                return self._backend
+
             try:
                 from .backends.sdcpp_backend import SDCppBackend
                 available = SDCppBackend.is_available()
@@ -218,6 +241,7 @@ class GeneratorService:
             configured_binary = self._backend_kwargs.get("sdcpp_binary")
             if configured_binary and not Path(configured_binary).is_file():
                 available = False
+
             if not available:
                 raise RuntimeError(
                     f"Model '{model_path.name}' is a GGUF file which requires the "

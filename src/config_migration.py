@@ -132,6 +132,7 @@ def get_default_config() -> Dict[str, Any]:
             "default_width": 512,
             "default_height": 512,
             "backend": "auto",
+            "gguf_backend": "auto",
             "sdcpp_binary": None,
             "sdcpp_threads": 8,
             "force_cpu": False,

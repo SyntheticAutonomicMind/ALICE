@@ -15,6 +15,7 @@ import os
 import gc
 import time
 import uuid
+import yaml
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -250,6 +251,13 @@ def _import_diffusers() -> None:
         _scheduler_classes["flow_match_euler"] = (FlowMatchEulerDiscreteScheduler, {})
     except ImportError:
         logger.debug("FlowMatchEulerDiscreteScheduler not available")
+
+    # GGUF quantization support (Qwen Image / FLUX GGUF models)
+    try:
+        from diffusers import GGUFQuantizationConfig
+        _pipeline_classes["GGUFQuantizationConfig"] = GGUFQuantizationConfig
+    except ImportError:
+        logger.debug("GGUFQuantizationConfig not available - GGUF models will route to sd.cpp")
     
     # Pipeline classes
     _pipeline_classes.update({
@@ -359,6 +367,95 @@ def _detect_pipeline_class(model_path: Path) -> Tuple[str, str]:
     except Exception as e:
         logger.warning("Error reading model_index.json: %s", e)
         return default_pipeline, default_type
+
+
+def _gguf_model_spec(model_path: Path) -> Optional[Dict[str, Any]]:
+    """
+    Identify a GGUF model file and map it to diffusers components.
+
+    GGUF single files contain the diffusion transformer only; the text
+    encoder and VAE are taken from the upstream HuggingFace base repo.
+
+    Args:
+        model_path: Path to the .gguf file
+
+    Returns:
+        Dict with family, base_repo, transformer_class, pipeline_class and
+        model_type, or None if the family is not supported by diffusers.
+    """
+    _import_diffusers()
+    try:
+        from diffusers import (  # noqa: F401
+            AutoencoderKLQwenImage,
+            QwenImagePipeline,
+            AutoencoderKLQwenImage21,
+            QwenImageImg2ImgPipeline,
+            QwenImage21Pipeline,
+            QwenImage21Transformer2DModel,
+            QwenImageTransformer2DModel,
+            FluxPipeline,
+            FluxTransformer2DModel,
+        )
+    except ImportError:
+        return None
+
+    name = model_path.name.lower()
+    if "qwen" in name:
+        if "2.1" in name or "_21" in name:
+            return {
+                "family": "qwen",
+                "model_type": "qwen",
+                "base_repo": "Qwen/Qwen-Image-2.1",
+                "transformer_class": QwenImage21Transformer2DModel,
+                "pipeline_class": QwenImage21Pipeline,
+                "vae_class": AutoencoderKLQwenImage21,
+            }
+        if "edit" in name:
+            edit_pipeline = _pipeline_classes.get("QwenImageEditPlusPipeline")
+            if edit_pipeline is None:
+                return None
+            return {
+                "family": "qwen",
+                "model_type": "qwen",
+                "base_repo": "Qwen/Qwen-Image-Edit-2509",
+                "transformer_class": QwenImageTransformer2DModel,
+                "pipeline_class": edit_pipeline,
+                "vae_class": AutoencoderKLQwenImage,
+            }
+        return {
+            "family": "qwen",
+            "model_type": "qwen",
+            "base_repo": "Qwen/Qwen-Image",
+            "transformer_class": QwenImageTransformer2DModel,
+            "pipeline_class": QwenImagePipeline,
+            "vae_class": AutoencoderKLQwenImage,
+        }
+    if "flux" in name:
+        base = "black-forest-labs/FLUX.1-schnell" if "schnell" in name else "black-forest-labs/FLUX.1-dev"
+        return {
+            "family": "flux",
+            "model_type": "flux",
+            "base_repo": base,
+            "transformer_class": FluxTransformer2DModel,
+            "pipeline_class": FluxPipeline,
+        }
+    return None
+
+
+def pytorch_backend_can_load_gguf(model_path: Path) -> bool:
+    """
+    True if the PyTorch backend can load this GGUF file via diffusers.
+
+    Used by the generator's model-based backend routing so GGUF models
+    run on diffusers (ROCm/CUDA) when supported instead of sd.cpp.
+    """
+    try:
+        from diffusers.utils import is_gguf_available
+        if not is_gguf_available():
+            return False
+    except Exception:
+        return False
+    return _gguf_model_spec(model_path) is not None
 
 
 def _get_scheduler(scheduler_name: str, pipeline_config: Dict) -> Any:
@@ -1561,15 +1658,6 @@ class PyTorchBackend(BaseBackend):
         """
         logger.info("Loading model in thread pool: %s", model_path)
 
-        # GGUF files are sd.cpp/Vulkan-only - cannot be loaded by PyTorch/diffusers
-        if model_path.is_file() and model_path.suffix.lower() == ".gguf":
-            raise RuntimeError(
-                f"Model '{model_path.name}' is a GGUF file which requires the Vulkan (sd.cpp) backend. "
-                f"The PyTorch backend cannot load GGUF models. "
-                f"Either change 'backend' to 'vulkan' or 'auto' in config.yaml, "
-                f"or use a .safetensors model instead."
-            )
-
         # Import diffusers if needed
         _import_diffusers()
         
@@ -1595,6 +1683,19 @@ class PyTorchBackend(BaseBackend):
             logger.info("Forcing float32 dtype as configured for AMD GPU compatibility")
         
         logger.info("Using dtype: %s for device: %s", dtype, self._device)
+
+        # GGUF single-file models: the transformer loads via diffusers GGUF
+        # quantization when the family is supported, otherwise sd.cpp is required.
+        if model_path.is_file() and model_path.suffix.lower() == ".gguf":
+            spec = _gguf_model_spec(model_path)
+            if spec is None:
+                raise RuntimeError(
+                    f"Model '{model_path.name}' is a GGUF file whose model family is not "
+                    f"supported by diffusers. Use the sd.cpp (Vulkan) backend for this model."
+                )
+            pipeline, model_type, device_map_applied = self._load_gguf_model(model_path, spec, dtype)
+            logger.info("GGUF model loaded successfully: %s (type=%s)", model_path.name, model_type)
+            return pipeline, model_type, device_map_applied, False
         
         # Load pipeline
         try:
@@ -1689,6 +1790,173 @@ class PyTorchBackend(BaseBackend):
         except Exception as e:
             logger.error("Failed to load model: %s", e)
             raise
+
+    def _load_gguf_model(
+        self,
+        model_path: Path,
+        spec: Dict[str, Any],
+        dtype: torch.dtype,
+    ) -> Tuple[Any, str, bool]:
+        """
+        Load a GGUF diffusion transformer and assemble the full pipeline.
+
+        The GGUF file contains only the transformer; text encoder, VAE, and
+        scheduler come from the upstream HuggingFace base repo.
+
+        Args:
+            model_path: Path to the .gguf file
+            spec: Model spec from _gguf_model_spec()
+            dtype: Compute dtype (used for GGUF dequantization and base components)
+
+        Returns:
+            Tuple of (pipeline, model_type, device_map_applied)
+        """
+        from diffusers import GGUFQuantizationConfig
+
+        compute_dtype = dtype if dtype != torch.float32 else torch.bfloat16
+        quantization_config = GGUFQuantizationConfig(compute_dtype=compute_dtype)
+
+        logger.info(
+            "Loading GGUF transformer %s (family=%s, compute_dtype=%s)",
+            model_path.name, spec["family"], compute_dtype,
+        )
+        transformer = spec["transformer_class"].from_single_file(
+            str(model_path),
+            quantization_config=quantization_config,
+            torch_dtype=compute_dtype,
+        )
+
+        load_kwargs = {"torch_dtype": dtype}
+        components = self._resolve_gguf_components(model_path, spec, dtype)
+        if components:
+            load_kwargs.update(components)
+        device_map_applied = False
+        if self.device_map and self.device_map in ("balanced", "cuda"):
+            load_kwargs["device_map"] = self.device_map
+            device_map_applied = True
+            logger.info("Using device_map: %s (GGUF pipeline)", self.device_map)
+
+        pipeline = spec["pipeline_class"].from_pretrained(
+            spec["base_repo"],
+            transformer=transformer,
+            **load_kwargs,
+        )
+
+        if not device_map_applied and not self.enable_model_cpu_offload and not self.enable_sequential_cpu_offload:
+            logger.info("Moving GGUF pipeline to device: %s", self._device)
+            pipeline = pipeline.to(self._device)
+
+        return pipeline, spec["model_type"], device_map_applied
+
+    def _resolve_gguf_components(
+        self,
+        model_path: Path,
+        spec: Dict[str, Any],
+        dtype: torch.dtype,
+    ) -> Dict[str, Any]:
+        """
+        Resolve auxiliary components (VAE, text encoder) for a GGUF model.
+
+        Uses local files referenced by the sd.cpp-style sidecar YAML
+        (<model>.yaml with vae:/llm: keys) or the conventional sibling file
+        names (vae.safetensors, qwen3vl*.safetensors). Falls back to the
+        base HuggingFace repo when no local components exist.
+        """
+        parent = model_path.parent
+        vae_file: Optional[Path] = None
+        llm_file: Optional[Path] = None
+
+        sidecar = parent / (model_path.stem + ".yaml")
+        if not sidecar.exists():
+            yamls = sorted(parent.glob("*.yaml"))
+            if len(yamls) == 1:
+                sidecar = yamls[0]
+        if sidecar.exists():
+            try:
+                with open(sidecar) as f:
+                    cfg = yaml.safe_load(f) or {}
+                for key in ("vae", "llm"):
+                    value = cfg.get(key)
+                    if not value:
+                        continue
+                    candidate = Path(value)
+                    if not candidate.is_absolute():
+                        candidate = parent / value
+                    if not candidate.exists():
+                        # sd.cpp allows partial names resolved by glob
+                        matches = sorted(parent.glob(str(value)))
+                        candidate = matches[0] if matches else candidate
+                    if candidate.exists():
+                        if key == "vae":
+                            vae_file = candidate
+                        else:
+                            llm_file = candidate
+            except Exception as e:
+                logger.warning("Failed to parse sidecar %s: %s", sidecar, e)
+
+        if vae_file is None:
+            candidate = parent / "vae.safetensors"
+            if candidate.exists():
+                vae_file = candidate
+        if llm_file is None:
+            matches = sorted(parent.glob("qwen3vl*.safetensors"))
+            if matches:
+                llm_file = matches[0]
+        if llm_file is None and vae_file is not None:
+            # Text encoder commonly sits next to the referenced VAE
+            try:
+                matches = sorted(vae_file.resolve().parent.glob("qwen3vl*.safetensors"))
+                if matches:
+                    llm_file = matches[0]
+            except OSError:
+                pass
+
+        components: Dict[str, Any] = {}
+        vae_class = spec.get("vae_class")
+        if vae_file is not None and vae_class is not None:
+            try:
+                logger.info("Loading VAE from %s", vae_file)
+                components["vae"] = vae_class.from_single_file(
+                    str(vae_file), torch_dtype=dtype,
+                )
+            except (ValueError, OSError, RuntimeError) as e:
+                # Local VAE files are often raw exports with non-diffusers
+                # key names and no single-file converter exists for the
+                # class. The base repo ships a diffusers-format VAE.
+                logger.info(
+                    "Local VAE %s not loadable via diffusers (%s); "
+                    "using the diffusers-format VAE from %s",
+                    vae_file.name, e, spec["base_repo"],
+                )
+        if llm_file is not None and spec["family"] == "qwen":
+            logger.info("Loading text encoder from %s", llm_file)
+            from transformers import Qwen3VLForConditionalGeneration, AutoConfig
+            from safetensors.torch import load_file
+            te_config = AutoConfig.from_pretrained(
+                spec["base_repo"], subfolder="text_encoder",
+            )
+            text_encoder = Qwen3VLForConditionalGeneration(te_config)
+            state = load_file(str(llm_file))
+            # sd.cpp-oriented exports use the legacy "model." prefix for the
+            # language tower; current transformers expects
+            # "model.language_model.". The visual tower names are unchanged.
+            remapped = {}
+            for key, tensor in state.items():
+                if key.startswith("model.") and not key.startswith("model.visual"):
+                    remapped["model.language_model." + key[len("model."):]] = tensor
+                else:
+                    remapped[key] = tensor
+            missing, unexpected = text_encoder.load_state_dict(remapped, strict=False)
+            if missing or unexpected:
+                raise RuntimeError(
+                    f"Text encoder weight mismatch for {llm_file.name}: "
+                    f"{len(missing)} missing, {len(unexpected)} unexpected keys"
+                )
+            del state, remapped
+            text_encoder = text_encoder.to(dtype)
+            components["text_encoder"] = text_encoder
+
+        return components
     async def _unload_model_internal(self) -> None:
         """Unload all cached models without acquiring lock (internal use when lock already held)."""
         if len(self._model_cache) == 0 and len(self._cpu_cache) == 0:
@@ -1980,26 +2248,44 @@ class PyTorchBackend(BaseBackend):
                     # When multiple concurrent requests share the same scheduler, they corrupt
                     # each other's state (step_index, sigmas, timesteps), causing index errors.
                     # Each request must have its own scheduler instance with independent state.
+                    # Flow-matching models (Qwen Image, FLUX) require a flow-matching
+                    # scheduler; classic epsilon/v-prediction schedulers are invalid here.
+                    # The pipeline itself computes timesteps (including the dynamic
+                    # shift) on every call, so no per-request scheduler is needed.
+                    effective_scheduler = scheduler
+                    if self._current_model_type in ("qwen", "flux") and effective_scheduler != "flow_match_euler":
+                        logger.info(
+                            "Flow-matching model: overriding requested scheduler '%s' "
+                            "with flow_match_euler",
+                            effective_scheduler,
+                        )
+                        effective_scheduler = "flow_match_euler"
                     request_scheduler = None
                     original_scheduler = None
-                    try:
-                        request_scheduler = _get_scheduler(scheduler, self._pipeline.scheduler.config)
-                        request_scheduler.set_timesteps(steps, device=self._device)
-                        
-                        # Diagnostic logging for Euler schedulers
-                        if scheduler in ["euler_a", "euler", "euler_ancestral"]:
-                            sigmas_len = len(request_scheduler.sigmas)
-                            logger.debug(
-                                "Created fresh scheduler for request: %s, steps=%d, sigmas_len=%d",
-                                scheduler, steps, sigmas_len
-                            )
-                        
-                        # Temporarily replace pipeline's scheduler with our request-specific instance
-                        original_scheduler = self._pipeline.scheduler
-                        self._pipeline.scheduler = request_scheduler
-                        
-                    except Exception as e:
-                        logger.warning("Failed to create request scheduler %s: %s. Using shared scheduler (may have race conditions).", scheduler, e)
+                    if self._current_model_type in ("qwen", "flux"):
+                        logger.info(
+                            "Flow-matching model: using the pipeline's own scheduler "
+                            "(timesteps are re-initialized per request)"
+                        )
+                    else:
+                        try:
+                            request_scheduler = _get_scheduler(effective_scheduler, self._pipeline.scheduler.config)
+                            request_scheduler.set_timesteps(steps, device=self._device)
+
+                            # Diagnostic logging for Euler schedulers
+                            if effective_scheduler in ["euler_a", "euler", "euler_ancestral"]:
+                                sigmas_len = len(request_scheduler.sigmas)
+                                logger.debug(
+                                    "Created fresh scheduler for request: %s, steps=%d, sigmas_len=%d",
+                                    scheduler, steps, sigmas_len
+                                )
+
+                            # Temporarily replace pipeline's scheduler with our request-specific instance
+                            original_scheduler = self._pipeline.scheduler
+                            self._pipeline.scheduler = request_scheduler
+
+                        except Exception as e:
+                            logger.warning("Failed to create request scheduler %s: %s. Using shared scheduler (may have race conditions).", scheduler, e)
                     
                     try:
                         with torch.inference_mode():
@@ -2023,8 +2309,12 @@ class PyTorchBackend(BaseBackend):
                                     "generator": generator,
                                     "output_type": output_type,
                                     "true_cfg_scale": guidance_scale,
-                                    "guidance_scale": 1.0,  # Qwen uses true_cfg_scale instead
                                 }
+                                # QwenImage21Pipeline only takes true_cfg_scale;
+                                # older pipelines also accept guidance_scale.
+                                import inspect as _inspect
+                                if "guidance_scale" in _inspect.signature(self._pipeline.__call__).parameters:
+                                    pipeline_kwargs["guidance_scale"] = 1.0
                             elif is_img2img:
                                 # Generic img2img: SD/SDXL img2img pipeline
                                 logger.info("Using generic img2img mode with %d input image(s)", len(input_images))

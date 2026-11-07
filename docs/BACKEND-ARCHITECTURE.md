@@ -458,6 +458,37 @@ models/
 └── Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf  # LLM encoder (4.4 GB)
 ```
 
+### GGUF Routing to diffusers (PyTorch backend)
+
+diffusers can load quantized GGUF diffusion transformers directly for
+supported families (Qwen Image 1.0/2.1, FLUX). This is typically much faster
+than sd.cpp on ROCm/CUDA, so the generator routes GGUF models to the
+PyTorch backend by default.
+
+`generation.gguf_backend` in config.yaml controls this:
+
+| Value | Behavior |
+|-------|----------|
+| `auto` (default) | diffusers when the model family is supported, sd.cpp otherwise |
+| `pytorch` | always diffusers (error if the family is unsupported) |
+| `sdcpp` | always sd.cpp |
+
+For supported families the PyTorch backend:
+1. Loads the GGUF file as the diffusion transformer via
+   `GGUFQuantizationConfig` (dequantized to the compute dtype on the fly)
+2. Uses local auxiliary components when available, resolving them from the
+   sd.cpp-style sidecar YAML (`vae:` / `llm:` keys) or sibling files
+   (`vae.safetensors`, `qwen3vl*.safetensors`)
+3. Takes tokenizer, scheduler, and (if no local VAE loads) the VAE from the
+   upstream HuggingFace base repo (small downloads, HF-cached)
+
+Flow-matching schedulers: requests against Qwen/FLUX models always use the
+pipeline's own flow-matching scheduler; classic epsilon/v-prediction
+scheduler requests are ignored for these models.
+
+Sidecar YAML files remain used by the sd.cpp backend and are honored by the
+PyTorch backend only for locating local `vae`/`llm` files.
+
 ## Image-to-Image (img2img) Pipeline
 
 Both backends support img2img generation. The pipeline:

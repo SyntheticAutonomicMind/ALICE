@@ -50,6 +50,7 @@ class GenerationConfig(BaseModel):
     default_height: int = Field(default=512, ge=64, le=2048, description="Default image height")
     # Backend selection
     backend: str = Field(default="auto", description="Backend to use: 'auto', 'pytorch', 'vulkan'")
+    gguf_backend: str = Field(default="auto", description="Backend for GGUF models: 'auto' (diffusers when supported, sd.cpp otherwise), 'pytorch', 'sdcpp'")
     sdcpp_binary: Optional[Path] = Field(default=None, description="Path to sd-cli binary (auto-detected if None)")
     sdcpp_threads: int = Field(default=8, ge=1, le=64, description="CPU threads for Vulkan backend")
     # PyTorch device settings
