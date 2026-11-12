@@ -21,46 +21,85 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, Type, List, TYPE_CHECKING
 
-# Set TRITON_CACHE_DIR before torch import — Triton compiler caches kernels in
-# this directory.  Under systemd's ProtectHome=yes, the default ~/.triton is
-# /opt/alice/.triton (alice's HOME), which is owned by deck and not writable.
-if "TRITON_CACHE_DIR" not in os.environ:
-    for _triton_cache in (Path("/var/lib/alice/.triton"), Path("/tmp/.triton")):
+def _pick_cache_dir(candidates: List[Path]) -> Optional[Path]:
+    """Return the first candidate directory that exists or can be created.
+
+    Args:
+        candidates: Ordered directories to test for writability.
+
+    Returns:
+        The first writable directory, or None if every candidate failed.
+    """
+    for candidate in candidates:
         try:
-            _triton_cache.mkdir(parents=True, exist_ok=True)
-            if os.access(_triton_cache, os.W_OK):
-                os.environ["TRITON_CACHE_DIR"] = str(_triton_cache)
-                break
+            candidate.mkdir(parents=True, exist_ok=True)
+            if os.access(candidate, os.W_OK):
+                return candidate
         except (PermissionError, OSError):
             continue
+    return None
+
+
+# Compiled artifacts belong on persistent storage.  Several defaults are
+# unusable here: the service runs with HOME=/opt/alice (the install tree,
+# replaced on self-update) and systemd's PrivateTmp=yes gives the unit a
+# /tmp that is discarded on every restart.  Inductor defaults to
+# $TMPDIR/torchinductor_<user> in that private tmp, so each restart used to
+# throw away the FX graph cache and recompile the UNet from scratch.
+_PERSISTENT = Path("/var/lib/alice/.cache")
+_STORAGE = Path("/var/lib/alice")
+
+_inductor_cache = _pick_cache_dir([
+    _PERSISTENT / "torchinductor",
+    _STORAGE / ".torchinductor",
+    Path("/tmp/torchinductor"),
+])
+if _inductor_cache is not None:
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(_inductor_cache))
+    # Reuse compiled kernels across processes instead of re-running codegen.
+    os.environ.setdefault("TORCHINDUCTOR_FX_GRAPH_CACHE", "1")
+
+# Triton kernel cache — same persistence requirement as Inductor, since the
+# .so artifacts Inductor emits reference Triton kernel hashes.
+_triton_cache = _pick_cache_dir([
+    _STORAGE / ".triton",
+    _PERSISTENT / "triton",
+    Path("/tmp/.triton"),
+])
+if _triton_cache is not None:
+    os.environ.setdefault("TRITON_CACHE_DIR", str(_triton_cache))
+
+# torch.hub downloads and other torch-managed caches.
+_torch_home = _pick_cache_dir([_PERSISTENT / "torch", _STORAGE / ".torch"])
+if _torch_home is not None:
+    os.environ.setdefault("TORCH_HOME", str(_torch_home))
+
+# MIOpen writes its solver database to ~/.config/miopen, i.e. into the install
+# tree.  MIOPEN_USER_DB_PATH has no ~ expansion, so the path must be absolute.
+_miopen = _pick_cache_dir([_STORAGE / ".config" / "miopen", _PERSISTENT / "miopen"])
+if _miopen is not None:
+    os.environ.setdefault("MIOPEN_USER_DB_PATH", str(_miopen))
+
+# Mesa/RADV shader caches follow XDG_CACHE_HOME; point it at persistent storage
+# so self-updates do not invalidate them.
+_xdg_cache = _pick_cache_dir([_PERSISTENT, _STORAGE / ".cache"])
+if _xdg_cache is not None:
+    os.environ.setdefault("XDG_CACHE_HOME", str(_xdg_cache))
 
 # Set torch CPU thread counts BEFORE importing torch — these are read at
 # import time and cannot be changed afterwards (inter-op in particular).
+# Reserve cores for Inductor's own compile workers: when OMP and the compile
+# pool both claim every core they contend and codegen slows down instead of
+# scaling.  Half the cores for intra-op leaves headroom for codegen bursts.
 _cpu_count = os.cpu_count() or 1
 _torch_threads = max(1, _cpu_count // 2)
 os.environ.setdefault("OMP_NUM_THREADS", str(_torch_threads))
 os.environ.setdefault("MKL_NUM_THREADS", str(_torch_threads))
 os.environ.setdefault("TORCH_NUM_THREADS", str(_torch_threads))
 
-# Enable Triton persistent kernel cache so torch.compile graphs survive
-# process restarts.  TRITON_CACHE_DIR was already set above to a writable
-# location; here we enable the persistent cache that stores compiled
-# kernels keyed by source hash.
-os.environ.setdefault("TRITON_CACHE_PERSISTENT", "1")
-# Triton codegen parallelizes across threads; match our torch thread budget.
-os.environ.setdefault("TRITON_NUM_THREADS", str(_torch_threads))
-
-# Set TORCH_HOME so torch.hub (and thus the Inductor cache) write to a
-# writable location under systemd's ProtectHome=yes.  Under the alice
-# user, HOME=/opt/alice but ProtectHome may block writes there.
-_torch_cache_dir = Path("/var/lib/alice/.cache/torch")
-if "TORCH_HOME" not in os.environ:
-    try:
-        _torch_cache_dir.mkdir(parents=True, exist_ok=True)
-        if os.access(_torch_cache_dir, os.W_OK):
-            os.environ["TORCH_HOME"] = str(_torch_cache_dir)
-    except (PermissionError, OSError):
-        pass
+# Cap Inductor's compile pool at the remaining cores so the two thread budgets
+# add up to the machine instead of oversubscribing it.
+os.environ.setdefault("TORCHINDUCTOR_COMPILE_THREADS", str(max(1, _cpu_count - _torch_threads)))
 
 import torch
 from PIL import Image
@@ -738,6 +777,7 @@ class PyTorchBackend(BaseBackend):
         vae_decode_cpu: bool = False,
         enable_torch_compile: bool = False,
         torch_compile_mode: str = "reduce-overhead",
+        warmup_compile: bool = True,
         max_concurrent_generations: int = 1,
         max_cached_models: int = 2,
         vram_evict_threshold_gb: float = 2.0,
@@ -794,7 +834,8 @@ class PyTorchBackend(BaseBackend):
         # Performance optimization settings
         self.enable_torch_compile = enable_torch_compile
         self.torch_compile_mode = torch_compile_mode
-        
+        self.warmup_compile = warmup_compile
+
         # Model caching - multi-model LRU cache
         # self._pipeline and friends are the "active" model's state, kept in sync
         # with the most-recently-used entry in self._model_cache
@@ -1202,7 +1243,13 @@ class PyTorchBackend(BaseBackend):
                 logger.debug("VAE tiling not supported on this pipeline type")
         
         # Torch compile (PyTorch 2.0+ performance optimization)
-        if self.enable_torch_compile and not self._unet_compiled:
+        denoiser_attr = self._denoiser_attr()
+        if self.enable_torch_compile and not self._unet_compiled and denoiser_attr is None:
+            logger.info(
+                "torch.compile skipped: pipeline %s exposes neither 'unet' nor 'transformer'",
+                type(self._pipeline).__name__,
+            )
+        if self.enable_torch_compile and not self._unet_compiled and denoiser_attr is not None:
             try:
                 import torch
                 import shutil
@@ -1211,9 +1258,12 @@ class PyTorchBackend(BaseBackend):
                 elif hasattr(torch, 'compile'):
                     # SDXL's UNet produces kernels that torch._inductor cannot split for CUDA graph
                     # capture under 'reduce-overhead' mode (raises CantSplit on the 2560-dim bottleneck).
-                    # Auto-fallback to 'default' mode to avoid the failure.
+                    # Transformer pipelines (Qwen Image, FLUX) cache tensors such as RoPE
+                    # frequencies across calls, which CUDA graph replay overwrites
+                    # ("accessing tensor output of CUDAGraphs that has been overwritten").
+                    # Auto-fallback to 'default' mode for both cases.
                     effective_mode = self.torch_compile_mode
-                    if self._current_model_type == "sdxl" and effective_mode == "reduce-overhead":
+                    if effective_mode == "reduce-overhead" and self._current_model_type == "sdxl":
                         logger.warning(
                             "torch_compile_mode='reduce-overhead' is incompatible with SDXL models "
                             "(Inductor raises 'CantSplit' on the 2560-dim bottleneck). "
@@ -1221,12 +1271,20 @@ class PyTorchBackend(BaseBackend):
                             "Set torch_compile_mode='default' in config.yaml to silence this warning."
                         )
                         effective_mode = "default"
+                    elif effective_mode == "reduce-overhead" and denoiser_attr == "transformer":
+                        logger.warning(
+                            "torch_compile_mode='reduce-overhead' is incompatible with transformer "
+                            "pipelines (CUDA graph replay overwrites cached RoPE tensors). "
+                            "Auto-fallback to mode='default' for this model. "
+                            "Set torch_compile_mode='default' in config.yaml to silence this warning."
+                        )
+                        effective_mode = "default"
 
-                    logger.info("Compiling UNet with torch.compile (mode=%s). First run will be slower...", effective_mode)
-                    # Preserve eager UNet for runtime Inductor fallback. SDXL's 2560-dim bottleneck
+                    logger.info("Compiling %s with torch.compile (mode=%s). First run will be slower...", denoiser_attr, effective_mode)
+                    # Preserve eager denoiser for runtime Inductor fallback. SDXL's 2560-dim bottleneck
                     # can trigger CantSplit during Inductor's codegen on first execution, not at
-                    # compile-wrap time. If that happens, we restore the eager UNet and retry.
-                    self._original_unet = self._pipeline.unet
+                    # compile-wrap time. If that happens, we restore the eager module and retry.
+                    self._original_unet = getattr(self._pipeline, denoiser_attr)
                     try:
                         # Reduce Inductor symbolic-shape recursion depth on complex UNets.
                         # SDXL's unet has many dynamic shape dimensions; the default
@@ -1254,11 +1312,11 @@ class PyTorchBackend(BaseBackend):
                                     _triton.cudasim = False
                                 except Exception:
                                     pass
-                        self._pipeline.unet = torch.compile(
-                            self._pipeline.unet,
+                        setattr(self._pipeline, denoiser_attr, torch.compile(
+                            getattr(self._pipeline, denoiser_attr),
                             mode=effective_mode,
                             fullgraph=False,  # Allow graph breaks for compatibility
-                        )
+                        ))
                     except Exception as compile_error:
                         # Map known Inductor failures to a friendly message and proceed
                         # without torch.compile rather than failing the whole model load.
@@ -1276,7 +1334,7 @@ class PyTorchBackend(BaseBackend):
                     else:
                         self._unet_compiled = True
                         optimizations_applied.append(f"torch_compile({effective_mode})")
-                        logger.info("UNet compilation complete. Subsequent generations will be faster.")
+                        logger.info("%s compilation complete. Subsequent generations will be faster.", denoiser_attr)
                 else:
                     logger.warning("torch.compile not available (requires PyTorch 2.0+)")
             except Exception as e:
@@ -1420,7 +1478,10 @@ class PyTorchBackend(BaseBackend):
             # the *eager* UNET (using the cached Inductor/Triton artifacts)
             # rather than double-wrapping an already-compiled graph.
             if cached.unet_compiled and cached.original_unet is not None:
-                cached.pipeline.unet = cached.original_unet
+                for _attr in ("unet", "transformer"):
+                    if getattr(cached.pipeline, _attr, None) is not None:
+                        setattr(cached.pipeline, _attr, cached.original_unet)
+                        break
                 cached.unet_compiled = False
             # CompelForSDXL holds GPU tensors and CUDA calls; discard it.
             # It will be re-created on reload via load_model's CPU cache path.
@@ -1675,7 +1736,6 @@ class PyTorchBackend(BaseBackend):
                     free_vram = self._get_free_vram_bytes()
 
             # Load model in thread pool
-            logger.info("Loading model in thread pool: %s", model_path)
             loop = asyncio.get_running_loop()
             pipeline, model_type, device_map_applied, is_single_file_sdxl = await loop.run_in_executor(
                 None,
@@ -1712,11 +1772,119 @@ class PyTorchBackend(BaseBackend):
                 except Exception as e:
                     logger.warning("Failed to initialize CompelForSDXL: %s", e)
 
+            # Inductor defers codegen until the first inference, so without this
+            # the first user request absorbs 100+ seconds of kernel compilation
+            # for SDXL.  Running a throwaway inference here moves that cost to
+            # model load, where a subsequent request finds the artifact in the
+            # persistent FX graph cache.  Runs after Compel init so the warmup
+            # exercises the same prompt-embedding path as a real request.
+            if self.enable_torch_compile and self.warmup_compile and self._unet_compiled:
+                await asyncio.to_thread(self._warmup_compiled_unet)
+
             # Sync post-optimization state back to cache
             self._sync_active_to_cache(model_key)
 
             logger.info("Model loaded and cached: %s (cache_size=%d/%d)",
                         model_key, len(self._model_cache), self._max_cached_models)
+
+    def _denoiser_attr(self) -> Optional[str]:
+        """Return the pipeline attribute holding the denoising module.
+
+        UNet-based pipelines (SD 1.5, SDXL) expose ``unet``; transformer-based
+        pipelines (Qwen Image, FLUX) expose ``transformer``.  Compiling only
+        ``unet`` silently skipped every transformer model.
+
+        Returns:
+            The attribute name, or None if the pipeline exposes neither.
+        """
+        if self._pipeline is None:
+            return None
+        for attr in ("unet", "transformer"):
+            if getattr(self._pipeline, attr, None) is not None:
+                return attr
+        return None
+
+    def _warmup_compiled_unet(self) -> None:
+        """Run one throwaway inference to force Inductor codegen.
+
+        The result is discarded.  Failures are non-fatal: if Inductor cannot
+        handle the warmup shape, the eager UNet is restored and the generation
+        path's own fallback takes over.
+ 
+        The shape matters: Inductor specializes on tensor shapes, so warming a
+        resolution the caller will not use just moves the compile into the
+        request instead of out of it.  Use the configured default dimensions,
+        which is what requests fall back to.
+
+        The guidance scale matters just as much.  At guidance_scale <= 1 the
+        pipeline skips classifier-free guidance and runs the UNet on a single
+        batch; real requests run it on a doubled batch.  Warming with guidance
+        disabled compiles a graph that is never used, and the first real
+        request then pays the full compile anyway.
+        """
+        if self._pipeline is None or self._original_unet is None:
+            return
+
+        width = self.default_width or 512
+        height = self.default_height or 512
+        guidance = self.default_guidance_scale or 7.5
+
+        # Mirror the real text-to-image kwargs.  Any divergence here (prompt
+        # embeddings vs raw prompt, missing generator, different output_type)
+        # produces a different graph and the first real request recompiles.
+        pipeline_kwargs = {
+            "prompt": "warmup",
+            "negative_prompt": None,
+            "num_inference_steps": 2,
+            "width": width,
+            "height": height,
+            "num_images_per_prompt": 1,
+            "generator": torch.Generator(device="cpu").manual_seed(0),
+            "output_type": "latent" if self.vae_decode_cpu else "pil",
+            "guidance_scale": guidance,
+        }
+
+        if self._compel is not None:
+            try:
+                encoded = self._compel(main_prompt="warmup", negative_prompt="")
+                device = torch.device(self._device)
+                pipeline_kwargs["prompt_embeds"] = encoded.embeds.to(device)
+                pipeline_kwargs["negative_prompt_embeds"] = encoded.negative_embeds.to(device)
+                pipeline_kwargs["pooled_prompt_embeds"] = encoded.pooled_embeds.to(device)
+                pipeline_kwargs["negative_pooled_prompt_embeds"] = encoded.negative_pooled_embeds.to(device)
+                del pipeline_kwargs["prompt"]
+                del pipeline_kwargs["negative_prompt"]
+            except Exception as encode_error:
+                logger.debug("Warmup prompt encoding failed, using raw prompt: %s", encode_error)
+                for key in ("prompt_embeds", "negative_prompt_embeds",
+                            "pooled_prompt_embeds", "negative_pooled_prompt_embeds"):
+                    pipeline_kwargs.pop(key, None)
+
+        logger.info(
+            "Warming up torch.compile at %dx%d, guidance=%.1f (this compiles kernels once)...",
+            width, height, guidance,
+        )
+        started = time.monotonic()
+        try:
+            with torch.inference_mode():
+                self._pipeline(**pipeline_kwargs)
+            if self._device == "cuda":
+                torch.cuda.synchronize()
+            logger.info("Compile warmup complete in %.1fs; kernels cached",
+                        time.monotonic() - started)
+        except Exception as warmup_error:
+            error_msg = str(warmup_error)
+            if "CantSplit" in error_msg or "Inductor" in error_msg or "torch._inductor" in error_msg:
+                logger.error(
+                    "Compile warmup failed (%s). Restoring eager denoiser for this model.",
+                    error_msg.split("\n", 1)[0],
+                )
+                _attr = self._denoiser_attr()
+                if _attr is not None:
+                    setattr(self._pipeline, _attr, self._original_unet)
+                self._unet_compiled = False
+            else:
+                logger.warning("Compile warmup failed: %s", error_msg.split("\n", 1)[0])
     
     def _load_model_blocking(self, model_path: Path) -> Tuple[Any, str, bool, bool]:
         """
@@ -1776,6 +1944,10 @@ class PyTorchBackend(BaseBackend):
                 "torch_dtype": dtype,
                 "safety_checker": None,
                 "feature_extractor": None,
+                # Build weights straight into their final dtype instead of
+                # materializing an fp32 copy first; the fp32 path peaked at
+                # 30GB of RSS for a 6.9GB checkpoint.
+                "low_cpu_mem_usage": True,
             }
             
             if model_path.is_file() and model_path.suffix in [".safetensors", ".ckpt"]:
@@ -1905,6 +2077,7 @@ class PyTorchBackend(BaseBackend):
         )
 
         load_kwargs = {"torch_dtype": dtype}
+        load_kwargs["low_cpu_mem_usage"] = True
         components = self._resolve_gguf_components(model_path, spec, dtype)
         if components:
             load_kwargs.update(components)
@@ -2522,12 +2695,14 @@ class PyTorchBackend(BaseBackend):
                                 if inductor_failure and self._original_unet is not None:
                                     logger.error(
                                         "torch.compile failed at runtime (%s). "
-                                        "Falling back to eager UNet for this generation. "
+                                        "Falling back to eager denoiser for this generation. "
                                         "Subsequent runs will retry compilation; this is a "
                                         "known Inductor limitation on SDXL bottleneck shapes.",
                                         error_msg.split("\n", 1)[0]
                                     )
-                                    self._pipeline.unet = self._original_unet
+                                    _attr = self._denoiser_attr()
+                                    if _attr is not None:
+                                        setattr(self._pipeline, _attr, self._original_unet)
                                     self._unet_compiled = False
                                     result = self._pipeline(**pipeline_kwargs)
                                 else:

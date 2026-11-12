@@ -57,6 +57,7 @@ class GeneratorService:
         vae_decode_cpu: bool = False,
         enable_torch_compile: bool = False,
         torch_compile_mode: str = "reduce-overhead",
+        warmup_compile: bool = True,
         diffusion_conv_direct: bool = False,
         vae_conv_direct: bool = False,
         circular: bool = False,
@@ -124,6 +125,7 @@ class GeneratorService:
             vae_decode_cpu=vae_decode_cpu,
             enable_torch_compile=enable_torch_compile,
             torch_compile_mode=torch_compile_mode,
+            warmup_compile=warmup_compile,
             diffusion_conv_direct=diffusion_conv_direct,
             vae_conv_direct=vae_conv_direct,
             circular=circular,
@@ -158,6 +160,7 @@ class GeneratorService:
             vae_decode_cpu=vae_decode_cpu,
             enable_torch_compile=enable_torch_compile,
             torch_compile_mode=torch_compile_mode,
+            warmup_compile=warmup_compile,
             diffusion_conv_direct=diffusion_conv_direct,
             vae_conv_direct=vae_conv_direct,
             circular=circular,
@@ -223,6 +226,11 @@ class GeneratorService:
                         return self._get_routing_backend("pytorch") if self._backend_key != "pytorch" else self._backend
                 except Exception as e:
                     logger.debug("GGUF diffusers routing check failed: %s", e)
+                logger.warning(
+                    "GGUF model '%s' not routable to diffusers (gguf package "
+                    "missing or unsupported model family); using sd.cpp",
+                    model_path.name,
+                )
                 if gguf_pref in ("pytorch", "diffusers"):
                     raise RuntimeError(
                         f"Model '{model_path.name}' is a GGUF file but diffusers cannot load "

@@ -590,7 +590,10 @@ class MiniMaxMusic3Engine:
         gpu_budget = min(gpu_mem // 2, 4 * 1024 * 1024 * 1024)
         logger.info("MiniMax language model GPU budget: %.1f GB / %.1f GB total",
                     gpu_budget / (1024**3), gpu_mem / (1024**3))
-        return {"cpu": "32GB", 0: f"{gpu_budget} bytes"}
+        # accelerate accepts either an integer byte count or a string with a
+        # unit ("4GB").  A bare "<n> bytes" string is rejected, which silently
+        # disabled the budget and loaded the whole model onto the GPU.
+        return {"cpu": "32GB", 0: gpu_budget}
 
     # -- model lifecycle -----------------------------------------------------
 

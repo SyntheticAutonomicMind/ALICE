@@ -149,6 +149,7 @@ def get_default_config() -> Dict[str, Any]:
             "vae_decode_cpu": False,
             "enable_torch_compile": False,
             "torch_compile_mode": "reduce-overhead",
+            "warmup_compile": True,
             "diffusion_conv_direct": False,
             "vae_conv_direct": True,
             "circular": False,

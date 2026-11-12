@@ -39,6 +39,7 @@ generation:
   vae_decode_cpu: true
   enable_torch_compile: true
   torch_compile_mode: reduce-overhead
+  warmup_compile: true
   cancel_on_disconnect: false
   max_cached_models: 3
   vram_evict_threshold_gb: 2.0

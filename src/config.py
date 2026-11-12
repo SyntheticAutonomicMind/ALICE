@@ -71,6 +71,7 @@ class GenerationConfig(BaseModel):
     # Performance optimization settings
     enable_torch_compile: bool = Field(default=False, description="Enable torch.compile for UNet (PyTorch 2.0+, 30-50% speedup after warmup)")
     torch_compile_mode: str = Field(default="reduce-overhead", description="Torch compile mode: 'default', 'reduce-overhead', 'max-autotune'")
+    warmup_compile: bool = Field(default=True, description="Run a dummy inference after torch.compile so Inductor codegen happens at model load rather than inside the first user request (PyTorch backend only)")
     # Advanced Vulkan optimizations
     diffusion_conv_direct: bool = Field(default=False, description="Use direct conv2d in diffusion model (Vulkan only - NOT recommended, slower)")
     vae_conv_direct: bool = Field(default=True, description="Use direct conv2d in VAE model (Vulkan only - RECOMMENDED, 3x faster VAE decode)")
@@ -190,6 +191,24 @@ def load_config(path: Optional[str] = None) -> Config:
         return Config()
 
 
+def _stdout_is_file(path: Path) -> bool:
+    """Return True when stdout already points at ``path``.
+
+    Under systemd the unit redirects stdout/stderr to the log file, so adding
+    a FileHandler for the same path writes every record twice.
+
+    Args:
+        path: Log file path to compare against stdout.
+
+    Returns:
+        True if stdout resolves to the same file as ``path``.
+    """
+    try:
+        return os.path.samefile(path, "/proc/self/fd/1")
+    except (OSError, ValueError):
+        return False
+
+
 def setup_logging(config: LoggingConfig) -> None:
     """
     Configure logging based on configuration.
@@ -222,6 +241,10 @@ def setup_logging(config: LoggingConfig) -> None:
                     "Log directory %s is not writable, using console-only logging",
                     log_dir
                 )
+            elif _stdout_is_file(config.file):
+                # systemd already redirects stdout here; a FileHandler would
+                # duplicate every record.
+                pass
             else:
                 handlers.append(logging.FileHandler(config.file))
         except Exception as e:

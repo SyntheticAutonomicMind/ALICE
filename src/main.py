@@ -175,6 +175,7 @@ async def lifespan(app: FastAPI):
         vae_decode_cpu=config.generation.vae_decode_cpu,
         enable_torch_compile=config.generation.enable_torch_compile,
         torch_compile_mode=config.generation.torch_compile_mode,
+        warmup_compile=config.generation.warmup_compile,
         diffusion_conv_direct=config.generation.diffusion_conv_direct,
         vae_conv_direct=config.generation.vae_conv_direct,
         circular=config.generation.circular,
@@ -3416,6 +3417,7 @@ async def get_config(admin: bool = Depends(verify_admin_key)):
             # PyTorch-specific optimizations
             "enable_torch_compile": generation_cfg.get("enable_torch_compile", False),
             "torch_compile_mode": generation_cfg.get("torch_compile_mode", "reduce-overhead"),
+            "warmup_compile": generation_cfg.get("warmup_compile", True),
             # Vulkan/sdcpp-specific optimizations
             "enable_flash_attention": generation_cfg.get("enable_flash_attention", True),
             "vae_conv_direct": generation_cfg.get("vae_conv_direct", True),

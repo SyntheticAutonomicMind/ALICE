@@ -483,11 +483,53 @@ class TestTritonCacheDir:
         )
 
     def test_triton_cache_dir_has_fallback(self):
-        """TRITON_CACHE_DIR should fall back to /var/lib/alice/.triton."""
+        """TRITON_CACHE_DIR should resolve under the persistent storage root."""
         pb_path = Path(pytorch_backend.__file__)
         source = pb_path.read_text()
-        assert "/var/lib/alice/.triton" in source, (
-            "TRITON_CACHE_DIR fallback to /var/lib/alice/.triton not found"
+        assert '_STORAGE / ".triton"' in source, (
+            "TRITON_CACHE_DIR fallback to the persistent storage root not found"
+        )
+        assert 'Path("/var/lib/alice")' in source, (
+            "persistent storage root /var/lib/alice not found"
+        )
+
+    def test_inductor_cache_dir_is_persistent(self):
+        """TORCHINDUCTOR_CACHE_DIR must point outside the private tmp.
+
+        systemd runs the unit with PrivateTmp=yes, so Inductor's default
+        $TMPDIR/torchinductor_<user> is discarded on every restart and the
+        UNet is recompiled from scratch.
+        """
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        assert "TORCHINDUCTOR_CACHE_DIR" in source, (
+            "TORCHINDUCTOR_CACHE_DIR not set; Inductor will cache in private /tmp"
+        )
+        assert '_PERSISTENT / "torchinductor"' in source, (
+            "Inductor cache not rooted at the persistent cache directory"
+        )
+
+    def test_inductor_fx_graph_cache_enabled(self):
+        """The FX graph cache must be enabled so restarts reuse compiled graphs."""
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        assert "TORCHINDUCTOR_FX_GRAPH_CACHE" in source, (
+            "TORCHINDUCTOR_FX_GRAPH_CACHE not enabled"
+        )
+
+    def test_no_nonexistent_triton_env_vars(self):
+        """TRITON_CACHE_PERSISTENT and TRITON_NUM_THREADS are not read by Triton.
+
+        Setting them had no effect and masked the fact that nothing made the
+        cache persistent.
+        """
+        pb_path = Path(pytorch_backend.__file__)
+        source = pb_path.read_text()
+        assert "TRITON_CACHE_PERSISTENT" not in source, (
+            "TRITON_CACHE_PERSISTENT is not a Triton environment variable"
+        )
+        assert "TRITON_NUM_THREADS" not in source, (
+            "TRITON_NUM_THREADS is not a Triton environment variable"
         )
 
     def test_triton_cache_dir_set(self):
@@ -558,31 +600,24 @@ class TestThreadConfiguration:
         torch_threads_pos = source.find('TORCH_NUM_THREADS')
         assert torch_threads_pos < torch_pos, "TORCH_NUM_THREADS must be before 'import torch'"
 
-    def test_triton_threads_configured(self):
-        """TRITON_NUM_THREADS should be set to use multiple CPU threads."""
+    def test_inductor_compile_threads_capped(self):
+        """TORCHINDUCTOR_COMPILE_THREADS should be set so the compile pool and
+        the intra-op pool do not both claim every core."""
         pb_path = Path(pytorch_backend.__file__)
         source = pb_path.read_text()
-        assert "TRITON_NUM_THREADS" in source, (
-            "TRITON_NUM_THREADS not set for Triton parallel codegen"
-        )
-
-    def test_triton_persistent_cache_enabled(self):
-        """TRITON_CACHE_PERSISTENT should be set to '1' for persistent kernel cache."""
-        pb_path = Path(pytorch_backend.__file__)
-        source = pb_path.read_text()
-        assert "TRITON_CACHE_PERSISTENT" in source, (
-            "TRITON_CACHE_PERSISTENT not set for persistent kernel cache"
+        assert "TORCHINDUCTOR_COMPILE_THREADS" in source, (
+            "TORCHINDUCTOR_COMPILE_THREADS not set; compile pool oversubscribes"
         )
 
     def test_torch_home_set_for_protecthome(self):
-        """TORCH_HOME should be set to /var/lib/alice/.cache/torch for systemd."""
+        """TORCH_HOME should resolve under the persistent cache directory."""
         pb_path = Path(pytorch_backend.__file__)
         source = pb_path.read_text()
         assert "TORCH_HOME" in source, (
             "TORCH_HOME not set for systemd ProtectHome compatibility"
         )
-        assert "/var/lib/alice/.cache/torch" in source, (
-            "TORCH_HOME fallback to /var/lib/alice/.cache/torch not found"
+        assert '_PERSISTENT / "torch"' in source, (
+            "TORCH_HOME not rooted at the persistent cache directory"
         )
 
 
